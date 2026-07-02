@@ -5,7 +5,7 @@ import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
-import { setPluginInput } from "./llm.js"
+import { setPluginInput, cleanupOldSubSessions } from "./llm.js"
 import { isGitAvailable } from "./git-baseline.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
@@ -50,6 +50,7 @@ export default {
       console.warn("[opencode-memex] git binary not found — Phase 2 consolidation will be disabled")
       gitWarned = true
     }
+    void cleanupOldSubSessions().catch(() => {})
     return hooks
   },
 }

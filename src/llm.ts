@@ -6,11 +6,6 @@ export interface ExtractionResult {
   rollout_slug: string | null
 }
 
-export interface LlmClient {
-  extract(sessionId: string, transcript: string): Promise<ExtractionResult>
-  consolidate(diffPath: string, workdir: string): Promise<void>
-}
-
 let inputRef: PluginInput | null = null
 
 export function setPluginInput(input: PluginInput): void {
@@ -90,10 +85,38 @@ export async function consolidateViaSubagent(diffPath: string, workdir: string):
   }
 }
 
+export async function cleanupOldSubSessions(maxAgeMinutes = 30): Promise<void> {
+  const input = getPluginInput()
+  if (!input) return
+  try {
+    const res = await fetch(new URL("api/session", input.serverUrl))
+    if (!res.ok) return
+    const list = (await res.json()) as Array<{ id: string; title?: string; time?: { created?: number } }>
+    const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
+    for (const s of list) {
+      if (s.title && s.title.startsWith("memex-")) {
+        const created = s.time?.created ?? 0
+        if (created && created < cutoff) {
+          await deleteSession(s.id)
+        }
+      }
+    }
+  } catch {
+    // best effort only
+  }
+}
+
 async function deleteSession(id: string): Promise<void> {
   const input = getPluginInput()
   if (!input) return
-  await fetch(new URL(`api/session/${id}`, input.serverUrl), { method: "DELETE" }).catch(() => {})
+  try {
+    const res = await fetch(new URL(`api/session/${id}`, input.serverUrl), { method: "DELETE" })
+    if (!res.ok) {
+      console.warn(`[opencode-memex] failed to delete sub-session ${id}: ${res.status}`)
+    }
+  } catch (err) {
+    console.warn(`[opencode-memex] error deleting sub-session ${id}:`, err)
+  }
 }
 
 function buildExtractionPrompt(sessionId: string, transcript: string): string {
