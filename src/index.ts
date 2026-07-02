@@ -3,11 +3,13 @@ import { stripCitations, extractCitedSessionIds } from "./citation.js"
 import { memory_read, memory_search, memory_add_note } from "../tools/memory.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
+import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
 import { setPluginInput } from "./llm.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
 let store: MemoryStore | null = null
 let phase1InFlight = false
+let phase2InFlight = false
 
 function getStore(): MemoryStore {
   if (!store) store = new MemoryStore()
@@ -112,5 +114,18 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
     console.error("[opencode-memex] phase1 error:", err)
   } finally {
     phase1InFlight = false
+  }
+  void triggerPhase2()
+}
+
+async function triggerPhase2(): Promise<void> {
+  if (phase2InFlight) return
+  phase2InFlight = true
+  try {
+    await runPhase2(getStore(), DEFAULT_PHASE2_OPTIONS)
+  } catch (err) {
+    console.error("[opencode-memex] phase2 error:", err)
+  } finally {
+    phase2InFlight = false
   }
 }
