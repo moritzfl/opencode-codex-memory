@@ -53,7 +53,11 @@ const hooks = {
         if (msg.info?.role !== "assistant") continue
         for (const part of msg.parts) {
           if (part.type === "text" && typeof part.text === "string" && part.text.includes("<memory-citation>")) {
+            const before = part.text
             part.text = stripCitations(part.text)
+            if (part.text.includes("<memory-citation>")) {
+              console.warn("[opencode-memex] citation marker still present after stripCitations — hook contract may have changed")
+            }
           }
         }
       }

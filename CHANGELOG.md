@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `memory_mode` (per-session enabled/disabled/polluted).
 - **Stage 5 (Polish)**:
   - Rate-limit stub (`checkRateLimit`).
-  - Comprehensive unit tests (42 tests across citation, redact, store, paths, token, llm).
+  - Comprehensive unit tests (42 tests).
+- Basic read-path integration harness added (`tests/integration.ts`); full write-pipeline harness (Phase 1+2) still missing.
   - Documentation: `README.md`, `RUNNING.md` (official opencode + plugin install), implementation plan preserved.
   - Plugin renamed from `opencode-memory` to `opencode-memex` for clarity.
 

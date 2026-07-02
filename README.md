@@ -81,7 +81,7 @@ Phase 1/2 check `checkRateLimit()` before spawning extraction/consolidation. Cur
 - Sub-agent sessions created for extraction/consolidation are not cleaned up on plugin crash (harmless but noisy).
 - The `experimental.chat.messages.transform` hook mutates assistant text parts in-place. If the hook contract changes, citation stripping will break.
 - Git baseline uses the system `git` binary. On Windows or restricted environments this may fail silently.
-- No integration test harness against a real opencode server (only unit tests).
+- No full end-to-end integration test that drives the write pipeline (Phase 1 extraction + Phase 2 consolidation) against a real opencode server. A basic read-path harness exists in `tests/integration.ts`.
 - The plugin ID is `opencode-memex`. If you publish it, use the same name on npm.
 
 ## Development
