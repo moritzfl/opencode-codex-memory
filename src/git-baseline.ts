@@ -20,7 +20,7 @@ export function isGitAvailable(): boolean {
 }
 
 function runGit(args: string[], opts: { cwd: string }): { ok: boolean; stdout: string; stderr: string } {
-  const proc = Bun.spawnSync(args, { cwd: opts.cwd, env: { ...process.env, ...GIT_ENV } })
+  const proc = Bun.spawnSync(["git", ...args], { cwd: opts.cwd, env: { ...process.env, ...GIT_ENV } })
   const stdout = proc.stdout?.toString("utf8") ?? ""
   const stderr = proc.stderr?.toString("utf8") ?? ""
   return { ok: proc.exitCode === 0, stdout, stderr }
@@ -31,7 +31,7 @@ export function ensureBaseline(): boolean {
   const root = memoryRoot()
   const gitDir = path.join(root, ".git")
   if (!fs.existsSync(gitDir)) {
-    const init = runGit(["init", root], { cwd: root })
+    const init = runGit(["init"], { cwd: root })
     if (!init.ok) return false
   }
   runGit(["add", "-A"], { cwd: root })
