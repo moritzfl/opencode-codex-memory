@@ -1,4 +1,4 @@
-# opencode-memory (opencode-memex)
+# opencode-memex
 
 Persistent memory plugin for opencode — ports codex's closed-loop memory system (extraction → consolidation → injection → citation feedback).
 
@@ -10,7 +10,7 @@ No core changes, no MCP server, no separate process. Install via your `opencode.
 
 ```json
 {
-  "plugins": ["opencode-memory"]
+  "plugins": ["opencode-memex"]
 }
 ```
 

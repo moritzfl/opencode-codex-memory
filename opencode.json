@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-memory"],
+  "plugins": ["opencode-memex"],
   "agent": {
     "memorize": {
       "mode": "subagent",

@@ -1,3 +1,5 @@
+import fs from "fs"
+import path from "path"
 import { memoryRoot } from "./paths.js"
 
 const GIT_ENV = { GIT_TERMINAL_PROMPT: "0", GIT_AUTHOR_NAME: "opencode-memex", GIT_AUTHOR_EMAIL: "memex@opencode.local", GIT_COMMITTER_NAME: "opencode-memex", GIT_COMMITTER_EMAIL: "memex@opencode.local" }
@@ -27,8 +29,8 @@ function runGit(args: string[], opts: { cwd: string }): { ok: boolean; stdout: s
 export function ensureBaseline(): boolean {
   if (!isGitAvailable()) return false
   const root = memoryRoot()
-  const gitDir = `${root}/.git`
-  if (!exists(gitDir)) {
+  const gitDir = path.join(root, ".git")
+  if (!fs.existsSync(gitDir)) {
     const init = runGit(["init", root], { cwd: root })
     if (!init.ok) return false
   }
@@ -62,12 +64,4 @@ export function resetBaseline(): boolean {
     return commit.ok
   }
   return true
-}
-
-function exists(p: string): boolean {
-  try {
-    return Bun.file(p).size >= 0
-  } catch {
-    return false
-  }
 }

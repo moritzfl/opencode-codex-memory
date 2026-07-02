@@ -21,7 +21,7 @@ const EXTRACT_AGENTS = new Set(["memorize", "memorize-extract"])
 export { EXTRACT_AGENTS }
 
 export default {
-  id: "opencode-memory",
+  id: "opencode-memex",
   async server(input: PluginInput, _options?: PluginOptions) {
     setPluginInput(input)
     return hooks
@@ -69,16 +69,31 @@ const hooks = {
         const part = (ev.properties as { part?: { type: string; text?: string; sessionID?: string } }).part
         if (!part || part.type !== "text" || typeof part.text !== "string") return
         if (!part.text.includes("<memory-citation>")) return
-        const ids = extractCitedSessionIds(part.text)
-        if (ids.length > 0) getStore().recordUsage(ids)
+        let ids: string[] = []
+        try {
+          ids = extractCitedSessionIds(part.text)
+        } catch {
+          return
+        }
+        if (ids.length > 0) {
+          try {
+            getStore().recordUsage(ids)
+          } catch (e) {
+            console.error("[opencode-memex] recordUsage failed:", e)
+          }
+        }
         return
       }
 
       if (ev.type === "tool.execute.after") {
         const props = ev.properties as { tool?: string; sessionID?: string }
         const toolName = props?.tool ?? ""
-        if (toolName === "websearch" || toolName === "webfetch") {
-          if (props.sessionID) getStore().markPolluted(props.sessionID)
+        if ((toolName === "websearch" || toolName === "webfetch") && props.sessionID) {
+          try {
+            getStore().markPolluted(props.sessionID)
+          } catch (e) {
+            console.error("[opencode-memex] markPolluted failed:", e)
+          }
         }
         return
       }
