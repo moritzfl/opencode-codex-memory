@@ -1,11 +1,11 @@
 import fs from "fs"
 import path from "path"
 import { tool } from "@opencode-ai/plugin"
-import { memoryRoot, memorySummaryPath } from "../src/paths.js"
-import { MemoryStore } from "../src/store.js"
-import { invalidateCache } from "../src/source.js"
-import { closeDb } from "../src/db.js"
-import { estimateTokens } from "../src/token.js"
+import { memoryRoot, memorySummaryPath } from "@/paths"
+import { MemoryStore } from "@/store"
+import { invalidateCache } from "@/source"
+import { closeDb } from "@/db"
+import { estimateTokens } from "@/token"
 
 function isSymlinkedRoot(): boolean {
   const root = memoryRoot()

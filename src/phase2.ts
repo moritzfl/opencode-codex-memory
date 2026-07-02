@@ -43,12 +43,12 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)
 
-      if (!ensureBaseline()) {
+      if (!await ensureBaseline()) {
         store.markPhase2Failed(claim.ownershipToken, "git baseline failed")
         return { status: "baseline_failed" }
       }
 
-      const diff = captureWorkspaceDiff()
+      const diff = await captureWorkspaceDiff()
       if (!diff.trim()) {
         store.markPhase2Succeeded(claim.ownershipToken)
         return { status: "no_workspace_changes" }
@@ -79,7 +79,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         return { status: "heartbeat_lost" }
       }
 
-      if (!resetBaseline()) {
+      if (!await resetBaseline()) {
         store.markPhase2Failed(claim.ownershipToken, "baseline reset failed")
         return { status: "baseline_reset_failed" }
       }

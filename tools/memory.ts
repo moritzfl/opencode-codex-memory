@@ -1,7 +1,7 @@
 import fs from "fs"
 import path from "path"
-import { safeResolveMemoryPath } from "../src/path-guard.js"
-import { memoryRoot } from "../src/paths.js"
+import { safeResolveMemoryPath } from "@/path-guard"
+import { memoryRoot } from "@/paths"
 import { tool } from "@opencode-ai/plugin"
 
 const MAX_READ_BYTES = 256 * 1024

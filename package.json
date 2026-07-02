@@ -13,7 +13,8 @@
   "keywords": ["opencode", "memory", "plugin", "ai", "persistent-context"],
   "license": "MIT",
   "dependencies": {
-    "@opencode-ai/plugin": "latest"
+    "@opencode-ai/plugin": "latest",
+    "isomorphic-git": "^1.38.6"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

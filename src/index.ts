@@ -6,13 +6,11 @@ import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
 import { setPluginInput, cleanupOldSubSessions } from "./llm.js"
-import { isGitAvailable } from "./git-baseline.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
 let store: MemoryStore | null = null
 let phase1InFlight = false
 let phase2InFlight = false
-let gitWarned = false
 
 let pluginOptions: {
   generate_memory: boolean
@@ -45,10 +43,6 @@ export default {
       if (typeof opts.max_unused_days === "number") pluginOptions.max_unused_days = opts.max_unused_days
       if (typeof opts.max_rollout_age_days === "number") pluginOptions.max_rollout_age_days = opts.max_rollout_age_days
       if (typeof opts.min_rollout_idle_hours === "number") pluginOptions.min_rollout_idle_hours = opts.min_rollout_idle_hours
-    }
-    if (!gitWarned && !isGitAvailable()) {
-      console.warn("[opencode-memex] git binary not found — Phase 2 consolidation will be disabled")
-      gitWarned = true
     }
     void cleanupOldSubSessions().catch(() => {})
     return hooks
