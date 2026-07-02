@@ -151,7 +151,10 @@ export function parseExtraction(raw: string): ExtractionResult {
   if (obj.raw_memory.startsWith("<write") || obj.raw_memory.includes("Detailed markdown. Include: what the user was doing")) {
     throw new Error("extraction returned placeholder text instead of actual content")
   }
-  if (obj.rollout_slug === "kebab-case-slug-of-the-session-topic" || (obj.rollout_slug && obj.rollout_slug.startsWith("<write"))) {
+  if (obj.raw_memory.includes("User debugged a CSV parser. Found that quoted fields with embedded newlines")) {
+    throw new Error("extraction returned example text instead of actual content")
+  }
+  if (obj.rollout_slug === "kebab-case-slug-of-the-session-topic" || obj.rollout_slug === "csv-parser-quoted-newlines" || (obj.rollout_slug && obj.rollout_slug.startsWith("<write"))) {
     throw new Error("extraction returned placeholder slug instead of actual content")
   }
   return {
