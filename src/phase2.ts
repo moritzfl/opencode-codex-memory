@@ -14,7 +14,7 @@ export interface Phase2Options {
 }
 
 export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
-  maxRaw: 50,
+  maxRaw: 20,
   maxUnusedDays: 30,
   extensionRetentionDays: 7,
 }

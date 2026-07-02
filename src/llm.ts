@@ -29,16 +29,22 @@ async function createSession(agent: string, title?: string): Promise<string> {
   return id
 }
 
-async function promptSession(sessionId: string, prompt: string, agent: string): Promise<string> {
+async function promptSession(sessionId: string, prompt: string, agent: string, timeoutMs = 300_000): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
-  const res = await input.client.session.prompt({
+  const promptPromise = input.client.session.prompt({
     path: { id: sessionId },
     body: {
       agent,
       parts: [{ type: "text", text: prompt } as any],
     },
   })
+  const res = await Promise.race([
+    promptPromise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`sub-agent prompt timed out after ${timeoutMs}ms`)), timeoutMs)
+    ),
+  ])
   if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
   return extractAssistantText(res.data)
 }
@@ -65,7 +71,7 @@ export async function extractViaSubagent(sessionId: string, transcript: string):
   const subId = await createSession(agent, `memex-extract-${sessionId}`)
   try {
     const prompt = buildExtractionPrompt(sessionId, transcript)
-    const raw = await promptSession(subId, prompt, agent)
+    const raw = await promptSession(subId, prompt, agent, 180_000)
     return parseExtraction(raw)
   } finally {
     void deleteSession(subId).catch(() => {})
