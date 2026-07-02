@@ -1,6 +1,6 @@
 import { MemoryStore, PHASE2_COOLDOWN_MS } from "./store.js"
 import { ensureLayout, rebuildRawMemories, writeRolloutSummaries, pruneExtensionResources, writeWorkspaceDiff } from "./workspace.js"
-import { ensureBaseline, captureWorkspaceDiff, resetBaseline, isGitAvailable } from "./git-baseline.js"
+import { ensureBaseline, captureWorkspaceDiff, resetBaseline } from "./git-baseline.js"
 import { consolidateViaSubagent } from "./llm.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
@@ -30,11 +30,6 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
 
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") return { status: claim.type }
-
-    if (!isGitAvailable()) {
-      store.markPhase2Failed(claim.ownershipToken, "git not available")
-      return { status: "skipped_no_git" }
-    }
 
     try {
       ensureLayout()
