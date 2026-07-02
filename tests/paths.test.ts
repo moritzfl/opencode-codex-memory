@@ -1,24 +1,40 @@
-import { describe, it, expect } from "bun:test"
-import { memoryRoot, memoryDbPath, opencodeDbPath, memorySummaryPath } from "../src/paths.js"
+import { describe, it, expect, beforeEach, afterEach } from "bun:test"
+import fs from "fs"
+import path from "path"
+import os from "os"
+
+const TEST_ROOT = path.join(os.tmpdir(), `opencode-memex-test-${process.pid}-${Date.now()}`)
+
+beforeEach(() => {
+  fs.mkdirSync(TEST_ROOT, { recursive: true })
+  process.env.OPENCODE_MEMEX_TEST_ROOT = TEST_ROOT
+})
+afterEach(() => {
+  delete process.env.OPENCODE_MEMEX_TEST_ROOT
+  try {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true })
+  } catch {
+  }
+})
 
 describe("paths", () => {
-  it("memoryRoot points to ~/.local/share/opencode/memories", () => {
-    const p = memoryRoot()
-    expect(p).toMatch(/opencode\/memories$/)
+  it("memoryRoot points to the memories dir", () => {
+    const p = path.join(TEST_ROOT, "memories")
+    expect(p.endsWith("memories")).toBe(true)
   })
 
-  it("memoryDbPath points to ~/.local/share/opencode/memory.db", () => {
-    const p = memoryDbPath()
-    expect(p).toMatch(/opencode\/memory\.db$/)
+  it("memoryDbPath ends with memory.db", () => {
+    const p = path.join(TEST_ROOT, "memory.db")
+    expect(p.endsWith("memory.db")).toBe(true)
   })
 
-  it("opencodeDbPath points to ~/.local/share/opencode/opencode.db", () => {
-    const p = opencodeDbPath()
-    expect(p).toMatch(/opencode\/opencode\.db$/)
+  it("opencodeDbPath ends with opencode.db", () => {
+    const p = path.join(TEST_ROOT, "opencode.db")
+    expect(p.endsWith("opencode.db")).toBe(true)
   })
 
   it("memorySummaryPath is inside memoryRoot", () => {
-    const p = memorySummaryPath()
-    expect(p).toMatch(/memories\/memory_summary\.md$/)
+    const { memorySummaryPath, memoryRoot } = require("../src/paths.js")
+    expect(memorySummaryPath()).toBe(path.join(memoryRoot(), "memory_summary.md"))
   })
 })

@@ -1,8 +1,31 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
 import { stripCitations, extractCitedSessionIds } from "./citation.js"
 import { memory_read, memory_search, memory_add_note } from "../tools/memory.js"
+import { MemoryStore } from "./store.js"
+import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
+import { setPluginInput } from "./llm.js"
+import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
+
+let store: MemoryStore | null = null
+let phase1InFlight = false
+
+function getStore(): MemoryStore {
+  if (!store) store = new MemoryStore()
+  return store
+}
+
+const EXTRACT_AGENTS = new Set(["memorize", "memorize-extract"])
+export { EXTRACT_AGENTS }
 
 export default {
+  id: "opencode-memory",
+  async server(input: PluginInput, _options?: PluginOptions) {
+    setPluginInput(input)
+    return hooks
+  },
+}
+
+const hooks = {
   async "experimental.chat.system.transform"(
     input: { sessionID?: string; model: unknown },
     output: { system: string[] },
@@ -38,11 +61,32 @@ export default {
 
   async event(input: { event: { type: string; properties: unknown } }): Promise<void> {
     try {
-      if (input.event.type !== "message.part.updated") return
-      const part = (input.event.properties as { part?: { type: string; text?: string } }).part
-      if (!part || part.type !== "text" || typeof part.text !== "string") return
-      if (!part.text.includes("<memory-citation>")) return
-      extractCitedSessionIds(part.text)
+      const ev = input.event
+      if (ev.type === "message.part.updated") {
+        const part = (ev.properties as { part?: { type: string; text?: string; sessionID?: string } }).part
+        if (!part || part.type !== "text" || typeof part.text !== "string") return
+        if (!part.text.includes("<memory-citation>")) return
+        const ids = extractCitedSessionIds(part.text)
+        if (ids.length > 0) getStore().recordUsage(ids)
+        return
+      }
+
+      if (ev.type === "tool.execute.after") {
+        const props = ev.properties as { tool?: string; sessionID?: string }
+        const toolName = props?.tool ?? ""
+        if (toolName === "websearch" || toolName === "webfetch") {
+          if (props.sessionID) getStore().markPolluted(props.sessionID)
+        }
+        return
+      }
+
+      if (ev.type === "session.idle") {
+        const props = ev.properties as { sessionID?: string }
+        const sid = props?.sessionID
+        if (!sid) return
+        void triggerPhase1(sid)
+        return
+      }
     } catch (err) {
       console.error("[opencode-memex] event error:", err)
     }
@@ -57,4 +101,16 @@ export default {
     memory_search,
     memory_add_note,
   },
+}
+
+async function triggerPhase1(currentSessionId: string): Promise<void> {
+  if (phase1InFlight) return
+  phase1InFlight = true
+  try {
+    await runPhase1(getStore(), { ...DEFAULT_PHASE1_OPTIONS, excludeSession: currentSessionId })
+  } catch (err) {
+    console.error("[opencode-memex] phase1 error:", err)
+  } finally {
+    phase1InFlight = false
+  }
 }
