@@ -5,3 +5,4 @@ dist/
 memory.db
 memories/
 *.log
+.idea/
