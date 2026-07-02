@@ -1,6 +1,7 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
 import { stripCitations, extractCitedSessionIds } from "./citation.js"
 import { memory_read, memory_search, memory_add_note } from "../tools/memory.js"
+import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
@@ -102,6 +103,9 @@ const hooks = {
     memory_read,
     memory_search,
     memory_add_note,
+    memory_reset,
+    memory_inspect,
+    memory_mode,
   },
 }
 
