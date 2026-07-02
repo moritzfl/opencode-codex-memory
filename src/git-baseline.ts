@@ -15,8 +15,8 @@ async function ensureInit(dir: string): Promise<void> {
   const gitDir = path.join(dir, ".git")
   if (!fs.existsSync(gitDir)) {
     await isogit.init({ fs, dir })
-    isogitAvailable = true
   }
+  isogitAvailable = true
 }
 
 async function addAndCommit(dir: string, message: string): Promise<string | null> {
