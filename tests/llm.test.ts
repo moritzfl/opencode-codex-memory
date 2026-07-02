@@ -29,4 +29,22 @@ describe("parseExtraction", () => {
   it("throws when required fields are missing", () => {
     expect(() => parseExtraction(JSON.stringify({ rollout_summary: "rs" }))).toThrow()
   })
+
+  it("throws when raw_memory is placeholder text", () => {
+    const raw = JSON.stringify({
+      raw_memory: "Detailed markdown. Include: what the user was doing, key decisions",
+      rollout_summary: "rs",
+      rollout_slug: "slug",
+    })
+    expect(() => parseExtraction(raw)).toThrow()
+  })
+
+  it("throws when rollout_slug is placeholder", () => {
+    const raw = JSON.stringify({
+      raw_memory: "actual content",
+      rollout_summary: "rs",
+      rollout_slug: "kebab-case-slug-of-the-session-topic",
+    })
+    expect(() => parseExtraction(raw)).toThrow()
+  })
 })

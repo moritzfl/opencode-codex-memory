@@ -148,6 +148,12 @@ export function parseExtraction(raw: string): ExtractionResult {
   if (typeof obj.raw_memory !== "string" || typeof obj.rollout_summary !== "string") {
     throw new Error("extraction response missing required fields")
   }
+  if (obj.raw_memory.includes("Detailed markdown. Include: what the user was doing")) {
+    throw new Error("extraction returned placeholder text instead of actual content")
+  }
+  if (obj.rollout_slug === "kebab-case-slug-of-the-session-topic") {
+    throw new Error("extraction returned placeholder slug instead of actual content")
+  }
   return {
     raw_memory: obj.raw_memory,
     rollout_summary: obj.rollout_summary,
