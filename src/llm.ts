@@ -19,30 +19,28 @@ export function getPluginInput(): PluginInput | null {
 async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
-  const res = await fetch(new URL("api/session", input.serverUrl), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ agent, title: title ?? `memex-${agent}` }),
+  const res = await input.client.session.create({
+    body: { title: title ?? `memex-${agent}` },
   })
-  if (!res.ok) throw new Error(`session create failed: ${res.status} ${await res.text()}`)
-  const body = (await res.json()) as { id?: string; sessionID?: string }
-  const id = body.id ?? body.sessionID
+  if (!res.data) throw new Error(`session create failed: ${JSON.stringify(res.error ?? {})}`)
+  const body = res.data as { id?: string }
+  const id = body.id
   if (!id) throw new Error(`session create returned no id: ${JSON.stringify(body)}`)
   return id
 }
 
-async function promptSession(sessionId: string, prompt: string): Promise<string> {
+async function promptSession(sessionId: string, prompt: string, agent: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
-  const res = await fetch(new URL(`api/session/${sessionId}/prompt`, input.serverUrl), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ parts: [{ type: "text", text: prompt }] }),
+  const res = await input.client.session.prompt({
+    path: { id: sessionId },
+    body: {
+      agent,
+      parts: [{ type: "text", text: prompt } as any],
+    },
   })
-  if (!res.ok) throw new Error(`prompt failed: ${res.status} ${await res.text()}`)
-  const body = await res.json() as any
-  const out = extractAssistantText(body)
-  return out
+  if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
+  return extractAssistantText(res.data)
 }
 
 function extractAssistantText(body: any): string {
@@ -67,7 +65,7 @@ export async function extractViaSubagent(sessionId: string, transcript: string):
   const subId = await createSession(agent, `memex-extract-${sessionId}`)
   try {
     const prompt = buildExtractionPrompt(sessionId, transcript)
-    const raw = await promptSession(subId, prompt)
+    const raw = await promptSession(subId, prompt, agent)
     return parseExtraction(raw)
   } finally {
     void deleteSession(subId).catch(() => {})
@@ -79,7 +77,7 @@ export async function consolidateViaSubagent(diffPath: string, workdir: string):
   const subId = await createSession(agent, "memex-consolidate")
   try {
     const prompt = buildConsolidationPrompt(diffPath)
-    await promptSession(subId, prompt)
+    await promptSession(subId, prompt, agent)
   } finally {
     void deleteSession(subId).catch(() => {})
   }
@@ -89,9 +87,9 @@ export async function cleanupOldSubSessions(maxAgeMinutes = 30): Promise<void> {
   const input = getPluginInput()
   if (!input) return
   try {
-    const res = await fetch(new URL("api/session", input.serverUrl))
-    if (!res.ok) return
-    const list = (await res.json()) as Array<{ id: string; title?: string; time?: { created?: number } }>
+    const res = await input.client.session.list()
+    if (!res.data) return
+    const list = res.data as Array<{ id: string; title?: string; time?: { created?: number } }>
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     for (const s of list) {
       if (s.title && s.title.startsWith("memex-")) {
@@ -110,9 +108,9 @@ async function deleteSession(id: string): Promise<void> {
   const input = getPluginInput()
   if (!input) return
   try {
-    const res = await fetch(new URL(`api/session/${id}`, input.serverUrl), { method: "DELETE" })
-    if (!res.ok) {
-      console.warn(`[opencode-memex] failed to delete sub-session ${id}: ${res.status}`)
+    const res = await input.client.session.delete({ path: { id } })
+    if (res.error) {
+      console.warn(`[opencode-memex] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
     }
   } catch (err) {
     console.warn(`[opencode-memex] error deleting sub-session ${id}:`, err)
