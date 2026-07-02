@@ -25,7 +25,7 @@ export function listRecentSessions(limit: number = SCAN_LIMIT): SessionRow[] {
   if (!db) return []
   try {
     return db
-      .prepare("SELECT id, updated_at FROM session ORDER BY updated_at DESC LIMIT ?")
+      .prepare("SELECT id, time_updated AS updated_at FROM session ORDER BY time_updated DESC LIMIT ?")
       .all(limit) as SessionRow[]
   } catch {
     return []
@@ -44,19 +44,31 @@ export function loadTranscript(sessionId: string): TranscriptMessage[] {
   if (!db) return []
   try {
     const rows = db
-      .prepare("SELECT seq, data FROM session_message WHERE session_id = ? ORDER BY seq")
-      .all(sessionId) as { seq: number; data: string }[]
-    return rows.map((r) => {
+      .prepare(
+        `SELECT p.data, m.data AS msg_data
+         FROM part p
+         JOIN message m ON p.message_id = m.id
+         WHERE p.session_id = ?
+         ORDER BY p.time_created ASC`,
+      )
+      .all(sessionId) as { data: string; msg_data: string }[]
+    return rows.map((r, i) => {
       let parsed: any = {}
       try {
         parsed = JSON.parse(r.data)
       } catch {
       }
+      let role: string | undefined
+      try {
+        const msg = JSON.parse(r.msg_data)
+        role = msg.role
+      } catch {
+      }
       return {
-        seq: r.seq,
+        seq: i,
         type: parsed.type ?? "unknown",
-        role: parsed.role,
-        text: typeof parsed.text === "string" ? parsed.text : extractText(parsed),
+        role,
+        text: extractText(parsed),
       }
     })
   } catch {
@@ -67,6 +79,14 @@ export function loadTranscript(sessionId: string): TranscriptMessage[] {
 function extractText(msg: any): string | undefined {
   if (!msg) return undefined
   if (typeof msg.text === "string") return msg.text
+  if (msg.type === "text" && typeof msg.text === "string") return msg.text
+  if (msg.type === "tool") {
+    const tool = msg.tool ?? "unknown"
+    const input = msg.state?.input ? JSON.stringify(msg.state.input).slice(0, 200) : ""
+    const output = typeof msg.state?.output === "string" ? msg.state.output.slice(0, 500) : ""
+    return `[tool: ${tool}] ${input}${output ? "\n" + output : ""}`
+  }
+  if (msg.type === "step-start" || msg.type === "step-finish") return undefined
   if (Array.isArray(msg.parts)) {
     return msg.parts
       .filter((p: any) => p?.type === "text" && typeof p.text === "string")
