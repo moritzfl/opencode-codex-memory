@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stage 5 (Polish)**:
   - Rate-limit stub (`checkRateLimit`).
   - Comprehensive unit tests (42 tests).
-- Basic read-path integration harness added (`tests/integration.ts`); full write-pipeline harness (Phase 1+2) still missing.
+- Basic read-path integration harness (`tests/integration.ts`) and a detailed manual/agentic write-pipeline test procedure (`tests/WRITE_PIPELINE_TEST.md`) added. No automated Jest/Bun end-to-end harness yet.
   - Documentation: `README.md`, `RUNNING.md` (official opencode + plugin install), implementation plan preserved.
   - Plugin renamed from `opencode-memory` to `opencode-memex` for clarity.
 
