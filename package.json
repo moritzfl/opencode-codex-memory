@@ -1,0 +1,25 @@
+{
+  "name": "opencode-memex",
+  "version": "0.0.1",
+  "description": "Persistent memory plugin for opencode — ports codex's two-phase memory system (extraction → consolidation → injection → citation feedback)",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["opencode", "memory", "plugin", "ai", "persistent-context"],
+  "license": "MIT",
+  "dependencies": {
+    "@opencode-ai/plugin": "latest"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/bun": "^1.1.0"
+  },
+  "peerDependencies": {
+    "bun": "^1.1.0"
+  }
+}
