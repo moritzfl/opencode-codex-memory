@@ -76,13 +76,13 @@ Phase 1/2 check `checkRateLimit()` before spawning extraction/consolidation. Cur
 
 ## Known weaknesses / TODO (Stage 5+)
 
-- Rate-limit awareness is a stub (`ratelimit.ts`). Wire to opencode's provider rate-limit info when exposed.
-- No `generate_memory` / `extract_model` / retention config options yet.
+- ~~Rate-limit awareness is a stub (`ratelimit.ts`).~~ → Basic time-based heuristic added (30s for Phase 1, 5min for Phase 2). Still not wired to opencode's provider rate-limit info.
+- ~~No `generate_memory` / `extract_model` / retention config options yet.~~ → Plugin now accepts these options via `PluginOptions` and respects them.
 - Sub-agent sessions created for extraction/consolidation are not cleaned up on plugin crash (harmless but noisy).
-- The `experimental.chat.messages.transform` hook mutates assistant text parts in-place. If the hook contract changes, citation stripping will break.
-- Git baseline uses the system `git` binary. On Windows or restricted environments this may fail silently.
+- The `experimental.chat.messages.transform` hook mutates assistant text parts in-place. If the hook contract changes, citation stripping will break. (Mitigated with a post-strip sanity check that logs a warning.)
+- ~~Git baseline uses the system `git` binary. On Windows or restricted environments this may fail silently.~~ → One-time warning is now emitted at plugin load if `git` is missing.
 - No full end-to-end integration test that drives the write pipeline (Phase 1 extraction + Phase 2 consolidation) against a real opencode server. A basic read-path harness exists in `tests/integration.ts`.
-- The plugin ID is `opencode-memex`. If you publish it, use the same name on npm.
+- The plugin ID is `opencode-memex`. If you publish it, use the same name on npm. (`package.json` name already matches.)
 
 ## Development
 

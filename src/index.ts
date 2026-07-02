@@ -6,11 +6,26 @@ import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
 import { setPluginInput } from "./llm.js"
+import { isGitAvailable } from "./git-baseline.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
 let store: MemoryStore | null = null
 let phase1InFlight = false
 let phase2InFlight = false
+let gitWarned = false
+
+let pluginOptions: {
+  generate_memory: boolean
+  extract_model?: string
+  max_unused_days: number
+  max_rollout_age_days: number
+  min_rollout_idle_hours: number
+} = {
+  generate_memory: true,
+  max_unused_days: 30,
+  max_rollout_age_days: 14,
+  min_rollout_idle_hours: 1,
+}
 
 function getStore(): MemoryStore {
   if (!store) store = new MemoryStore()
@@ -22,8 +37,19 @@ export { EXTRACT_AGENTS }
 
 export default {
   id: "opencode-memex",
-  async server(input: PluginInput, _options?: PluginOptions) {
+  async server(input: PluginInput, opts?: PluginOptions) {
     setPluginInput(input)
+    if (opts) {
+      if (typeof opts.generate_memory === "boolean") pluginOptions.generate_memory = opts.generate_memory
+      if (typeof opts.extract_model === "string") pluginOptions.extract_model = opts.extract_model
+      if (typeof opts.max_unused_days === "number") pluginOptions.max_unused_days = opts.max_unused_days
+      if (typeof opts.max_rollout_age_days === "number") pluginOptions.max_rollout_age_days = opts.max_rollout_age_days
+      if (typeof opts.min_rollout_idle_hours === "number") pluginOptions.min_rollout_idle_hours = opts.min_rollout_idle_hours
+    }
+    if (!gitWarned && !isGitAvailable()) {
+      console.warn("[opencode-memex] git binary not found — Phase 2 consolidation will be disabled")
+      gitWarned = true
+    }
     return hooks
   },
 }
@@ -129,10 +155,14 @@ const hooks = {
 }
 
 async function triggerPhase1(currentSessionId: string): Promise<void> {
-  if (phase1InFlight) return
+  if (phase1InFlight || !pluginOptions.generate_memory) return
   phase1InFlight = true
   try {
-    await runPhase1(getStore(), { ...DEFAULT_PHASE1_OPTIONS, excludeSession: currentSessionId })
+    await runPhase1(getStore(), {
+      maxAgeDays: pluginOptions.max_rollout_age_days,
+      minIdleHours: pluginOptions.min_rollout_idle_hours,
+      excludeSession: currentSessionId,
+    })
   } catch (err) {
     console.error("[opencode-memex] phase1 error:", err)
   } finally {
@@ -145,7 +175,11 @@ async function triggerPhase2(): Promise<void> {
   if (phase2InFlight) return
   phase2InFlight = true
   try {
-    await runPhase2(getStore(), DEFAULT_PHASE2_OPTIONS)
+    await runPhase2(getStore(), {
+      maxRaw: 50,
+      maxUnusedDays: pluginOptions.max_unused_days,
+      extensionRetentionDays: 7,
+    })
   } catch (err) {
     console.error("[opencode-memex] phase2 error:", err)
   } finally {

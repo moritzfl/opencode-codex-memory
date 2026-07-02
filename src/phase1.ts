@@ -16,7 +16,7 @@ export const DEFAULT_PHASE1_OPTIONS: Phase1Options = {
 }
 
 export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAULT_PHASE1_OPTIONS): Promise<void> {
-  const rl = await checkRateLimit()
+  const rl = await checkRateLimit("phase1")
   if (!rl.ok) {
     console.warn("[opencode-memex] skipping phase1 due to rate limit:", rl.reason)
     return

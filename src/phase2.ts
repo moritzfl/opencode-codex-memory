@@ -25,7 +25,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
   if (phase2InFlight) return { status: "already_running" }
   phase2InFlight = true
   try {
-    const rl = await checkRateLimit()
+    const rl = await checkRateLimit("phase2")
     if (!rl.ok) return { status: "skipped_rate_limit" }
 
     const claim = store.claimGlobalPhase2Job()
