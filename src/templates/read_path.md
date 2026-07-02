@@ -20,7 +20,9 @@ At the start of a session, do a **quick memory pass**:
 
 During a session:
 - If you recall something from memory that's relevant, use it.
-- If you discover something worth remembering, note it (the user can add a note via the `memory_add_note` tool).
+- If you need more detail than the summary provides, use the `memory_read` tool to read `MEMORY.md`, `rollout_summaries/<session>.md`, or `skills/<name>.md`.
+- Use `memory_search` to find memories by keyword across the whole workspace.
+- If you discover something worth remembering, use the `memory_add_note` tool so it is available in future sessions.
 
 ## Memory summary
 

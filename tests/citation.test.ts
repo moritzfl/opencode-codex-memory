@@ -1,0 +1,76 @@
+import { describe, it, expect } from "bun:test"
+import { parseCitations, extractCitedSessionIds, stripCitations } from "../src/citation.js"
+
+const SAMPLE = `Here is an answer from memory.
+
+<memory-citation>
+<citation_entries>session-1,session-2</citation_entries>
+</memory-citation>`
+
+const MULTI = `First answer.
+
+<memory-citation>
+<citation_entries>abc-1</citation_entries>
+</memory-citation>
+
+Second answer.
+
+<memory-citation>
+<citation_entries> def-2 , def-3 </citation_entries>
+</memory-citation>`
+
+const NONE = `No memory used here.`
+
+describe("parseCitations", () => {
+  it("parses a single citation block", () => {
+    const r = parseCitations(SAMPLE)
+    expect(r.length).toBe(1)
+    expect(r[0].sessionIds).toEqual(["session-1", "session-2"])
+  })
+
+  it("parses multiple citation blocks", () => {
+    const r = parseCitations(MULTI)
+    expect(r.length).toBe(2)
+    expect(r[0].sessionIds).toEqual(["abc-1"])
+    expect(r[1].sessionIds).toEqual(["def-2", "def-3"])
+  })
+
+  it("returns empty when no citations", () => {
+    expect(parseCitations(NONE)).toEqual([])
+  })
+
+  it("ignores empty citation_entries", () => {
+    const text = `<memory-citation><citation_entries></citation_entries></memory-citation>`
+    expect(parseCitations(text)).toEqual([])
+  })
+})
+
+describe("extractCitedSessionIds", () => {
+  it("dedupes session ids across blocks", () => {
+    const text = `<memory-citation><citation_entries>a,b</citation_entries></memory-citation>` +
+      `<memory-citation><citation_entries>b,c</citation_entries></memory-citation>`
+    expect(extractCitedSessionIds(text).sort()).toEqual(["a", "b", "c"])
+  })
+})
+
+describe("stripCitations", () => {
+  it("removes citation blocks and preserves prose", () => {
+    const out = stripCitations(SAMPLE)
+    expect(out).toBe("Here is an answer from memory.")
+  })
+
+  it("removes multiple citation blocks", () => {
+    const out = stripCitations(MULTI)
+    expect(out).toContain("First answer.")
+    expect(out).toContain("Second answer.")
+    expect(out).not.toContain("memory-citation")
+  })
+
+  it("leaves non-citation text unchanged", () => {
+    expect(stripCitations(NONE)).toBe(NONE)
+  })
+
+  it("handles text with no citations", () => {
+    expect(stripCitations("plain text")).toBe("plain text")
+  })
+})
