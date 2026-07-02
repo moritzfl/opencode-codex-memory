@@ -74,6 +74,16 @@ Phase 1/2 check `checkRateLimit()` before spawning extraction/consolidation. Cur
 | Transcript access | Direct DB | Read-only `opencode.db` or HTTP API | WAL mode safe; fallback to HTTP if schema changes |
 | Git baseline | gix (libgit2) | Shell out to `git` binary | Functionally equivalent |
 
+## Known weaknesses / TODO (Stage 5+)
+
+- Rate-limit awareness is a stub (`ratelimit.ts`). Wire to opencode's provider rate-limit info when exposed.
+- No `generate_memory` / `extract_model` / retention config options yet.
+- Sub-agent sessions created for extraction/consolidation are not cleaned up on plugin crash (harmless but noisy).
+- The `experimental.chat.messages.transform` hook mutates assistant text parts in-place. If the hook contract changes, citation stripping will break.
+- Git baseline uses the system `git` binary. On Windows or restricted environments this may fail silently.
+- No integration test harness against a real opencode server (only unit tests).
+- The plugin ID is `opencode-memex`. If you publish it, use the same name on npm.
+
 ## Development
 
 ```bash
