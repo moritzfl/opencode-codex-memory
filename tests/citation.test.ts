@@ -73,4 +73,12 @@ describe("stripCitations", () => {
   it("handles text with no citations", () => {
     expect(stripCitations("plain text")).toBe("plain text")
   })
+
+  it("handles citation block with extra whitespace/newlines", () => {
+    const text = `answer\n\n<memory-citation>\n  <citation_entries>  s1 , s2  </citation_entries>\n</memory-citation>\n\n`
+    const ids = extractCitedSessionIds(text)
+    expect(ids.sort()).toEqual(["s1", "s2"])
+    const out = stripCitations(text)
+    expect(out).toBe("answer")
+  })
 })

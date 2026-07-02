@@ -2,6 +2,7 @@ import { MemoryStore, STAGE1_CONCURRENCY } from "./store.js"
 import { loadTranscript, selectEligibleSessions } from "./capture.js"
 import { redact } from "./redact.js"
 import { extractViaSubagent } from "./llm.js"
+import { checkRateLimit } from "./ratelimit.js"
 
 export interface Phase1Options {
   maxAgeDays: number
@@ -15,6 +16,11 @@ export const DEFAULT_PHASE1_OPTIONS: Phase1Options = {
 }
 
 export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAULT_PHASE1_OPTIONS): Promise<void> {
+  const rl = await checkRateLimit()
+  if (!rl.ok) {
+    console.warn("[opencode-memex] skipping phase1 due to rate limit:", rl.reason)
+    return
+  }
   const eligible = selectEligibleSessions(store, opts)
   if (eligible.length === 0) return
   const claimed = store.claimStage1Jobs(eligible.map((s) => s.id), opts.excludeSession)

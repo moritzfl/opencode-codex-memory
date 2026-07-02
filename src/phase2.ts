@@ -5,6 +5,7 @@ import { consolidateViaSubagent } from "./llm.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
 import path from "path"
+import { checkRateLimit } from "./ratelimit.js"
 
 export interface Phase2Options {
   maxRaw: number
@@ -24,6 +25,9 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
   if (phase2InFlight) return { status: "already_running" }
   phase2InFlight = true
   try {
+    const rl = await checkRateLimit()
+    if (!rl.ok) return { status: "skipped_rate_limit" }
+
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") return { status: claim.type }
 
