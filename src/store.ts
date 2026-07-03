@@ -251,7 +251,7 @@ export class MemoryStore {
     return this.db
       .prepare(
         `SELECT * FROM memory_stage1_outputs
-         WHERE (last_usage IS NULL OR last_usage >= ?) AND source_updated_at >= ?
+         WHERE source_updated_at >= ? OR (last_usage IS NOT NULL AND last_usage >= ?)
          ORDER BY usage_count DESC, source_updated_at DESC
          LIMIT ?`,
       )

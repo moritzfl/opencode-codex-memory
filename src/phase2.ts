@@ -33,6 +33,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
 
     try {
       ensureLayout()
+      store.pruneStage1Outputs(opts.maxUnusedDays)
       const outputs = store.getPhase2InputSelection(opts.maxRaw, opts.maxUnusedDays)
       rebuildRawMemories(outputs)
       writeRolloutSummaries(outputs)

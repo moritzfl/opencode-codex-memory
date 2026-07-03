@@ -143,6 +143,45 @@ describe("MemoryStore phase2", () => {
   })
 })
 
+describe("MemoryStore phase2 input selection", () => {
+  const DAY = 24 * 60 * 60 * 1000
+
+  function seed(store: any, id: string, sourceUpdatedAt: number) {
+    store.claimStage1Jobs([{ id, updated_at: sourceUpdatedAt }])
+    store.markStage1Succeeded(id, { session_id: id, source_updated_at: sourceUpdatedAt, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: sourceUpdatedAt })
+  }
+
+  it("keeps old memories that are still in use and drops old unused ones", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const now = Date.now()
+    seed(store, "fresh", now - 1 * DAY)
+    seed(store, "old-used", now - 60 * DAY)
+    seed(store, "old-unused", now - 60 * DAY)
+    openDb().prepare("UPDATE memory_stage1_outputs SET last_usage = ? WHERE session_id = 'old-used'").run(now - 1 * DAY)
+    const selected = store.getPhase2InputSelection(50, 30).map((o: any) => o.session_id)
+    expect(selected).toContain("fresh")
+    expect(selected).toContain("old-used")
+    expect(selected).not.toContain("old-unused")
+  })
+
+  it("pruneStage1Outputs deletes only old unused rows", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const now = Date.now()
+    seed(store, "fresh", now - 1 * DAY)
+    seed(store, "old-used", now - 60 * DAY)
+    seed(store, "old-unused", now - 60 * DAY)
+    openDb().prepare("UPDATE memory_stage1_outputs SET last_usage = ? WHERE session_id = 'old-used'").run(now - 1 * DAY)
+    const deleted = store.pruneStage1Outputs(30)
+    expect(deleted).toBe(1)
+    const remaining = store.stage1Outputs().map((o: any) => o.session_id)
+    expect(remaining.sort()).toEqual(["fresh", "old-used"])
+  })
+})
+
 describe("MemoryStore session meta", () => {
   it("sets and reads memory mode", () => {
     const { MemoryStore } = require("../src/store.js")
