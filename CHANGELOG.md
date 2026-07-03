@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `memory_search` supports `since`/`until` for time-scoped recall over time-anchored files (rollout summaries, ad-hoc notes); with a window and no query it returns a chronological listing of that period's sessions/notes. Extends beyond codex.
 - **Codex memory parity pass** (breaking: reset local memory state — DB schema, summary filenames, and memory_summary schema all changed):
   - All three prompt templates replaced with full adaptations of codex's memory prompts: stage-1 extraction (minimum-signal gate, task outcome triage, preference-signal extraction, task-grouped raw_memory format), Phase 2 consolidation (MEMORY.md Task Group schema, `v1` memory_summary schema with User Profile / User preferences / General Tips / What's in Memory, skills format, diff-driven forgetting workflow), and the read path (decision boundary, budgeted quick memory pass, staleness guidance).
   - System/input prompt split for extraction (system via prompt body's `system` field); all-empty output is a supported no-op that deletes any stale stage-1 row.
