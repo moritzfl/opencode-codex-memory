@@ -31,6 +31,48 @@ Second answer.
 
 const NONE = `No memory used here.`
 
+const RICH = `The build command is bun run build.
+
+<memory-citation>
+<citation_entries>
+MEMORY.md:12-14|note=[build command for the api service]
+rollout_summaries/2026-02-17T21-23-02-ln3m-example.md:10-12|note=[weekly report format]
+</citation_entries>
+<session_ids>
+ses_abc123
+ses_def456
+ses_abc123
+</session_ids>
+</memory-citation>`
+
+describe("parseCitations (rich format)", () => {
+  it("parses citation entries with paths, line ranges, and notes", () => {
+    const r = parseCitations(RICH)
+    expect(r.length).toBe(1)
+    expect(r[0].entries).toEqual([
+      { path: "MEMORY.md", lineStart: 12, lineEnd: 14, note: "build command for the api service" },
+      { path: "rollout_summaries/2026-02-17T21-23-02-ln3m-example.md", lineStart: 10, lineEnd: 12, note: "weekly report format" },
+    ])
+  })
+
+  it("parses and dedupes session ids from the session_ids block", () => {
+    const r = parseCitations(RICH)
+    expect(r[0].sessionIds).toEqual(["ses_abc123", "ses_def456"])
+  })
+
+  it("accepts an empty session_ids block", () => {
+    const text = `<memory-citation>\n<citation_entries>\nMEMORY.md:1-2|note=[x]\n</citation_entries>\n<session_ids>\n</session_ids>\n</memory-citation>`
+    const r = parseCitations(text)
+    expect(r.length).toBe(1)
+    expect(r[0].sessionIds).toEqual([])
+    expect(r[0].entries.length).toBe(1)
+  })
+
+  it("strips the rich block from the reply", () => {
+    expect(stripCitations(RICH)).toBe("The build command is bun run build.")
+  })
+})
+
 describe("parseCitations", () => {
   it("parses a single citation block", () => {
     const r = parseCitations(SAMPLE)
