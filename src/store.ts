@@ -26,6 +26,11 @@ export type ClaimResult =
   | { type: "claimed"; sessionId: string; workerId: string; ownershipToken: string }
   | { type: "skipped" }
 
+export interface ClaimableSession {
+  id: string
+  updated_at: number
+}
+
 export type Phase2ClaimResult =
   | { type: "claimed"; workerId: string; ownershipToken: string }
   | { type: "skipped_cooldown" }
@@ -90,13 +95,13 @@ export class MemoryStore {
     for (const id of sessionIds) stmt.run(ts, id)
   }
 
-  claimStage1Jobs(sessionIds: string[], excludeSession?: string): string[] {
+  claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string): string[] {
     const workerId = newId()
     const ownershipToken = newId()
     const lease = nowSec() + STAGE1_LEASE_SECONDS
     const claimed: string[] = []
-    for (const sid of sessionIds) {
-      if (sid === excludeSession) continue
+    for (const s of sessions) {
+      if (s.id === excludeSession) continue
       if (claimed.length >= STAGE1_CONCURRENCY) break
       const activeRow = this.db
         .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' AND status='running' AND (lease_until IS NULL OR lease_until > ?)")
@@ -114,12 +119,16 @@ export class MemoryStore {
              started_at = excluded.started_at,
              lease_until = excluded.lease_until,
              retry_remaining = excluded.retry_remaining
-           WHERE memory_jobs.status IN ('pending','failed')
-             AND (memory_jobs.retry_at IS NULL OR memory_jobs.retry_at <= ?)
-             AND (memory_jobs.lease_until IS NULL OR memory_jobs.lease_until <= ?)`,
+           WHERE (memory_jobs.status IN ('pending','failed')
+                  AND (memory_jobs.retry_at IS NULL OR memory_jobs.retry_at <= ?)
+                  AND (memory_jobs.lease_until IS NULL OR memory_jobs.lease_until <= ?))
+             OR (memory_jobs.status = 'running'
+                 AND memory_jobs.lease_until IS NOT NULL AND memory_jobs.lease_until <= ?)
+             OR (memory_jobs.status = 'done'
+                 AND (memory_jobs.last_success_watermark IS NULL OR memory_jobs.last_success_watermark < ?))`,
         )
-        .run(sid, workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING, nowSec(), nowSec())
-      if (result.changes > 0) claimed.push(sid)
+        .run(s.id, workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING, nowSec(), nowSec(), nowSec(), s.updated_at)
+      if (result.changes > 0) claimed.push(s.id)
     }
     return claimed
   }
@@ -132,7 +141,7 @@ export class MemoryStore {
           last_success_watermark=?, retry_at=NULL
          WHERE kind='memory_stage1' AND job_key=?`,
       )
-      .run(nowSec(), now(), sessionId)
+      .run(nowSec(), out.source_updated_at, sessionId)
   }
 
   markStage1Failed(sessionId: string, error: string): void {

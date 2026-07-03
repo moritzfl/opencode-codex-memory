@@ -23,16 +23,18 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
   }
   const eligible = selectEligibleSessions(store, opts)
   if (eligible.length === 0) return
-  const claimed = store.claimStage1Jobs(eligible.map((s) => s.id), opts.excludeSession)
+  const claimed = store.claimStage1Jobs(eligible, opts.excludeSession)
   if (claimed.length === 0) return
+  const updatedAtBySession = new Map(eligible.map((s) => [s.id, s.updated_at]))
 
   await runPool(claimed, STAGE1_CONCURRENCY, async (sid) => {
     try {
+      const sourceUpdatedAt = updatedAtBySession.get(sid) ?? Date.now()
       const transcript = buildTranscript(sid)
       if (!transcript.trim()) {
         store.markStage1Succeeded(sid, {
           session_id: sid,
-          source_updated_at: Date.now(),
+          source_updated_at: sourceUpdatedAt,
           raw_memory: "(empty session)",
           rollout_summary: "Empty or unreadable session.",
           rollout_slug: null,
@@ -43,7 +45,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
       const result = await extractViaSubagent(sid, transcript)
       store.markStage1Succeeded(sid, {
         session_id: sid,
-        source_updated_at: Date.now(),
+        source_updated_at: sourceUpdatedAt,
         raw_memory: redact(result.raw_memory),
         rollout_summary: redact(result.rollout_summary),
         rollout_slug: result.rollout_slug,

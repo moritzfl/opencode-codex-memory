@@ -21,26 +21,49 @@ afterEach(() => {
   }
 })
 
+function sessions(...ids: string[]) {
+  return ids.map((id) => ({ id, updated_at: 1000 }))
+}
+
 describe("MemoryStore stage1", () => {
   it("claims jobs and dedupes by session", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    const claimed = store.claimStage1Jobs(["s1", "s2", "s1"])
+    const claimed = store.claimStage1Jobs(sessions("s1", "s2", "s1"))
     expect(claimed).toEqual(["s1", "s2"])
   })
 
   it("respects the concurrency cap", () => {
     const { MemoryStore, STAGE1_CONCURRENCY } = require("../src/store.js")
     const store = new MemoryStore()
-    const sessions = Array.from({ length: STAGE1_CONCURRENCY + 5 }, (_, i) => `s${i}`)
-    const claimed = store.claimStage1Jobs(sessions)
+    const many = Array.from({ length: STAGE1_CONCURRENCY + 5 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
+    const claimed = store.claimStage1Jobs(many)
     expect(claimed.length).toBe(STAGE1_CONCURRENCY)
+  })
+
+  it("reclaims a running job once its lease expires", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    expect(store.claimStage1Jobs(sessions("s1"))).toEqual(["s1"])
+    expect(store.claimStage1Jobs(sessions("s1"))).toEqual([])
+    openDb().prepare("UPDATE memory_jobs SET lease_until = 1 WHERE job_key = 's1'").run()
+    expect(store.claimStage1Jobs(sessions("s1"))).toEqual(["s1"])
+  })
+
+  it("reclaims a done job only when the session has newer activity", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    store.claimStage1Jobs(sessions("s1"))
+    store.markStage1Succeeded("s1", { session_id: "s1", source_updated_at: 1000, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1000 })
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 2000 }])).toEqual(["s1"])
   })
 
   it("marks succeeded and stores output", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    store.claimStage1Jobs(["s1"])
+    store.claimStage1Jobs(sessions("s1"))
     store.markStage1Succeeded("s1", {
       session_id: "s1",
       source_updated_at: 1000,
@@ -58,7 +81,7 @@ describe("MemoryStore stage1", () => {
   it("does not overwrite a newer output with an older one", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    store.claimStage1Jobs(["s1"])
+    store.claimStage1Jobs(sessions("s1"))
     store.markStage1Succeeded("s1", { session_id: "s1", source_updated_at: 2000, raw_memory: "v2", rollout_summary: "s2", rollout_slug: "slug", generated_at: 2000 })
     store.markStage1Succeeded("s1", { session_id: "s1", source_updated_at: 1000, raw_memory: "v1", rollout_summary: "s1", rollout_slug: "slug", generated_at: 1000 })
     const outs = store.stage1Outputs() as Array<{ session_id: string; raw_memory: string }>
@@ -68,7 +91,7 @@ describe("MemoryStore stage1", () => {
   it("records usage and increments counters", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    store.claimStage1Jobs(["s1", "s2"])
+    store.claimStage1Jobs(sessions("s1", "s2"))
     store.markStage1Succeeded("s1", { session_id: "s1", source_updated_at: 1, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
     store.markStage1Succeeded("s2", { session_id: "s2", source_updated_at: 1, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
     store.recordUsage(["s1", "s1", "s2"])
@@ -80,7 +103,7 @@ describe("MemoryStore stage1", () => {
   it("marks failed and decrements retry_remaining", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    store.claimStage1Jobs(["s1"])
+    store.claimStage1Jobs(sessions("s1"))
     store.markStage1Failed("s1", "boom")
     const { openDb } = require("../src/db.js")
     const db = openDb()
@@ -135,7 +158,7 @@ describe("MemoryStore session meta", () => {
   it("clearMemoryData wipes tables", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    store.claimStage1Jobs(["s1"])
+    store.claimStage1Jobs(sessions("s1"))
     store.markStage1Succeeded("s1", { session_id: "s1", source_updated_at: 1, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
     store.clearMemoryData()
     expect(store.stage1Outputs().length).toBe(0)
