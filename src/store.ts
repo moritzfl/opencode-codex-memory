@@ -56,10 +56,16 @@ export class MemoryStore {
       .all() as Stage1Output[]
   }
 
+  /** Deletes stale rows; snapshots consumed by the last successful Phase 2 are protected. */
   pruneStage1Outputs(maxUnusedDays: number): number {
     const cutoff = now() - maxUnusedDays * 24 * 60 * 60 * 1000
     return this.db
-      .prepare("DELETE FROM memory_stage1_outputs WHERE (last_usage IS NULL OR last_usage < ?) AND source_updated_at < ?")
+      .prepare(
+        `DELETE FROM memory_stage1_outputs
+         WHERE selected_for_phase2 = 0
+           AND ((last_usage IS NOT NULL AND last_usage < ?)
+                OR (last_usage IS NULL AND source_updated_at < ?))`,
+      )
       .run(cutoff, cutoff).changes
   }
 
@@ -107,27 +113,40 @@ export class MemoryStore {
         .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' AND status='running' AND (lease_until IS NULL OR lease_until > ?)")
         .get(nowSec()) as { c: number }
       if (activeRow.c >= STAGE1_CONCURRENCY) break
+      // Mirrors codex try_claim_stage1_job: a newer input watermark (session
+      // activity) overrides retry backoff and resets exhausted retries; done
+      // jobs are reclaimed only when the session advanced past the last
+      // success watermark.
       const result = this.db
         .prepare(
           `INSERT INTO memory_jobs
-            (kind, job_key, status, worker_id, ownership_token, started_at, lease_until, retry_remaining)
-           VALUES ('memory_stage1', ?, 'running', ?, ?, ?, ?, ?)
+            (kind, job_key, status, worker_id, ownership_token, started_at, lease_until, retry_remaining, input_watermark)
+           VALUES ('memory_stage1', ?, 'running', ?, ?, ?, ?, ?, ?)
            ON CONFLICT(kind, job_key) DO UPDATE SET
              status = 'running',
              worker_id = excluded.worker_id,
              ownership_token = excluded.ownership_token,
              started_at = excluded.started_at,
              lease_until = excluded.lease_until,
-             retry_remaining = excluded.retry_remaining
-           WHERE (memory_jobs.status IN ('pending','failed')
-                  AND (memory_jobs.retry_at IS NULL OR memory_jobs.retry_at <= ?)
-                  AND (memory_jobs.lease_until IS NULL OR memory_jobs.lease_until <= ?))
-             OR (memory_jobs.status = 'running'
-                 AND memory_jobs.lease_until IS NOT NULL AND memory_jobs.lease_until <= ?)
-             OR (memory_jobs.status = 'done'
-                 AND (memory_jobs.last_success_watermark IS NULL OR memory_jobs.last_success_watermark < ?))`,
+             finished_at = NULL,
+             retry_at = NULL,
+             last_error = NULL,
+             retry_remaining = CASE
+               WHEN excluded.input_watermark > COALESCE(memory_jobs.input_watermark, -1) THEN excluded.retry_remaining
+               ELSE memory_jobs.retry_remaining
+             END,
+             input_watermark = excluded.input_watermark
+           WHERE (memory_jobs.status != 'running' OR memory_jobs.lease_until IS NULL OR memory_jobs.lease_until <= excluded.started_at)
+             AND (memory_jobs.retry_at IS NULL
+                  OR memory_jobs.retry_at <= excluded.started_at
+                  OR excluded.input_watermark > COALESCE(memory_jobs.input_watermark, -1))
+             AND (memory_jobs.retry_remaining > 0
+                  OR excluded.input_watermark > COALESCE(memory_jobs.input_watermark, -1))
+             AND (memory_jobs.status != 'done'
+                  OR memory_jobs.last_success_watermark IS NULL
+                  OR memory_jobs.last_success_watermark < excluded.input_watermark)`,
         )
-        .run(s.id, workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING, nowSec(), nowSec(), nowSec(), s.updated_at)
+        .run(s.id, workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING, s.updated_at)
       if (result.changes > 0) claimed.push(s.id)
     }
     return claimed
@@ -137,7 +156,7 @@ export class MemoryStore {
     this.upsertStage1Output(out)
     this.db
       .prepare(
-        `UPDATE memory_jobs SET status='done', finished_at=?, last_error=NULL,
+        `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
           last_success_watermark=?, retry_at=NULL
          WHERE kind='memory_stage1' AND job_key=?`,
       )
@@ -164,7 +183,8 @@ export class MemoryStore {
            retry_remaining = MAX(0, retry_remaining - 1),
            last_error = ?,
            retry_at = ?,
-           finished_at = ?
+           finished_at = ?,
+           lease_until = NULL
          WHERE kind='memory_stage1' AND job_key=?`,
       )
       .run(error.slice(0, 4000), nowSec() + 60 * 5, nowSec(), sessionId)
@@ -235,13 +255,26 @@ export class MemoryStore {
     return res.changes > 0
   }
 
-  markPhase2Succeeded(ownershipToken: string): void {
-    this.db
+  /**
+   * Marks the phase-2 job done and records exactly which stage-1 snapshots the
+   * run consumed (selected_for_phase2), so pruning cannot delete inputs that
+   * still back the consolidated artifacts.
+   */
+  markPhase2Succeeded(ownershipToken: string, selected: Pick<Stage1Output, "session_id" | "source_updated_at">[] = []): void {
+    const res = this.db
       .prepare(
         `UPDATE memory_jobs SET status='done', finished_at=?, last_error=NULL, last_success_watermark=?, retry_at=NULL
          WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=?`,
       )
       .run(nowSec(), now(), ownershipToken)
+    if (res.changes === 0) return
+    this.db.exec("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
+    const mark = this.db.prepare(
+      `UPDATE memory_stage1_outputs
+       SET selected_for_phase2 = 1, selected_for_phase2_source_updated_at = ?
+       WHERE session_id = ? AND source_updated_at = ?`,
+    )
+    for (const s of selected) mark.run(s.source_updated_at, s.session_id, s.source_updated_at)
   }
 
   markPhase2Failed(ownershipToken: string, error: string): void {
@@ -258,13 +291,28 @@ export class MemoryStore {
       .run(error.slice(0, 4000), nowSec() + 60 * 10, nowSec(), ownershipToken)
   }
 
+  /**
+   * Phase 2 input set, mirroring codex get_phase2_input_selection:
+   * - excludes sessions marked disabled/polluted (their summary files then
+   *   disappear from the workspace and the diff drives forgetting)
+   * - recency: last_usage when the memory has ever been used, otherwise
+   *   source_updated_at
+   * - ranked by usage, then recency
+   */
   getPhase2InputSelection(maxRaw: number, maxUnusedDays: number): Stage1Output[] {
     const cutoff = now() - maxUnusedDays * 24 * 60 * 60 * 1000
     return this.db
       .prepare(
-        `SELECT * FROM memory_stage1_outputs
-         WHERE source_updated_at >= ? OR (last_usage IS NOT NULL AND last_usage >= ?)
-         ORDER BY usage_count DESC, source_updated_at DESC
+        `SELECT so.* FROM memory_stage1_outputs so
+         LEFT JOIN memory_session_meta m ON m.session_id = so.session_id
+         WHERE (m.memory_mode IS NULL OR m.memory_mode = 'enabled')
+           AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
+           AND ((so.last_usage IS NOT NULL AND so.last_usage >= ?)
+                OR (so.last_usage IS NULL AND so.source_updated_at >= ?))
+         ORDER BY COALESCE(so.usage_count, 0) DESC,
+                  COALESCE(so.last_usage, so.source_updated_at) DESC,
+                  so.source_updated_at DESC,
+                  so.session_id DESC
          LIMIT ?`,
       )
       .all(cutoff, cutoff, maxRaw) as Stage1Output[]

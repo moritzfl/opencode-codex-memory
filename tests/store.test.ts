@@ -100,16 +100,51 @@ describe("MemoryStore stage1", () => {
     expect(outs.find((o) => o.session_id === "s2")!.usage_count).toBe(1)
   })
 
-  it("marks failed and decrements retry_remaining", () => {
+  it("marks failed, decrements retry_remaining, and clears the lease", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
     store.claimStage1Jobs(sessions("s1"))
     store.markStage1Failed("s1", "boom")
     const { openDb } = require("../src/db.js")
     const db = openDb()
-    const job = db.prepare("SELECT status, retry_remaining FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'").get()
+    const job = db.prepare("SELECT status, retry_remaining, lease_until FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'").get()
     expect(job.status).toBe("pending")
     expect(job.retry_remaining).toBeLessThan(3)
+    expect(job.lease_until).toBeNull()
+  })
+
+  it("blocks retry during backoff but lets newer session activity reset exhausted retries", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    // A fresh failure sits in retry backoff: the same watermark cannot reclaim.
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual(["s1"])
+    store.markStage1Failed("s1", "boom 0")
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
+    // Exhaust the remaining retries (simulate elapsed backoff between attempts).
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='s1'").run()
+      expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual(["s1"])
+      store.markStage1Failed("s1", `boom ${i}`)
+    }
+    // Retries exhausted: even with backoff elapsed, the same watermark cannot claim.
+    openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='s1'").run()
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
+    // Newer session activity overrides backoff and resets retries.
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 2000 }])).toEqual(["s1"])
+    const job = openDb().prepare("SELECT retry_remaining FROM memory_jobs WHERE job_key='s1'").get()
+    expect(job.retry_remaining).toBe(3)
+  })
+
+  it("markStage1SucceededNoOutput finishes the job and drops the output row", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    store.claimStage1Jobs(sessions("s1"))
+    store.markStage1Succeeded("s1", { session_id: "s1", source_updated_at: 500, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 500 })
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual(["s1"])
+    store.markStage1SucceededNoOutput("s1", 1000)
+    expect(store.stage1Outputs().length).toBe(0)
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
   })
 })
 
@@ -164,6 +199,33 @@ describe("MemoryStore phase2 input selection", () => {
     expect(selected).toContain("fresh")
     expect(selected).toContain("old-used")
     expect(selected).not.toContain("old-unused")
+  })
+
+  it("excludes disabled and polluted sessions so their files get forgotten", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const now = Date.now()
+    seed(store, "ok", now - 1 * DAY)
+    seed(store, "bad", now - 1 * DAY)
+    seed(store, "off", now - 1 * DAY)
+    store.markPolluted("bad")
+    store.setMemoryMode("off", "disabled")
+    const selected = store.getPhase2InputSelection(50, 30).map((o: any) => o.session_id)
+    expect(selected).toEqual(["ok"])
+  })
+
+  it("markPhase2Succeeded records the consumed snapshots and pruning spares them", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const now = Date.now()
+    const old = now - 60 * DAY
+    seed(store, "kept", old)
+    seed(store, "dropped", old)
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(claim.ownershipToken, [{ session_id: "kept", source_updated_at: old }])
+    expect(store.pruneStage1Outputs(30)).toBe(1)
+    expect(store.stage1Outputs().map((o: any) => o.session_id)).toEqual(["kept"])
   })
 
   it("pruneStage1Outputs deletes only old unused rows", () => {

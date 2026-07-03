@@ -50,7 +50,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
 
       const diff = await captureWorkspaceDiff()
       if (diff.changes.length === 0) {
-        store.markPhase2Succeeded(claim.ownershipToken)
+        store.markPhase2Succeeded(claim.ownershipToken, outputs)
         return { status: "no_workspace_changes" }
       }
 
@@ -79,7 +79,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         return { status: "baseline_reset_failed" }
       }
 
-      store.markPhase2Succeeded(claim.ownershipToken)
+      store.markPhase2Succeeded(claim.ownershipToken, outputs)
       invalidateCache()
       return { status: "succeeded" }
     } catch (err) {
