@@ -1,16 +1,16 @@
 import { MemoryStore, PHASE2_COOLDOWN_MS } from "./store.js"
 import { ensureLayout, rebuildRawMemories, writeRolloutSummaries, pruneExtensionResources, writeWorkspaceDiff } from "./workspace.js"
-import { ensureBaseline, captureWorkspaceDiff, resetBaseline } from "./git-baseline.js"
+import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
 import { consolidateViaSubagent } from "./llm.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
-import path from "path"
 import { checkRateLimit } from "./ratelimit.js"
 
 export interface Phase2Options {
   maxRaw: number
   maxUnusedDays: number
   extensionRetentionDays: number
+  consolidationModel?: string
 }
 
 export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
@@ -54,8 +54,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         return { status: "no_workspace_changes" }
       }
 
-      const diffPath = writeWorkspaceDiff(diff)
-      const relDiffPath = path.relative(memoryRoot(), diffPath)
+      writeWorkspaceDiff(diff)
 
       let heartbeatLost = false
       const heartbeat = setInterval(() => {
@@ -65,7 +64,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       }, 90_000)
 
       try {
-        await consolidateViaSubagent(relDiffPath, memoryRoot())
+        await consolidateViaSubagent(memoryRoot(), DIFF_ARTIFACT, opts.consolidationModel)
       } finally {
         clearInterval(heartbeat)
       }

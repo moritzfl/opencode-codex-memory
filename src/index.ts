@@ -14,6 +14,7 @@ let phase1InFlight = false
 let pluginOptions: {
   generate_memory: boolean
   extract_model?: string
+  consolidation_model?: string
   max_unused_days: number
   max_rollout_age_days: number
   min_rollout_idle_hours: number
@@ -57,6 +58,7 @@ export default {
     if (opts) {
       if (typeof opts.generate_memory === "boolean") pluginOptions.generate_memory = opts.generate_memory
       if (typeof opts.extract_model === "string") pluginOptions.extract_model = opts.extract_model
+      if (typeof opts.consolidation_model === "string") pluginOptions.consolidation_model = opts.consolidation_model
       if (typeof opts.max_unused_days === "number") pluginOptions.max_unused_days = opts.max_unused_days
       if (typeof opts.max_rollout_age_days === "number") pluginOptions.max_rollout_age_days = opts.max_rollout_age_days
       if (typeof opts.min_rollout_idle_hours === "number") pluginOptions.min_rollout_idle_hours = opts.min_rollout_idle_hours
@@ -194,6 +196,7 @@ async function triggerPhase2(): Promise<void> {
       maxRaw: 50,
       maxUnusedDays: pluginOptions.max_unused_days,
       extensionRetentionDays: 7,
+      consolidationModel: pluginOptions.consolidation_model,
     })
   } catch (err) {
     console.error("[opencode-memex] phase2 error:", err)

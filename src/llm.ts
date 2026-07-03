@@ -122,12 +122,12 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
   }
 }
 
-export async function consolidateViaSubagent(diffPath: string, workdir: string): Promise<void> {
+export async function consolidateViaSubagent(memoryRoot: string, diffFileName: string, model?: string): Promise<void> {
   const agent = "memorize"
   const subId = await createSession(agent, "memex-consolidate")
   try {
-    const prompt = buildConsolidationPrompt(diffPath)
-    await promptSession(subId, prompt, agent)
+    const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
+    await promptSession(subId, prompt, agent, { model })
   } finally {
     void deleteSession(subId).catch(() => {})
   }
@@ -186,8 +186,13 @@ function buildExtractionInput(sessionId: string, cwd: string, transcript: string
   })
 }
 
-function buildConsolidationPrompt(diffPath: string): string {
-  return fillTemplate(readTemplate("consolidation.md"), { diff_path: diffPath })
+function buildConsolidationPrompt(memoryRoot: string, diffFileName: string): string {
+  const tmpl = readTemplate("consolidation.md")
+  let out = tmpl
+  // These placeholders appear many times in the template; replace all occurrences.
+  out = out.split("{{ memory_root }}").join(memoryRoot)
+  out = out.split("{{ phase2_workspace_diff_file }}").join(diffFileName)
+  return out
 }
 
 function readTemplate(name: string): string {

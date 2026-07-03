@@ -10,6 +10,21 @@ const EXTENSIONS_DIR = "extensions"
 const SKILLS_DIR = "skills"
 const ADHOC_NOTES_DIR = "extensions/ad_hoc/notes"
 
+const ADHOC_INSTRUCTIONS = `# Ad-hoc notes extension
+
+Files under \`notes/\` are memory update requests the user explicitly asked an agent to
+remember. Each note is one small file named \`<timestamp>_<slug>.md\` describing something to
+add, delete, or update in the memories.
+
+How to consume them during consolidation:
+
+- Treat each note as an authoritative user request; integrate its content into \`MEMORY.md\`
+  (and \`memory_summary.md\` when it is broadly reusable).
+- A note may ask to forget something: then remove the matching memory content.
+- Notes are pruned automatically after a retention window, so consume them on sight —
+  do not rely on them staying around.
+`
+
 export function ensureLayout(): void {
   const root = memoryRoot()
   for (const dir of [
@@ -25,6 +40,8 @@ export function ensureLayout(): void {
   if (!fs.existsSync(memoryMd)) fs.writeFileSync(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n", { flag: "w" })
   const summary = path.join(root, "memory_summary.md")
   if (!fs.existsSync(summary)) fs.writeFileSync(summary, "", { flag: "w" })
+  const adhocInstructions = path.join(root, EXTENSIONS_DIR, "ad_hoc", "instructions.md")
+  if (!fs.existsSync(adhocInstructions)) fs.writeFileSync(adhocInstructions, ADHOC_INSTRUCTIONS, { flag: "w" })
 }
 
 const RAW_MEMORY_MAX_CHARS = 2_500
@@ -61,22 +78,39 @@ export function writeRolloutSummaries(outputs: Stage1Output[]): void {
   }
 }
 
+// Resource filenames start with an ISO-like timestamp: 2026-07-03T05-11-22_slug.md
+function resourceTimestamp(name: string): number | null {
+  const m = name.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const ts = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`)
+  return Number.isNaN(ts) ? null : ts
+}
+
+// Prunes only timestamped .md resource/note files inside extension folders that
+// have an instructions.md. Instructions and untimestamped files are never touched
+// (mirrors codex's prune_old_extension_resources).
 export function pruneExtensionResources(retentionDays: number): void {
-  const dir = path.join(memoryRoot(), EXTENSIONS_DIR)
-  if (!fs.existsSync(dir)) return
+  const extensionsDir = path.join(memoryRoot(), EXTENSIONS_DIR)
+  if (!fs.existsSync(extensionsDir)) return
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
-  const walk = (d: string) => {
-    for (const name of fs.readdirSync(d)) {
-      const abs = path.join(d, name)
-      let stat
-      try { stat = fs.statSync(abs) } catch { continue }
-      if (stat.isDirectory()) walk(abs)
-      else if (stat.mtimeMs < cutoff) {
-        try { fs.unlinkSync(abs) } catch {}
+  for (const extName of fs.readdirSync(extensionsDir)) {
+    const extDir = path.join(extensionsDir, extName)
+    let extStat
+    try { extStat = fs.statSync(extDir) } catch { continue }
+    if (!extStat.isDirectory()) continue
+    if (!fs.existsSync(path.join(extDir, "instructions.md"))) continue
+    for (const sub of ["resources", "notes"]) {
+      const resDir = path.join(extDir, sub)
+      let names: string[]
+      try { names = fs.readdirSync(resDir) } catch { continue }
+      for (const name of names) {
+        if (!name.endsWith(".md")) continue
+        const ts = resourceTimestamp(name)
+        if (ts === null || ts > cutoff) continue
+        try { fs.unlinkSync(path.join(resDir, name)) } catch {}
       }
     }
   }
-  walk(dir)
 }
 
 const WORKSPACE_DIFF_MAX_BYTES = 4 * 1024 * 1024
