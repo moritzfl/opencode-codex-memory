@@ -17,6 +17,7 @@ export interface Stage1Output {
   raw_memory: string
   rollout_summary: string
   rollout_slug: string | null
+  cwd?: string | null
   generated_at: number
   usage_count: number
   last_usage: number | null
@@ -79,16 +80,17 @@ export class MemoryStore {
     this.db
       .prepare(
         `INSERT INTO memory_stage1_outputs
-          (session_id, source_updated_at, raw_memory, rollout_summary, rollout_slug, generated_at, usage_count, last_usage)
-         VALUES (?, ?, ?, ?, ?, ?, 0, NULL)
+          (session_id, source_updated_at, raw_memory, rollout_summary, rollout_slug, cwd, generated_at, usage_count, last_usage)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)
          ON CONFLICT(session_id) DO UPDATE SET
            source_updated_at = excluded.source_updated_at,
            raw_memory = excluded.raw_memory,
            rollout_summary = excluded.rollout_summary,
            rollout_slug = excluded.rollout_slug,
+           cwd = excluded.cwd,
            generated_at = excluded.generated_at`,
       )
-      .run(out.session_id, out.source_updated_at, out.raw_memory, out.rollout_summary, out.rollout_slug, out.generated_at)
+      .run(out.session_id, out.source_updated_at, out.raw_memory, out.rollout_summary, out.rollout_slug, out.cwd ?? null, out.generated_at)
     return true
   }
 

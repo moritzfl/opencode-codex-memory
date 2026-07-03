@@ -8,6 +8,7 @@ export const SCHEMA_V1 = [
     raw_memory TEXT NOT NULL,
     rollout_summary TEXT NOT NULL,
     rollout_slug TEXT,
+    cwd TEXT,
     generated_at INTEGER NOT NULL,
     usage_count INTEGER DEFAULT 0,
     last_usage INTEGER,

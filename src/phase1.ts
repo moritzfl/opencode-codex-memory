@@ -59,6 +59,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
         raw_memory: redact(result.raw_memory),
         rollout_summary: redact(result.rollout_summary),
         rollout_slug: result.rollout_slug,
+        cwd: session?.directory ?? null,
         generated_at: Date.now(),
       })
     } catch (err) {
