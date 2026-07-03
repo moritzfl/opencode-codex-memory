@@ -33,16 +33,20 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
 
     try {
       ensureLayout()
+
+      // Commit any leftover state first so the diff below only reflects
+      // this run's rebuild. Doing this after the rebuild would swallow the
+      // changes and consolidation would never see a diff.
+      if (!await ensureBaseline()) {
+        store.markPhase2Failed(claim.ownershipToken, "git baseline failed")
+        return { status: "baseline_failed" }
+      }
+
       store.pruneStage1Outputs(opts.maxUnusedDays)
       const outputs = store.getPhase2InputSelection(opts.maxRaw, opts.maxUnusedDays)
       rebuildRawMemories(outputs)
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)
-
-      if (!await ensureBaseline()) {
-        store.markPhase2Failed(claim.ownershipToken, "git baseline failed")
-        return { status: "baseline_failed" }
-      }
 
       const diff = await captureWorkspaceDiff()
       if (!diff.trim()) {
