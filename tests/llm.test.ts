@@ -1,5 +1,16 @@
 import { describe, it, expect } from "bun:test"
-import { parseExtraction } from "../src/llm.js"
+import { parseExtraction, fillTemplate } from "../src/llm.js"
+
+describe("fillTemplate", () => {
+  it("substitutes placeholders", () => {
+    expect(fillTemplate("id: {{ session_id }}", { session_id: "s1" })).toBe("id: s1")
+  })
+
+  it("does not expand $-patterns in the value", () => {
+    const out = fillTemplate("body: {{ transcript }}", { transcript: "price is $& and $' and $1" })
+    expect(out).toBe("body: price is $& and $' and $1")
+  })
+})
 
 describe("parseExtraction", () => {
   it("parses a clean JSON object", () => {

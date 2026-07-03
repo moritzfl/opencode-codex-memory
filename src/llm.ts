@@ -1,3 +1,5 @@
+import fs from "fs"
+import path from "path"
 import type { PluginInput } from "@opencode-ai/plugin"
 
 export interface ExtractionResult {
@@ -39,14 +41,19 @@ async function promptSession(sessionId: string, prompt: string, agent: string, t
       parts: [{ type: "text", text: prompt } as any],
     },
   })
-  const res = await Promise.race([
-    promptPromise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`sub-agent prompt timed out after ${timeoutMs}ms`)), timeoutMs)
-    ),
-  ])
-  if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
-  return extractAssistantText(res.data)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const res = await Promise.race([
+      promptPromise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`sub-agent prompt timed out after ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
+    if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
+    return extractAssistantText(res.data)
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function extractAssistantText(body: any): string {
@@ -123,23 +130,29 @@ async function deleteSession(id: string): Promise<void> {
   }
 }
 
+// Substitute with a function so `$&`/`$'` sequences in the value are not
+// expanded as String.replace replacement patterns.
+export function fillTemplate(tmpl: string, vars: Record<string, string>): string {
+  let out = tmpl
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.replace(`{{ ${key} }}`, () => value)
+  }
+  return out
+}
+
 function buildExtractionPrompt(sessionId: string, transcript: string): string {
-  const tmpl = readTemplate("stage_one_system.md")
-  return tmpl
-    .replace("{{ session_id }}", sessionId)
-    .replace("{{ transcript }}", transcript.slice(0, 200_000))
+  return fillTemplate(readTemplate("stage_one_system.md"), {
+    session_id: sessionId,
+    transcript: transcript.slice(0, 200_000),
+  })
 }
 
 function buildConsolidationPrompt(diffPath: string): string {
-  const tmpl = readTemplate("consolidation.md")
-  return tmpl.replace("{{ diff_path }}", diffPath)
+  return fillTemplate(readTemplate("consolidation.md"), { diff_path: diffPath })
 }
 
 function readTemplate(name: string): string {
-  const fs = require("fs") as typeof import("fs")
-  const path = require("path") as typeof import("path")
-  const p = path.join(import.meta.dirname, "templates", name)
-  return fs.readFileSync(p, "utf8")
+  return fs.readFileSync(path.join(import.meta.dirname, "templates", name), "utf8")
 }
 
 export function parseExtraction(raw: string): ExtractionResult {
