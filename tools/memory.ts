@@ -47,66 +47,148 @@ export const memory_read = tool({
   },
 })
 
+// Time-anchored memory files carry their session/note timestamp as a filename
+// prefix: 2026-07-03T05-11-22-<hash>-<slug>.md / 2026-07-03T05-11-22_<slug>.md
+function fileTimestamp(name: string): number | null {
+  const m = name.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const ts = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`)
+  return Number.isNaN(ts) ? null : ts
+}
+
+// Accepts YYYY-MM-DD (whole-day boundary) or a full ISO datetime.
+function parseDateArg(value: string, endOfDay: boolean): number | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const ts = Date.parse(`${value}T00:00:00Z`)
+    if (Number.isNaN(ts)) return null
+    return endOfDay ? ts + 24 * 60 * 60 * 1000 - 1 : ts
+  }
+  const ts = Date.parse(value)
+  return Number.isNaN(ts) ? null : ts
+}
+
+interface CandidateFile {
+  rel: string
+  abs: string
+  ts: number | null
+}
+
+function collectSearchFiles(root: string): CandidateFile[] {
+  const files: CandidateFile[] = []
+  const walk = (dir: string, prefix: string) => {
+    let entries: string[]
+    try {
+      entries = fs.readdirSync(dir)
+    } catch {
+      return
+    }
+    for (const name of entries) {
+      if (name.startsWith(".git")) continue
+      const abs = path.join(dir, name)
+      const rel = prefix ? `${prefix}/${name}` : name
+      let stat
+      try {
+        stat = fs.statSync(abs)
+      } catch {
+        continue
+      }
+      if (stat.isDirectory()) {
+        walk(abs, rel)
+      } else if (/\.(md|txt|json)$/i.test(name)) {
+        files.push({ rel, abs, ts: fileTimestamp(name) })
+      }
+    }
+  }
+  walk(root, "")
+  return files
+}
+
+function firstContentLine(content: string): string {
+  for (const line of content.split(/\r?\n/)) {
+    const t = line.trim()
+    if (!t) continue
+    // Skip the metadata header lines of summary/note files.
+    if (/^(session_id|updated_at|cwd|usage_count|created|session):/i.test(t)) continue
+    return t.slice(0, 160)
+  }
+  return "(empty)"
+}
+
 export const memory_search = tool({
   description:
     "Search across the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*). " +
-    "Returns matching lines with file paths. Simple case-insensitive substring/ranking fallback when no index is available.",
+    "Returns matching lines with file paths. Optional since/until restrict the search to " +
+    "time-anchored files (rollout summaries, ad-hoc notes) from that period — useful to recall " +
+    "what the user was working on around a given time. With since/until and no query, returns a " +
+    "chronological listing of that period's sessions/notes.",
   args: {
-    query: tool.schema.string().min(1).describe("Search query (case-insensitive substring match)."),
+    query: tool.schema.string().min(1).optional().describe("Search query (case-insensitive substring match). Optional when since/until is set."),
+    since: tool.schema.string().optional().describe("Only time-anchored files at/after this time (YYYY-MM-DD or ISO datetime)."),
+    until: tool.schema.string().optional().describe("Only time-anchored files at/before this time (YYYY-MM-DD or ISO datetime; whole day for date-only)."),
     limit: tool.schema.number().int().min(1).max(200).default(50).describe("Max matches to return."),
   },
   async execute(args, ctx) {
     try {
       const root = memoryRoot()
       if (!fs.existsSync(root)) return { output: "Memory workspace is empty." }
+      if (!args.query && !args.since && !args.until) {
+        return { output: "memory_search error: provide a query and/or since/until." }
+      }
+      const since = args.since ? parseDateArg(args.since, false) : null
+      if (args.since && since === null) return { output: `memory_search error: could not parse since="${args.since}".` }
+      const until = args.until ? parseDateArg(args.until, true) : null
+      if (args.until && until === null) return { output: `memory_search error: could not parse until="${args.until}".` }
+
+      let files = collectSearchFiles(root)
+      const timeFiltered = since !== null || until !== null
+      if (timeFiltered) {
+        // Time filters only apply to time-anchored files; MEMORY.md etc. carry
+        // no single timestamp and are excluded from time-scoped recall.
+        files = files.filter((f) => f.ts !== null && (since === null || f.ts >= since) && (until === null || f.ts <= until))
+        files.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+      }
+      const rangeLabel = timeFiltered ? ` in ${args.since ?? "..."}..${args.until ?? "..."}` : ""
+
+      if (!args.query) {
+        const listing = files.slice(0, args.limit).map((f) => {
+          let content = ""
+          try {
+            content = fs.readFileSync(f.abs, "utf8")
+          } catch {
+          }
+          return `${new Date(f.ts!).toISOString()} ${f.rel} — ${firstContentLine(content)}`
+        })
+        if (listing.length === 0) return { output: `No time-anchored memory files${rangeLabel}.` }
+        return {
+          output: `${listing.length} memory file(s)${rangeLabel}:\n${listing.join("\n")}`,
+          metadata: { count: listing.length, since: args.since, until: args.until },
+        }
+      }
+
       const q = args.query.toLowerCase()
       const matches: { file: string; line: number; text: string }[] = []
-      const limit = args.limit
-      const walk = (dir: string, prefix: string) => {
-        if (matches.length >= limit) return
-        let entries: string[]
+      for (const f of files) {
+        if (matches.length >= args.limit) break
+        let content: string
         try {
-          entries = fs.readdirSync(dir)
+          content = fs.readFileSync(f.abs, "utf8")
         } catch {
-          return
+          continue
         }
-        for (const name of entries) {
-          if (matches.length >= limit) return
-          if (name.startsWith(".git")) continue
-          const abs = path.join(dir, name)
-          const rel = prefix ? `${prefix}/${name}` : name
-          let stat
-          try {
-            stat = fs.statSync(abs)
-          } catch {
-            continue
-          }
-          if (stat.isDirectory()) {
-            walk(abs, rel)
-          } else if (/\.(md|txt|json)$/i.test(name)) {
-            let content: string
-            try {
-              content = fs.readFileSync(abs, "utf8")
-            } catch {
-              continue
-            }
-            content.split(/\r?\n/).forEach((line, i) => {
-              if (matches.length >= limit) return
-              if (line.toLowerCase().includes(q)) {
-                matches.push({ file: rel, line: i + 1, text: line.slice(0, 240) })
-              }
-            })
+        for (const [i, line] of content.split(/\r?\n/).entries()) {
+          if (matches.length >= args.limit) break
+          if (line.toLowerCase().includes(q)) {
+            matches.push({ file: f.rel, line: i + 1, text: line.slice(0, 240) })
           }
         }
       }
-      walk(root, "")
-      if (matches.length === 0) return { output: `No matches for "${args.query}".` }
+      if (matches.length === 0) return { output: `No matches for "${args.query}"${rangeLabel}.` }
       const out = matches
         .map((m) => `${m.file}:${m.line}: ${m.text}`)
         .join("\n")
       return {
-        output: `${matches.length} match(es) for "${args.query}":\n${out}`,
-        metadata: { count: matches.length, query: args.query },
+        output: `${matches.length} match(es) for "${args.query}"${rangeLabel}:\n${out}`,
+        metadata: { count: matches.length, query: args.query, since: args.since, until: args.until },
       }
     } catch (err) {
       return { output: `memory_search error: ${(err as Error).message}` }

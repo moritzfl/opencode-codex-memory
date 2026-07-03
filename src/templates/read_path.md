@@ -29,6 +29,9 @@ Quick memory pass (when applicable):
 1. Skim the MEMORY_SUMMARY below and extract task-relevant keywords.
 2. Search `MEMORY.md` for those keywords with the `memory_search` tool, or read it
    with `memory_read`.
+   - For time-scoped recall ("what was I working on last week / around date X"),
+     pass `since`/`until` to `memory_search` — with a query it searches only that
+     period's sessions/notes; without a query it lists them chronologically.
 3. Only if MEMORY.md directly points to rollout summaries/skills, open the 1-2
    most relevant files under `rollout_summaries/` or `skills/`.
 4. If there are no relevant hits, stop memory lookup and continue normally.
