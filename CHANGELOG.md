@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Phase 2 consolidation never actually ran: the git baseline was committed *after* the workspace rebuild, so the captured diff was always empty. The baseline is now established before the rebuild.
+- Staging deleted files no longer throws (`isogit.add` → `isogit.remove`); previously any pruned rollout summary permanently broke baseline commits and diff capture.
+- Stage 1 jobs stuck in `running` after a crash are reclaimed once their lease expires.
+- Sessions with new activity after a successful extraction are re-extracted; `source_updated_at` and the success watermark now use the session's real `time_updated` instead of extraction wall-clock time.
+- Phase 2 input selection kept dropping old-but-actively-cited memories (recent activity *or* recent usage now qualifies), and `pruneStage1Outputs` is now actually called each Phase 2 run.
+- Citation usage was counted once per streaming delta instead of once per message part, inflating `usage_count`.
+- Template substitution no longer expands `$&`/`$'`/`$n` patterns contained in transcripts or the memory summary.
+- memex's own sub-sessions are isolated: no memory prompt injection, no phase-1 triggering on their idle events, and excluded from session capture at the SQL level.
+
 ### Added
 
 - Full implementation of the codex memory architecture as a standalone opencode plugin (`opencode-memex`).
