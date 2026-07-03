@@ -18,6 +18,15 @@ export function getPluginInput(): PluginInput | null {
   return inputRef
 }
 
+// Sessions this plugin spawned for extraction/consolidation. The main
+// hooks skip these so memex never injects memory into (or memorizes) its
+// own sub-agents.
+const activeSubSessions = new Set<string>()
+
+export function isMemexSubSession(sessionId: string): boolean {
+  return activeSubSessions.has(sessionId)
+}
+
 async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
@@ -28,6 +37,7 @@ async function createSession(agent: string, title?: string): Promise<string> {
   const body = res.data as { id?: string }
   const id = body.id
   if (!id) throw new Error(`session create returned no id: ${JSON.stringify(body)}`)
+  activeSubSessions.add(id)
   return id
 }
 
@@ -118,6 +128,7 @@ export async function cleanupOldSubSessions(maxAgeMinutes = 30): Promise<void> {
 }
 
 async function deleteSession(id: string): Promise<void> {
+  activeSubSessions.delete(id)
   const input = getPluginInput()
   if (!input) return
   try {

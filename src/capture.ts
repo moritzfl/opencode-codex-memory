@@ -24,8 +24,14 @@ export function listRecentSessions(limit: number = SCAN_LIMIT): SessionRow[] {
   const db = openOpencodeDb()
   if (!db) return []
   try {
+    // Top-level sessions only: task-tool children are summarized into their
+    // parent, and memex's own sub-sessions must never be memorized.
     return db
-      .prepare("SELECT id, time_updated AS updated_at FROM session ORDER BY time_updated DESC LIMIT ?")
+      .prepare(
+        `SELECT id, time_updated AS updated_at FROM session
+         WHERE parent_id IS NULL AND title NOT LIKE 'memex-%'
+         ORDER BY time_updated DESC LIMIT ?`,
+      )
       .all(limit) as SessionRow[]
   } catch {
     return []
@@ -79,7 +85,6 @@ export function loadTranscript(sessionId: string): TranscriptMessage[] {
 function extractText(msg: any): string | undefined {
   if (!msg) return undefined
   if (typeof msg.text === "string") return msg.text
-  if (msg.type === "text" && typeof msg.text === "string") return msg.text
   if (msg.type === "tool") {
     const tool = msg.tool ?? "unknown"
     const input = msg.state?.input ? JSON.stringify(msg.state.input).slice(0, 200) : ""

@@ -5,12 +5,11 @@ import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
-import { setPluginInput, cleanupOldSubSessions } from "./llm.js"
+import { setPluginInput, cleanupOldSubSessions, isMemexSubSession } from "./llm.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
 let store: MemoryStore | null = null
 let phase1InFlight = false
-let phase2InFlight = false
 
 let pluginOptions: {
   generate_memory: boolean
@@ -30,8 +29,26 @@ function getStore(): MemoryStore {
   return store
 }
 
-const EXTRACT_AGENTS = new Set(["memorize", "memorize-extract"])
-export { EXTRACT_AGENTS }
+// Citation blocks arrive via message.part.updated once per streaming delta,
+// so the same completed block is seen many times. Track which session ids
+// were already recorded per part to count each citation once.
+const recordedCitations = new Map<string, Set<string>>()
+const MAX_TRACKED_PARTS = 500
+
+export function takeNewCitations(partKey: string, ids: string[]): string[] {
+  let seen = recordedCitations.get(partKey)
+  if (!seen) {
+    seen = new Set()
+    recordedCitations.set(partKey, seen)
+    if (recordedCitations.size > MAX_TRACKED_PARTS) {
+      const oldest = recordedCitations.keys().next().value
+      if (oldest !== undefined) recordedCitations.delete(oldest)
+    }
+  }
+  const fresh = ids.filter((id) => !seen.has(id))
+  for (const id of fresh) seen.add(id)
+  return fresh
+}
 
 export default {
   id: "opencode-memex",
@@ -55,6 +72,7 @@ const hooks = {
     output: { system: string[] },
   ): Promise<void> {
     try {
+      if (input.sessionID && isMemexSubSession(input.sessionID)) return
       ensureMemoryLayout()
       const memoryPrompt = buildMemorySystemPrompt()
       if (memoryPrompt) {
@@ -91,8 +109,9 @@ const hooks = {
     try {
       const ev = input.event
       if (ev.type === "message.part.updated") {
-        const part = (ev.properties as { part?: { type: string; text?: string; sessionID?: string } }).part
+        const part = (ev.properties as { part?: { id?: string; type: string; text?: string; sessionID?: string } }).part
         if (!part || part.type !== "text" || typeof part.text !== "string") return
+        if (part.sessionID && isMemexSubSession(part.sessionID)) return
         if (!part.text.includes("<memory-citation>")) return
         let ids: string[] = []
         try {
@@ -100,9 +119,10 @@ const hooks = {
         } catch {
           return
         }
-        if (ids.length > 0) {
+        const fresh = takeNewCitations(`${part.sessionID ?? ""}:${part.id ?? ""}`, ids)
+        if (fresh.length > 0) {
           try {
-            getStore().recordUsage(ids)
+            getStore().recordUsage(fresh)
           } catch (e) {
             console.error("[opencode-memex] recordUsage failed:", e)
           }
@@ -126,7 +146,7 @@ const hooks = {
       if (ev.type === "session.idle") {
         const props = ev.properties as { sessionID?: string }
         const sid = props?.sessionID
-        if (!sid) return
+        if (!sid || isMemexSubSession(sid)) return
         void triggerPhase1(sid)
         return
       }
@@ -167,9 +187,8 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
 }
 
 async function triggerPhase2(): Promise<void> {
-  if (phase2InFlight) return
-  phase2InFlight = true
   try {
+    // runPhase2 has its own in-flight guard
     await runPhase2(getStore(), {
       maxRaw: 50,
       maxUnusedDays: pluginOptions.max_unused_days,
@@ -177,7 +196,5 @@ async function triggerPhase2(): Promise<void> {
     })
   } catch (err) {
     console.error("[opencode-memex] phase2 error:", err)
-  } finally {
-    phase2InFlight = false
   }
 }

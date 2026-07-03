@@ -1,5 +1,15 @@
 import { describe, it, expect } from "bun:test"
 import { parseCitations, extractCitedSessionIds, stripCitations } from "../src/citation.js"
+import { takeNewCitations } from "../src/index.js"
+
+describe("takeNewCitations", () => {
+  it("records each session id once per part across repeated streaming updates", () => {
+    expect(takeNewCitations("ses:part1", ["a", "b"])).toEqual(["a", "b"])
+    expect(takeNewCitations("ses:part1", ["a", "b"])).toEqual([])
+    expect(takeNewCitations("ses:part1", ["a", "b", "c"])).toEqual(["c"])
+    expect(takeNewCitations("ses:part2", ["a"])).toEqual(["a"])
+  })
+})
 
 const SAMPLE = `Here is an answer from memory.
 
