@@ -144,6 +144,18 @@ export class MemoryStore {
       .run(nowSec(), out.source_updated_at, sessionId)
   }
 
+  /** Extraction succeeded but produced nothing worth keeping: finish the job and drop any stale output. */
+  markStage1SucceededNoOutput(sessionId: string, sourceUpdatedAt: number): void {
+    this.db
+      .prepare(
+        `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
+          last_success_watermark=?, retry_at=NULL
+         WHERE kind='memory_stage1' AND job_key=?`,
+      )
+      .run(nowSec(), sourceUpdatedAt, sessionId)
+    this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+  }
+
   markStage1Failed(sessionId: string, error: string): void {
     this.db
       .prepare(

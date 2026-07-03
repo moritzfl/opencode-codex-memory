@@ -177,6 +177,7 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
       maxAgeDays: pluginOptions.max_rollout_age_days,
       minIdleHours: pluginOptions.min_rollout_idle_hours,
       excludeSession: currentSessionId,
+      extractModel: pluginOptions.extract_model,
     })
   } catch (err) {
     console.error("[opencode-memex] phase1 error:", err)

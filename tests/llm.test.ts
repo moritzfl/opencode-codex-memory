@@ -15,7 +15,7 @@ describe("fillTemplate", () => {
 describe("parseExtraction", () => {
   it("parses a clean JSON object", () => {
     const raw = JSON.stringify({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "slug-1" })
-    const r = parseExtraction(raw)
+    const r = parseExtraction(raw)!
     expect(r.raw_memory).toBe("rm")
     expect(r.rollout_summary).toBe("rs")
     expect(r.rollout_slug).toBe("slug-1")
@@ -23,14 +23,29 @@ describe("parseExtraction", () => {
 
   it("parses JSON wrapped in code fences", () => {
     const raw = "```json\n" + JSON.stringify({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "x" }) + "\n```"
-    expect(parseExtraction(raw).raw_memory).toBe("rm")
+    expect(parseExtraction(raw)!.raw_memory).toBe("rm")
   })
 
   it("parses JSON embedded in prose", () => {
     const raw = "Here is the result:\n" + JSON.stringify({ raw_memory: "rm", rollout_summary: "rs" }) + "\nDone."
-    const r = parseExtraction(raw)
+    const r = parseExtraction(raw)!
     expect(r.raw_memory).toBe("rm")
     expect(r.rollout_slug).toBeNull()
+  })
+
+  it("returns null for the all-empty no-op response", () => {
+    const raw = JSON.stringify({ raw_memory: "", rollout_summary: "", rollout_slug: "" })
+    expect(parseExtraction(raw)).toBeNull()
+  })
+
+  it("treats a whitespace-only response as a no-op", () => {
+    const raw = JSON.stringify({ raw_memory: "  \n", rollout_summary: " ", rollout_slug: "" })
+    expect(parseExtraction(raw)).toBeNull()
+  })
+
+  it("normalizes an empty slug to null", () => {
+    const raw = JSON.stringify({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" })
+    expect(parseExtraction(raw)!.rollout_slug).toBeNull()
   })
 
   it("throws when no JSON object is present", () => {
@@ -41,20 +56,11 @@ describe("parseExtraction", () => {
     expect(() => parseExtraction(JSON.stringify({ rollout_summary: "rs" }))).toThrow()
   })
 
-  it("throws when raw_memory is placeholder text", () => {
+  it("throws when raw_memory echoes the template skeleton", () => {
     const raw = JSON.stringify({
-      raw_memory: "Detailed markdown. Include: what the user was doing, key decisions",
+      raw_memory: "task_outcome: <success|partial|fail|uncertain>",
       rollout_summary: "rs",
       rollout_slug: "slug",
-    })
-    expect(() => parseExtraction(raw)).toThrow()
-  })
-
-  it("throws when rollout_slug is placeholder", () => {
-    const raw = JSON.stringify({
-      raw_memory: "actual content",
-      rollout_summary: "rs",
-      rollout_slug: "kebab-case-slug-of-the-session-topic",
     })
     expect(() => parseExtraction(raw)).toThrow()
   })
