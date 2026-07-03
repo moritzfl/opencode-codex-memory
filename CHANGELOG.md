@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `phase2_workspace_diff.md` now matches codex's format: a `## Status` listing plus a `## Diff` section with the real unified content diff since the last consolidation (per-file diffs over 64 KiB are stubbed, total bounded at 4 MiB with a truncation marker). Previously the consolidation agent only got the file-status list. The artifact is removed before diffing and before baseline commits so it never enters baseline history.
 - Full implementation of the codex memory architecture as a standalone opencode plugin (`opencode-memex`).
 - **Stage 0 (Read path MVP)**: `memory_summary.md` (≤2500 tokens) is read from `~/.local/share/opencode/memories/` and injected into every system prompt via `experimental.chat.system.transform`. Byte-identical append → provider cache stable.
 - **Stage 1 (Tools + Citations)**:

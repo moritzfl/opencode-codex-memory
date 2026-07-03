@@ -2,8 +2,32 @@ import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
 import * as isogit from "isomorphic-git"
+import { createPatch } from "diff"
 
 const AUTHOR = { name: "opencode-memex", email: "memex@opencode.local" }
+
+// Generated prompt artifact; removed before diffing and before baseline
+// commits (mirrors codex's remove_workspace_diff) so it never enters the
+// baseline history or shows up as memory content.
+export const DIFF_ARTIFACT = "phase2_workspace_diff.md"
+const PER_FILE_DIFF_MAX_BYTES = 64 * 1024
+
+export interface WorkspaceChange {
+  status: "A" | "M" | "D"
+  path: string
+}
+
+export interface WorkspaceDiff {
+  changes: WorkspaceChange[]
+  unifiedDiff: string
+}
+
+function removeDiffArtifact(dir: string): void {
+  try {
+    fs.unlinkSync(path.join(dir, DIFF_ARTIFACT))
+  } catch {
+  }
+}
 
 async function ensureInit(dir: string): Promise<void> {
   const gitDir = path.join(dir, ".git")
@@ -39,7 +63,9 @@ async function addAndCommit(dir: string, message: string): Promise<string | null
 
 export async function ensureBaseline(): Promise<boolean> {
   try {
-    await addAndCommit(memoryRoot(), "memex baseline")
+    const dir = memoryRoot()
+    removeDiffArtifact(dir)
+    await addAndCommit(dir, "memex baseline")
     return true
   } catch (err) {
     console.error("[opencode-memex] ensureBaseline error:", err)
@@ -47,28 +73,67 @@ export async function ensureBaseline(): Promise<boolean> {
   }
 }
 
-export async function captureWorkspaceDiff(): Promise<string> {
+async function readBaselineText(dir: string, headOid: string, filepath: string): Promise<string> {
+  try {
+    const { blob } = await isogit.readBlob({ fs, dir, oid: headOid, filepath })
+    return new TextDecoder().decode(blob)
+  } catch {
+    return ""
+  }
+}
+
+function readWorkdirText(dir: string, filepath: string): string {
+  try {
+    return fs.readFileSync(path.join(dir, filepath), "utf8")
+  } catch {
+    return ""
+  }
+}
+
+export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
   try {
     const dir = memoryRoot()
     await ensureInit(dir)
+    removeDiffArtifact(dir)
     const matrix = await isogit.statusMatrix({ fs, dir })
-    return matrix
-      .filter(([filepath, head, workdir]) => head !== workdir && filepath !== "phase2_workspace_diff.md")
-      .map(([filepath, head, workdir]) => {
-        if (head === 0) return `A ${filepath}`
-        if (workdir === 0) return `D ${filepath}`
-        return `M ${filepath}`
-      })
-      .join("\n")
+    const changedRows = matrix.filter(
+      ([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT,
+    )
+    const changes: WorkspaceChange[] = changedRows.map(([filepath, head, workdir]) => {
+      if (head === 0) return { status: "A", path: filepath }
+      if (workdir === 0) return { status: "D", path: filepath }
+      return { status: "M", path: filepath }
+    })
+
+    let headOid: string | null = null
+    try {
+      headOid = await isogit.resolveRef({ fs, dir, ref: "HEAD" })
+    } catch {
+      // no commits yet — every file diffs against empty
+    }
+    const patches: string[] = []
+    for (const [filepath, head, workdir] of changedRows) {
+      const oldText = head === 1 && headOid ? await readBaselineText(dir, headOid, filepath) : ""
+      const newText = workdir === 0 ? "" : readWorkdirText(dir, filepath)
+      const patch = createPatch(filepath, oldText, newText)
+      patches.push(
+        patch.length > PER_FILE_DIFF_MAX_BYTES
+          ? `Index: ${filepath}\n[diff omitted: ${patch.length} bytes]\n`
+          : patch,
+      )
+    }
+    return { changes, unifiedDiff: patches.join("\n") }
   } catch (err) {
     console.error("[opencode-memex] captureWorkspaceDiff error:", err)
-    return ""
+    return { changes: [], unifiedDiff: "" }
   }
 }
 
 export async function resetBaseline(): Promise<boolean> {
   try {
-    await addAndCommit(memoryRoot(), "memex consolidated")
+    const dir = memoryRoot()
+    removeDiffArtifact(dir)
+    await addAndCommit(dir, "memex consolidated")
     return true
   } catch (err) {
     console.error("[opencode-memex] resetBaseline error:", err)

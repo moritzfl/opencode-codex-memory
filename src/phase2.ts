@@ -49,13 +49,9 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       pruneExtensionResources(opts.extensionRetentionDays)
 
       const diff = await captureWorkspaceDiff()
-      if (!diff.trim()) {
+      if (diff.changes.length === 0) {
         store.markPhase2Succeeded(claim.ownershipToken)
         return { status: "no_workspace_changes" }
-      }
-      if (diff.length > 4 * 1024 * 1024) {
-        store.markPhase2Failed(claim.ownershipToken, "workspace diff too large")
-        return { status: "diff_too_large" }
       }
 
       const diffPath = writeWorkspaceDiff(diff)
