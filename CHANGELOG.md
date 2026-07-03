@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Codex memory parity pass** (breaking: reset local memory state — DB schema, summary filenames, and memory_summary schema all changed):
+  - All three prompt templates replaced with full adaptations of codex's memory prompts: stage-1 extraction (minimum-signal gate, task outcome triage, preference-signal extraction, task-grouped raw_memory format), Phase 2 consolidation (MEMORY.md Task Group schema, `v1` memory_summary schema with User Profile / User preferences / General Tips / What's in Memory, skills format, diff-driven forgetting workflow), and the read path (decision boundary, budgeted quick memory pass, staleness guidance).
+  - System/input prompt split for extraction (system via prompt body's `system` field); all-empty output is a supported no-op that deletes any stale stage-1 row.
+  - Rich citations: `citation_entries` with `file:line-range|note=[...]` plus a `session_ids` block (legacy format still parses).
+  - Forgetting: disabled/polluted sessions are excluded from Phase 2 selection so their workspace files disappear and the diff drives memory pruning; `selected_for_phase2` snapshots are tracked and protected from retention pruning.
+  - Job claiming mirrors codex: retry backoff respected, newer session activity overrides backoff and resets exhausted retries, leases cleared on completion/failure.
+  - Session `cwd` captured and rendered through raw_memories.md and rollout summaries; summary files named `<timestamp>-<shorthash>-<slug>.md`; transcripts strip citation blocks and truncate head+tail.
+  - `extensions/ad_hoc/instructions.md` seeded; note pruning is filename-timestamp based and never touches instructions; `extract_model` and `consolidation_model` plugin options wired to sub-agent prompts.
 - `phase2_workspace_diff.md` now matches codex's format: a `## Status` listing plus a `## Diff` section with the real unified content diff since the last consolidation (per-file diffs over 64 KiB are stubbed, total bounded at 4 MiB with a truncation marker). Previously the consolidation agent only got the file-status list. The artifact is removed before diffing and before baseline commits so it never enters baseline history.
 - Full implementation of the codex memory architecture as a standalone opencode plugin (`opencode-memex`).
 - **Stage 0 (Read path MVP)**: `memory_summary.md` (≤2500 tokens) is read from `~/.local/share/opencode/memories/` and injected into every system prompt via `experimental.chat.system.transform`. Byte-identical append → provider cache stable.
