@@ -35,7 +35,7 @@ anything.
 
    ```json
    {
-     "plugins": ["opencode-memex"]
+     "plugin": ["opencode-memex"]
    }
    ```
 
@@ -125,8 +125,17 @@ codex's `[memories]` config so the two stay easy to compare:
 | `max_rollouts_per_startup` | `2` | Max sessions extracted per pass |
 | `max_unused_days` | `30` | Prune memories unused for this long |
 
-Set them in the plugin entry of your `opencode.json` (see opencode's plugin
-options docs).
+To set options, turn the plugin entry into a `[name, options]` pair:
+
+```json
+{
+  "plugin": [
+    ["opencode-memex", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+  ]
+}
+```
+
+See the [opencode plugin docs](https://opencode.ai/docs/plugins/) for details.
 
 > Note: `dedicated_tools` defaults to `true` here (codex defaults it to `false`).
 > This is the one intentional default difference — the tools are a core part of a
