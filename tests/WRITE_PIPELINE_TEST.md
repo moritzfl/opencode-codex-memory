@@ -8,9 +8,10 @@ It is intentionally **not** a `bun test` because it requires real user-like sess
 
 - Official opencode 1.17+ installed and in PATH
 - This plugin configured in `~/.config/opencode/opencode.json` (path or package name)
-- `git` available
 - Fresh `~/.local/share/opencode/memories/` (recommended: back it up first)
 - SQLite CLI (`sqlite3`) available for verification
+
+No `git` binary is needed — git is bundled via `isomorphic-git`.
 
 ## Step 0 — Prepare clean state
 
@@ -72,11 +73,16 @@ opencode run "Write a short README section explaining how the memory plugin work
 
 **Session E (Polluted session — optional)**
 
+Pollution is opt-in (matching codex): set `disable_on_external_context: true`
+in the plugin options first, then:
+
 ```bash
 opencode run "Search the web for the current weather in Berlin and summarize it."
 ```
 
-This session should be marked `polluted` and **excluded** from extraction.
+With the option on, this session should be marked `polluted` and **excluded**
+from extraction (web and MCP tools both count). With the default (`false`),
+it stays eligible.
 
 After each session, wait ~10–20 seconds so `updated_at` is distinct.
 
@@ -131,7 +137,7 @@ Phase 2 runs automatically after successful Phase 1 extractions, but only if **a
 
 - No other Phase 2 job is currently running (singleton lock)
 - The 6-hour cooldown has passed since the last successful consolidation (first run after a DB wipe **always** proceeds)
-- `git` binary is available in `$PATH`
+- A failed run's retry backoff (1 hour) has elapsed
 
 **How to force a Phase 2 run (useful during testing):**
 
@@ -150,14 +156,6 @@ Watch the logs for:
 [opencode-memex] phase2 ...
 ```
 
-If you see a warning like:
-
-```
-[opencode-memex] git binary not found — Phase 2 consolidation will be disabled
-```
-
-then Phase 2 will be skipped for the entire opencode run. Install `git` and restart opencode.
-
 ## Step 6 — Verify Phase 2 artifacts
 
 ```bash
@@ -171,7 +169,9 @@ ls ~/.local/share/opencode/memories/rollout_summaries/
 - `MEMORY.md` contains entries for the sessions you created
 - `memory_summary.md` is updated and still under ~10k characters
 - `rollout_summaries/` contains `.md` files
-- `memories/.git` has at least two commits ("baseline" and "consolidated")
+- `memories/.git` has exactly **one** commit — the baseline is re-initialized
+  after each consolidation so deleted memory content is not retained in git
+  history (matching codex)
 
 ## Step 7 — Test new memory injection (closed loop)
 
@@ -216,7 +216,11 @@ ls ~/.local/share/opencode/memories/
 sqlite3 ~/.local/share/opencode/memory.db "SELECT COUNT(*) FROM memory_stage1_outputs;"
 ```
 
-**Expected:** Directory is empty (except possibly `.git`), DB tables are empty, next system prompt contains no memory.
+**Expected:** Directory is completely empty (including `.git` — reset drops git
+history so wiped memories are unrecoverable), `memory_stage1_outputs` and
+`memory_jobs` are empty, next system prompt contains no memory. Per-session
+memory modes (`memory_session_meta`) are intentionally preserved so
+disabled/polluted sessions stay excluded after the reset.
 
 ## Step 10 — Restore (optional)
 
@@ -241,10 +245,9 @@ The test passes if:
 | Flaky point | Why it happens | Mitigation in this document |
 |-------------|----------------|-----------------------------|
 | Timing of `session.idle` | The event only fires after the session has been idle for a short period. | Explicitly recommend sending `opencode run "ok"` immediately after each work session. |
-| 6h Phase 2 cooldown | The singleton global job has a hard 6-hour success cooldown. | Provide the exact `DELETE` statement to clear the job row so the next idle event will run Phase 2. |
-| Git not installed | `ensureBaseline()` / `captureWorkspaceDiff()` require the `git` binary. | One-time warning is logged at plugin load. The test document now tells the user to install `git` and restart opencode if the warning appears. |
+| 6h Phase 2 cooldown | The singleton global job has a hard 6-hour success cooldown (and a 1h retry backoff after failures). | Provide the exact `DELETE` statement to clear the job row so the next idle event will run Phase 2. |
 
-These three points are the only known sources of non-determinism when running the write-pipeline test manually. All other steps are deterministic once the prerequisites are met.
+These are the only known sources of non-determinism when running the write-pipeline test manually. All other steps are deterministic once the prerequisites are met (git is bundled, so no external binary can be missing).
 
 ## Notes for agents
 

@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Parity pass after a full subsystem audit vs codex** (`codex-map.yaml` now
+  records every remaining deliberate divergence, and the drift script watches
+  the config/lifecycle/pollution files where past blind spots lived):
+  - `ensureBaseline` no longer commits over an existing baseline: the phase-2
+    diff now spans last-success → now, so manual edits to `MEMORY.md` and
+    ad-hoc notes actually reach consolidation instead of being silently
+    baselined away.
+  - Baseline reset re-initializes `.git` (fresh single-commit history) and
+    `memory_reset` deletes `.git` too — deleted/redacted memory content is no
+    longer recoverable from git history, matching codex.
+  - Ad-hoc notes are never pruned (they are explicit user requests; codex
+    keeps them permanently). The seeded instructions template regained
+    codex's never-delete rule, `[ad-hoc note]` provenance tag, and
+    prompt-injection warning.
+  - Phase-2 retry semantics match codex: backoff (now 1 h) is enforced
+    regardless of job status, the retry counter is no longer reset on claim,
+    and retries never exhaust; stage-1 retry delay is 1 h; phase-2 lease 1 h;
+    a failing consolidation no longer re-invokes the LLM on every idle event.
+  - Multi-process safety: claims run in immediate transactions with
+    per-claim ownership tokens; all finalizers require ownership + running
+    status (a zombie worker can no longer clobber a re-claimed job's output);
+    phase 2 confirms ownership one final time before resetting the baseline;
+    the DB opens with a 5 s busy timeout.
+  - `disable_on_external_context` now covers MCP tools (matched via
+    `client.mcp.status()`), as the README already claimed.
+  - Extraction sees full tool payloads (previously sliced to 200/500 chars
+    per call) with a 600k-char (~150k-token) transcript budget, matching
+    codex's evidence budget; `rollout_slug` is redacted; Bearer redaction is
+    case-insensitive; injected AGENTS.md/`<skill>` blocks are excluded from
+    extraction.
+  - Path guard rejects symlinks per path component and hides dotfiles; the
+    search walker skips symlinks and hidden files.
+  - Sessions seen while `generate_memories: false` are permanently stamped
+    `disabled` (codex stamps at thread creation) instead of being retroactively
+    extractable after re-enabling; deleting a session now deletes its
+    extracted memory and job (`session.deleted`).
+  - `memory_reset` preserves per-session memory modes (disabled/polluted
+    sessions stay excluded), matching codex `clear_memory_data`.
+  - Summary truncation keeps head + tail with a marker instead of silently
+    dropping the end of `memory_summary.md`.
 - Phase 2 consolidation never actually ran: the git baseline was committed *after* the workspace rebuild, so the captured diff was always empty. The baseline is now established before the rebuild.
 - Staging deleted files no longer throws (`isogit.add` → `isogit.remove`); previously any pruned rollout summary permanently broke baseline commits and diff capture.
 - Stage 1 jobs stuck in `running` after a crash are reclaimed once their lease expires.
@@ -22,9 +62,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Full codex config parity for plugin options, using codex's exact names and defaults so the two stay easy to compare and sync: `generate_memories`, `use_memories`, `dedicated_tools`, `disable_on_external_context`, `max_raw_memories_for_consolidation`, `max_rollouts_per_startup` are now configurable (alongside the existing `extract_model`, `consolidation_model`, `max_unused_days`, `max_rollout_age_days`, `min_rollout_idle_hours`). Defaults now match codex (`max_rollout_age_days` 10, `min_rollout_idle_hours` 6, `max_rollouts_per_startup` 2, `max_raw_memories_for_consolidation` 256). One intentional divergence: `dedicated_tools` defaults to `true` (codex: `false`) so the plugin ships its memory tools out of the box.
 - `memory_search` supports `since`/`until` for time-scoped recall over time-anchored files (rollout summaries, ad-hoc notes); with a window and no query it returns a chronological listing of that period's sessions/notes. Extends beyond codex.
+- `memory_list` tool (port of codex `memories/list`): sorted directory listings with entry types; hidden files and symlinks are skipped.
+- `memory_read` supports `line_offset`/`max_lines` with start-line reporting, so `file:line` citations work on large files.
+- Numeric plugin options are clamped to codex's valid ranges; unknown option keys log a warning; `use_memories: false` now also hides the memory tools (codex extension gating).
 
 ### Changed
 
+- **Behavior change (parity):** `memory_search` is now case-sensitive by default (pass `case_sensitive: false` for the old behavior), searches all non-hidden files instead of only `.md`/`.txt`/`.json`, and returns results in `(path, line)` order with a default limit of 200. Ad-hoc note filenames use codex's hyphen layout (`<timestamp>-<slug>.md`) and never overwrite on collision.
 - **Behavior change from new defaults:** memory now waits longer before extracting a session (idle ≥6h, was ≥1h), only looks back 10 days (was 14), and processes at most 2 sessions per pass. Web/MCP sessions are no longer excluded from memory by default — set `disable_on_external_context: true` to restore that.
 - Renamed the `generate_memory` option to `generate_memories` to match codex; update your `opencode.json` if you set it.
 - **Codex memory parity pass** (breaking: reset local memory state — DB schema, summary filenames, and memory_summary schema all changed):
@@ -34,8 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Forgetting: disabled/polluted sessions are excluded from Phase 2 selection so their workspace files disappear and the diff drives memory pruning; `selected_for_phase2` snapshots are tracked and protected from retention pruning.
   - Job claiming mirrors codex: retry backoff respected, newer session activity overrides backoff and resets exhausted retries, leases cleared on completion/failure.
   - Session `cwd` captured and rendered through raw_memories.md and rollout summaries; summary files named `<timestamp>-<shorthash>-<slug>.md`; transcripts strip citation blocks and truncate head+tail.
-  - `extensions/ad_hoc/instructions.md` seeded; note pruning is filename-timestamp based and never touches instructions; `extract_model` and `consolidation_model` plugin options wired to sub-agent prompts.
-- `phase2_workspace_diff.md` now matches codex's format: a `## Status` listing plus a `## Diff` section with the real unified content diff since the last consolidation (per-file diffs over 64 KiB are stubbed, total bounded at 4 MiB with a truncation marker). Previously the consolidation agent only got the file-status list. The artifact is removed before diffing and before baseline commits so it never enters baseline history.
+  - `extensions/ad_hoc/instructions.md` seeded; resource pruning is filename-timestamp based and never touches notes or instructions; `extract_model` and `consolidation_model` plugin options wired to sub-agent prompts.
+- `phase2_workspace_diff.md` now matches codex's format: a `## Status` listing plus a `## Diff` section with the real unified content diff since the last consolidation (per-file diffs rendered in full, total bounded at 4 MiB with a truncation marker). Previously the consolidation agent only got the file-status list. The artifact is removed before diffing and before baseline commits so it never enters baseline history.
 - Full implementation of the codex memory architecture as a standalone opencode plugin (`opencode-memex`).
 - **Stage 0 (Read path MVP)**: `memory_summary.md` (≤2500 tokens) is read from `~/.local/share/opencode/memories/` and injected into every system prompt via `experimental.chat.system.transform`. Byte-identical append → provider cache stable.
 - **Stage 1 (Tools + Citations)**:
@@ -51,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Phase 1 extraction via `memorize-extract` sub-agent over the HTTP API.
 - **Stage 3 (Phase 2 consolidation)**:
   - Workspace management (`raw_memories.md`, `rollout_summaries/`, `skills/`, `extensions/`).
-  - Git baseline diffing inside the memories directory (shells out to `git`).
+  - Git baseline diffing inside the memories directory (bundled `isomorphic-git`, no external binary).
   - Phase 2 orchestration with 6h cooldown, 90s heartbeat, and singleton job claim.
   - Consolidation via the sandboxed `memorize` sub-agent.
   - Ships `opencode.json` with `memorize` and `memorize-extract` agent definitions (network/tools denied).
@@ -69,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - All hooks are wrapped in try/catch with graceful degradation (plugin crash does not affect the host session).
-- Phase 2 aborts early if the workspace diff exceeds 4 MiB.
+- The workspace diff is truncated at 4 MiB with an explicit marker.
 - Event handlers defensively catch per-operation errors (recordUsage, markPolluted).
 
 ### Security
@@ -77,7 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sub-agents (`memorize`, `memorize-extract`) have `bash`/`webfetch`/`websearch`/`task`/`todowrite` denied.
 - `memory_reset` refuses to run if the memories root is a symlink.
 - Aggressive secret redaction (OpenAI/Anthropic/AWS/GitHub/Slack keys, bearer tokens, private keys, password assignments) before any LLM call or storage.
-- Sessions that used web tools are marked `polluted` and excluded from extraction.
+- With `disable_on_external_context: true`, sessions that used web or MCP tools are marked `polluted` and excluded from extraction (off by default, matching codex).
 
 ## [0.1.0] - 2026-07-02
 

@@ -52,9 +52,11 @@ READ PATH
     → reads memories/memory_summary.md, truncates to 2500 tokens (chars/4)
     → appends a byte-identical string to system[] every turn (cache-stable)
     → re-reads the file only after Phase 2 rewrites it
-  tools: memory_read, memory_search, memory_add_note
+  tools: memory_read, memory_search, memory_list, memory_add_note
   event hook: parse <memory-citation> from assistant output
-    → strip from displayed text, record usage_count / last_usage
+    → record usage_count / last_usage; citations are stripped from
+      model-facing history (messages.transform) — opencode owns the display,
+      so the strip target is inverted vs codex (see codex-map.yaml)
 
 WRITE PATH
   Phase 1 — per-session extraction (on session.idle)
