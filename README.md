@@ -49,7 +49,8 @@ anything.
 
 3. That's it. The memory workspace is created on first use.
 
-Requirements: opencode (official release) and `git` available on your `PATH`.
+Requires only opencode (official release). Git is bundled (`isomorphic-git`) —
+no `git` binary or any other external tool needed.
 
 ## Try it
 
