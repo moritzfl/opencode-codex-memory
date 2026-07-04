@@ -150,4 +150,6 @@ If you want to understand the design, the trade-offs, or contribute, see
 
 ## License
 
-MIT. Port of the codex memory architecture; not affiliated with the codex project.
+Apache 2.0 — the same license as [OpenAI Codex](https://github.com/openai/codex),
+whose memory system this project ports. See [`LICENSE`](./LICENSE) and
+[`NOTICE`](./NOTICE). Not affiliated with the codex project.

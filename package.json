@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "keywords": ["opencode", "memory", "plugin", "ai", "persistent-context"],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@opencode-ai/plugin": "latest",
     "diff": "^9.0.0",

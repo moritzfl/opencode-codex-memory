@@ -1,0 +1,9 @@
+opencode-memex
+Copyright 2026 Moritz Flöter
+
+This project is a TypeScript port of the memory system from
+OpenAI Codex (https://github.com/openai/codex), licensed under the
+Apache License 2.0. Copyright 2025 OpenAI.
+
+The prompt templates under src/templates/ are adapted from Codex's
+memory templates. Per-file provenance is tracked in codex-map.yaml.
