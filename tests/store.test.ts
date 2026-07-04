@@ -3,18 +3,18 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 
-const TEST_ROOT = path.join(os.tmpdir(), `opencode-memex-store-${process.pid}-${Date.now()}`)
+const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-store-${process.pid}-${Date.now()}`)
 
 beforeEach(() => {
   fs.mkdirSync(TEST_ROOT, { recursive: true })
-  process.env.OPENCODE_MEMEX_TEST_ROOT = TEST_ROOT
+  process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
   const { resetDbForTest } = require("../src/db.js")
   resetDbForTest()
 })
 afterEach(() => {
   const { resetDbForTest } = require("../src/db.js")
   resetDbForTest()
-  delete process.env.OPENCODE_MEMEX_TEST_ROOT
+  delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
   } catch {

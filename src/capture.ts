@@ -26,11 +26,11 @@ export function listRecentSessions(limit: number = SCAN_LIMIT): SessionRow[] {
   if (!db) return []
   try {
     // Top-level sessions only: task-tool children are summarized into their
-    // parent, and memex's own sub-sessions must never be memorized.
+    // parent, and the plugin's own sub-sessions must never be memorized.
     return db
       .prepare(
         `SELECT id, time_updated AS updated_at, directory FROM session
-         WHERE parent_id IS NULL AND title NOT LIKE 'memex-%'
+         WHERE parent_id IS NULL AND title NOT LIKE 'codex-memory-%'
          ORDER BY time_updated DESC LIMIT ?`,
       )
       .all(limit) as SessionRow[]

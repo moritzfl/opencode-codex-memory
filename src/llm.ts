@@ -19,11 +19,11 @@ export function getPluginInput(): PluginInput | null {
 }
 
 // Sessions this plugin spawned for extraction/consolidation. The main
-// hooks skip these so memex never injects memory into (or memorizes) its
+// hooks skip these so the plugin never injects memory into (or memorizes) its
 // own sub-agents.
 const activeSubSessions = new Set<string>()
 
-export function isMemexSubSession(sessionId: string): boolean {
+export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
 }
 
@@ -31,7 +31,7 @@ async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
   const res = await input.client.session.create({
-    body: { title: title ?? `memex-${agent}` },
+    body: { title: title ?? `codex-memory-${agent}` },
   })
   if (!res.data) throw new Error(`session create failed: ${JSON.stringify(res.error ?? {})}`)
   const body = res.data as { id?: string }
@@ -133,7 +133,7 @@ export interface ExtractOptions {
 /** Returns null when the extractor reported a no-op (nothing worth remembering). */
 export async function extractViaSubagent(sessionId: string, transcript: string, opts: ExtractOptions = {}): Promise<ExtractionResult | null> {
   const agent = "memorize-extract"
-  const subId = await createSession(agent, `memex-extract-${sessionId}`)
+  const subId = await createSession(agent, `codex-memory-extract-${sessionId}`)
   try {
     const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript)
     // extract_model option > opencode small_model > session default.
@@ -156,7 +156,7 @@ const CONSOLIDATION_TIMEOUT_MS = 3600_000
 
 export async function consolidateViaSubagent(memoryRoot: string, diffFileName: string, model?: string): Promise<void> {
   const agent = "memorize"
-  const subId = await createSession(agent, "memex-consolidate")
+  const subId = await createSession(agent, "codex-memory-consolidate")
   try {
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
     // consolidation_model option > opencode model (main) > session default.
@@ -176,7 +176,7 @@ export async function cleanupOldSubSessions(maxAgeMinutes = 30): Promise<void> {
     const list = res.data as Array<{ id: string; title?: string; time?: { created?: number } }>
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     for (const s of list) {
-      if (s.title && s.title.startsWith("memex-")) {
+      if (s.title && s.title.startsWith("codex-memory-")) {
         const created = s.time?.created ?? 0
         if (created && created < cutoff) {
           await deleteSession(s.id)

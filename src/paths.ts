@@ -4,7 +4,7 @@ import os from "os"
 const MEMORY_DIR_NAME = "memories"
 const MEMORY_DB_NAME = "memory.db"
 
-const OVERRIDE_ENV = "OPENCODE_MEMEX_TEST_ROOT"
+const OVERRIDE_ENV = "OPENCODE_CODEX_MEMORY_TEST_ROOT"
 
 function dataRoot(): string {
   const override = process.env[OVERRIDE_ENV]

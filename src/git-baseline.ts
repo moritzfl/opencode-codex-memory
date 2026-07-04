@@ -64,7 +64,7 @@ async function hasHeadCommit(dir: string): Promise<boolean> {
 
 async function commitBaseline(dir: string): Promise<string> {
   await stageAll(dir)
-  return isogit.commit({ fs, dir, message: "memex baseline", author: AUTHOR })
+  return isogit.commit({ fs, dir, message: "memory baseline", author: AUTHOR })
 }
 
 /**

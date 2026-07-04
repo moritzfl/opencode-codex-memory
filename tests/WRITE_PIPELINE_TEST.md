@@ -104,7 +104,7 @@ This guarantees the `session.idle` event is emitted and Phase 1 is triggered in 
 Watch the logs (opencode usually prints them to stderr/stdout) for:
 
 ```
-[opencode-memex] phase1 ...
+[opencode-codex-memory] phase1 ...
 ```
 
 If nothing appears after 30–60 seconds, the current session may have been marked `polluted` or `disabled`. Check with:
@@ -153,7 +153,7 @@ Then send any message in the project directory to trigger the next `session.idle
 Watch the logs for:
 
 ```
-[opencode-memex] phase2 ...
+[opencode-codex-memory] phase2 ...
 ```
 
 ## Step 6 — Verify Phase 2 artifacts
@@ -253,7 +253,7 @@ These are the only known sources of non-determinism when running the write-pipel
 
 When following this document:
 - Be patient with timing.
-- Capture the exact log lines containing `[opencode-memex]`.
+- Capture the exact log lines containing `[opencode-codex-memory]`.
 - If a step fails, note the exact error and the current state of `memory.db` and the `memories/` directory.
 - Prefer short, focused sessions (5–15 turns) so transcripts stay readable.
 

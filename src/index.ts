@@ -5,7 +5,7 @@ import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
-import { setPluginInput, cleanupOldSubSessions, isMemexSubSession } from "./llm.js"
+import { setPluginInput, cleanupOldSubSessions, isMemorySubSession } from "./llm.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
 let store: MemoryStore | null = null
@@ -156,7 +156,7 @@ function buildHooks() {
   ): Promise<void> {
     try {
       if (!pluginOptions.use_memories) return
-      if (input.sessionID && isMemexSubSession(input.sessionID)) return
+      if (input.sessionID && isMemorySubSession(input.sessionID)) return
       ensureMemoryLayout()
       const memoryPrompt = buildMemorySystemPrompt()
       if (memoryPrompt) {
@@ -195,7 +195,7 @@ function buildHooks() {
       if (ev.type === "message.part.updated") {
         const part = (ev.properties as { part?: { id?: string; type: string; text?: string; sessionID?: string } }).part
         if (!part || part.type !== "text" || typeof part.text !== "string") return
-        if (part.sessionID && isMemexSubSession(part.sessionID)) return
+        if (part.sessionID && isMemorySubSession(part.sessionID)) return
         if (!part.text.includes("<memory-citation>")) return
         let ids: string[] = []
         try {
@@ -250,7 +250,7 @@ function buildHooks() {
       if (ev.type === "session.idle") {
         const props = ev.properties as { sessionID?: string }
         const sid = props?.sessionID
-        if (!sid || isMemexSubSession(sid)) return
+        if (!sid || isMemorySubSession(sid)) return
         // codex stamps memory_mode at thread creation from generate_memories:
         // sessions seen while generation is off stay excluded permanently,
         // even if the option is re-enabled later.

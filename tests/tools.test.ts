@@ -3,12 +3,12 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 
-const TEST_ROOT = path.join(os.tmpdir(), `opencode-memex-tools-${process.pid}-${Date.now()}`)
+const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-tools-${process.pid}-${Date.now()}`)
 const CTX = { sessionID: "ses_test" } as any
 
 beforeEach(() => {
   fs.mkdirSync(TEST_ROOT, { recursive: true })
-  process.env.OPENCODE_MEMEX_TEST_ROOT = TEST_ROOT
+  process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
   const root = path.join(TEST_ROOT, "memories")
   fs.mkdirSync(path.join(root, "rollout_summaries"), { recursive: true })
   fs.mkdirSync(path.join(root, "extensions", "ad_hoc", "notes"), { recursive: true })
@@ -27,7 +27,7 @@ beforeEach(() => {
   )
 })
 afterEach(() => {
-  delete process.env.OPENCODE_MEMEX_TEST_ROOT
+  delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
   } catch {
