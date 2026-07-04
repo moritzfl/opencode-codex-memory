@@ -20,7 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Full codex config parity for plugin options, using codex's exact names and defaults so the two stay easy to compare and sync: `generate_memories`, `use_memories`, `dedicated_tools`, `disable_on_external_context`, `max_raw_memories_for_consolidation`, `max_rollouts_per_startup` are now configurable (alongside the existing `extract_model`, `consolidation_model`, `max_unused_days`, `max_rollout_age_days`, `min_rollout_idle_hours`). Defaults now match codex (`max_rollout_age_days` 10, `min_rollout_idle_hours` 6, `max_rollouts_per_startup` 2, `max_raw_memories_for_consolidation` 256). One intentional divergence: `dedicated_tools` defaults to `true` (codex: `false`) so the plugin ships its memory tools out of the box.
 - `memory_search` supports `since`/`until` for time-scoped recall over time-anchored files (rollout summaries, ad-hoc notes); with a window and no query it returns a chronological listing of that period's sessions/notes. Extends beyond codex.
+
+### Changed
+
+- **Behavior change from new defaults:** memory now waits longer before extracting a session (idle ≥6h, was ≥1h), only looks back 10 days (was 14), and processes at most 2 sessions per pass. Web/MCP sessions are no longer excluded from memory by default — set `disable_on_external_context: true` to restore that.
+- Renamed the `generate_memory` option to `generate_memories` to match codex; update your `opencode.json` if you set it.
 - **Codex memory parity pass** (breaking: reset local memory state — DB schema, summary filenames, and memory_summary schema all changed):
   - All three prompt templates replaced with full adaptations of codex's memory prompts: stage-1 extraction (minimum-signal gate, task outcome triage, preference-signal extraction, task-grouped raw_memory format), Phase 2 consolidation (MEMORY.md Task Group schema, `v1` memory_summary schema with User Profile / User preferences / General Tips / What's in Memory, skills format, diff-driven forgetting workflow), and the read path (decision boundary, budgeted quick memory pass, staleness guidance).
   - System/input prompt split for extraction (system via prompt body's `system` field); all-empty output is a supported no-op that deletes any stale stage-1 row.

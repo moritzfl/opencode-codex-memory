@@ -137,3 +137,19 @@ mappings:
     note: >
       ad-hoc notes extension instructions + retention pruning. codex keeps this
       in a dedicated extensions/ module; the port folds it into workspace.ts.
+
+  # --- Config options ---
+  - ours: src/index.ts
+    theirs: codex-rs/config/src/types.rs
+    note: >
+      Plugin options mirror codex MemoriesToml/MemoriesConfig 1:1 by NAME so
+      syncing stays trivial. Supported: generate_memories, use_memories,
+      dedicated_tools, disable_on_external_context, max_raw_memories_for_consolidation,
+      max_unused_days, max_rollout_age_days, max_rollouts_per_startup,
+      min_rollout_idle_hours, extract_model, consolidation_model. Defaults match
+      codex (max_rollout_age_days=10, min_rollout_idle_hours=6,
+      max_rollouts_per_startup=2, max_raw_memories_for_consolidation=256).
+      DIVERGENCES: (1) dedicated_tools defaults to true here (codex: false) so the
+      standalone plugin ships its memory tools out of the box; (2) codex's
+      min_rate_limit_remaining_percent is not implemented — see src/ratelimit.ts
+      stub.

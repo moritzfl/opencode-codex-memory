@@ -8,13 +8,16 @@ import { checkRateLimit } from "./ratelimit.js"
 export interface Phase1Options {
   maxAgeDays: number
   minIdleHours: number
+  // Max rollouts claimed per pass (codex max_rollouts_per_startup / max_claimed).
+  maxClaimed?: number
   excludeSession?: string
   extractModel?: string
 }
 
 export const DEFAULT_PHASE1_OPTIONS: Phase1Options = {
-  maxAgeDays: 14,
-  minIdleHours: 1,
+  maxAgeDays: 10,
+  minIdleHours: 6,
+  maxClaimed: 2,
 }
 
 const TRANSCRIPT_MAX_CHARS = 200_000
@@ -31,7 +34,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
   }
   const eligible = selectEligibleSessions(store, opts)
   if (eligible.length === 0) return
-  const claimed = store.claimStage1Jobs(eligible, opts.excludeSession)
+  const claimed = store.claimStage1Jobs(eligible, opts.excludeSession, opts.maxClaimed)
   if (claimed.length === 0) return
   const sessionById = new Map(eligible.map((s) => [s.id, s]))
 

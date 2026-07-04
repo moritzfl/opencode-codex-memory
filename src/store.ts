@@ -103,14 +103,17 @@ export class MemoryStore {
     for (const id of sessionIds) stmt.run(ts, id)
   }
 
-  claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string): string[] {
+  claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string, maxClaimed?: number): string[] {
     const workerId = newId()
     const ownershipToken = newId()
     const lease = nowSec() + STAGE1_LEASE_SECONDS
+    // Cap per-pass claims at codex's max_rollouts_per_startup (max_claimed) when
+    // provided, never exceeding the hard concurrency ceiling.
+    const claimCap = Math.max(1, Math.min(maxClaimed ?? STAGE1_CONCURRENCY, STAGE1_CONCURRENCY))
     const claimed: string[] = []
     for (const s of sessions) {
       if (s.id === excludeSession) continue
-      if (claimed.length >= STAGE1_CONCURRENCY) break
+      if (claimed.length >= claimCap) break
       const activeRow = this.db
         .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' AND status='running' AND (lease_until IS NULL OR lease_until > ?)")
         .get(nowSec()) as { c: number }

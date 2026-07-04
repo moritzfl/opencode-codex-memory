@@ -11,18 +11,31 @@ import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 let store: MemoryStore | null = null
 let phase1InFlight = false
 
+// Option names and defaults mirror codex's MemoriesToml/MemoriesConfig
+// (codex-rs/config/src/types.rs). Keep them 1:1 so the drift script and manual
+// syncing stay trivial; do not rename for taste.
 let pluginOptions: {
-  generate_memory: boolean
+  generate_memories: boolean
+  use_memories: boolean
+  dedicated_tools: boolean
+  disable_on_external_context: boolean
   extract_model?: string
   consolidation_model?: string
+  max_raw_memories_for_consolidation: number
   max_unused_days: number
   max_rollout_age_days: number
+  max_rollouts_per_startup: number
   min_rollout_idle_hours: number
 } = {
-  generate_memory: true,
+  generate_memories: true,
+  use_memories: true,
+  dedicated_tools: true,
+  disable_on_external_context: false,
+  max_raw_memories_for_consolidation: 256,
   max_unused_days: 30,
-  max_rollout_age_days: 14,
-  min_rollout_idle_hours: 1,
+  max_rollout_age_days: 10,
+  max_rollouts_per_startup: 2,
+  min_rollout_idle_hours: 6,
 }
 
 function getStore(): MemoryStore {
@@ -56,24 +69,31 @@ export default {
   async server(input: PluginInput, opts?: PluginOptions) {
     setPluginInput(input)
     if (opts) {
-      if (typeof opts.generate_memory === "boolean") pluginOptions.generate_memory = opts.generate_memory
+      if (typeof opts.generate_memories === "boolean") pluginOptions.generate_memories = opts.generate_memories
+      if (typeof opts.use_memories === "boolean") pluginOptions.use_memories = opts.use_memories
+      if (typeof opts.dedicated_tools === "boolean") pluginOptions.dedicated_tools = opts.dedicated_tools
+      if (typeof opts.disable_on_external_context === "boolean") pluginOptions.disable_on_external_context = opts.disable_on_external_context
       if (typeof opts.extract_model === "string") pluginOptions.extract_model = opts.extract_model
       if (typeof opts.consolidation_model === "string") pluginOptions.consolidation_model = opts.consolidation_model
+      if (typeof opts.max_raw_memories_for_consolidation === "number") pluginOptions.max_raw_memories_for_consolidation = opts.max_raw_memories_for_consolidation
       if (typeof opts.max_unused_days === "number") pluginOptions.max_unused_days = opts.max_unused_days
       if (typeof opts.max_rollout_age_days === "number") pluginOptions.max_rollout_age_days = opts.max_rollout_age_days
+      if (typeof opts.max_rollouts_per_startup === "number") pluginOptions.max_rollouts_per_startup = opts.max_rollouts_per_startup
       if (typeof opts.min_rollout_idle_hours === "number") pluginOptions.min_rollout_idle_hours = opts.min_rollout_idle_hours
     }
     void cleanupOldSubSessions().catch(() => {})
-    return hooks
+    return buildHooks()
   },
 }
 
-const hooks = {
+function buildHooks() {
+  const base = {
   async "experimental.chat.system.transform"(
     input: { sessionID?: string; model: unknown },
     output: { system: string[] },
   ): Promise<void> {
     try {
+      if (!pluginOptions.use_memories) return
       if (input.sessionID && isMemexSubSession(input.sessionID)) return
       ensureMemoryLayout()
       const memoryPrompt = buildMemorySystemPrompt()
@@ -133,6 +153,9 @@ const hooks = {
       }
 
       if (ev.type === "tool.execute.after") {
+        // Mirrors codex: external context (web/mcp) only pollutes the session's
+        // memory when disable_on_external_context is enabled. Off by default.
+        if (!pluginOptions.disable_on_external_context) return
         const props = ev.properties as { tool?: string; sessionID?: string }
         const toolName = props?.tool ?? ""
         if ((toolName === "websearch" || toolName === "webfetch") && props.sessionID) {
@@ -160,24 +183,37 @@ const hooks = {
   async dispose(): Promise<void> {
     invalidateCache()
   },
+  }
 
-  tool: {
-    memory_read,
-    memory_search,
-    memory_add_note,
-    memory_reset,
-    memory_inspect,
-    memory_mode,
-  },
+  // Control tools (reset/inspect/mode) are always available. The memory
+  // read/search/add-note tools are gated by dedicated_tools, mirroring codex's
+  // MemoriesExtension.tools() (codex-rs/ext/memories/src/tests.rs).
+  const tool = pluginOptions.dedicated_tools
+    ? {
+        memory_read,
+        memory_search,
+        memory_add_note,
+        memory_reset,
+        memory_inspect,
+        memory_mode,
+      }
+    : {
+        memory_reset,
+        memory_inspect,
+        memory_mode,
+      }
+
+  return { ...base, tool }
 }
 
 async function triggerPhase1(currentSessionId: string): Promise<void> {
-  if (phase1InFlight || !pluginOptions.generate_memory) return
+  if (phase1InFlight || !pluginOptions.generate_memories) return
   phase1InFlight = true
   try {
     await runPhase1(getStore(), {
       maxAgeDays: pluginOptions.max_rollout_age_days,
       minIdleHours: pluginOptions.min_rollout_idle_hours,
+      maxClaimed: pluginOptions.max_rollouts_per_startup,
       excludeSession: currentSessionId,
       extractModel: pluginOptions.extract_model,
     })
@@ -193,7 +229,7 @@ async function triggerPhase2(): Promise<void> {
   try {
     // runPhase2 has its own in-flight guard
     await runPhase2(getStore(), {
-      maxRaw: 50,
+      maxRaw: pluginOptions.max_raw_memories_for_consolidation,
       maxUnusedDays: pluginOptions.max_unused_days,
       extensionRetentionDays: 7,
       consolidationModel: pluginOptions.consolidation_model,

@@ -41,6 +41,22 @@ describe("MemoryStore stage1", () => {
     expect(claimed.length).toBe(STAGE1_CONCURRENCY)
   })
 
+  it("respects maxClaimed (codex max_rollouts_per_startup) below the concurrency ceiling", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const many = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
+    const claimed = store.claimStage1Jobs(many, undefined, 2)
+    expect(claimed.length).toBe(2)
+  })
+
+  it("clamps maxClaimed to the concurrency ceiling", () => {
+    const { MemoryStore, STAGE1_CONCURRENCY } = require("../src/store.js")
+    const store = new MemoryStore()
+    const many = Array.from({ length: STAGE1_CONCURRENCY + 5 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
+    const claimed = store.claimStage1Jobs(many, undefined, 999)
+    expect(claimed.length).toBe(STAGE1_CONCURRENCY)
+  })
+
   it("reclaims a running job once its lease expires", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")
