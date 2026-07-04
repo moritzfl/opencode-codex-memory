@@ -162,7 +162,9 @@ extraction path.)
 opencode-memex is a faithful port of the memory system from OpenAI's codex.
 If you want to understand the design, the trade-offs, or contribute, see
 [`ARCHITECTURE.md`](./ARCHITECTURE.md). Contributor guidance lives in
-[`AGENTS.md`](./AGENTS.md).
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md) —
+in short: this repo exists to port codex's memory system to opencode, and
+PRs that break that parity will be rejected.
 
 ## License
 
