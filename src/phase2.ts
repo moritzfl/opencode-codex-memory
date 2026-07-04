@@ -70,8 +70,14 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         clearInterval(heartbeat)
       }
 
-      if (heartbeatLost) {
-        store.markPhase2Failed(claim.ownershipToken, "heartbeat lost")
+      // Final synchronous ownership confirmation before the destructive
+      // baseline reset (codex phase2.rs does the same): the periodic flag can
+      // be up to 90s stale, and a stale worker resetting the baseline would
+      // swallow the diff a re-claiming worker is about to consume. The
+      // heartbeat is token+status guarded, so it fails once ownership is lost;
+      // markPhase2Failed is equally guarded and becomes a no-op then.
+      if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
+        store.markPhase2Failed(claim.ownershipToken, "ownership lost")
         return { status: "heartbeat_lost" }
       }
 
