@@ -1,99 +1,143 @@
 # opencode-memex
 
-Persistent memory plugin for opencode — ports codex's closed-loop memory system (extraction → consolidation → injection → citation feedback).
+Persistent memory for [opencode](https://opencode.ai). Your agent remembers what
+it learned in past sessions — your conventions, your projects, the decisions you
+made — and brings that context into new conversations automatically.
 
-No core changes, no MCP server, no separate process. Install via your `opencode.json`.
+It's a single plugin. No core changes, no MCP server, no separate process, no
+cloud service. Everything stays on your machine under
+`~/.local/share/opencode/`.
+
+## Why
+
+By default every opencode session starts from zero. You re-explain your build
+commands, your code style, and the quirks of each repo over and over.
+
+opencode-memex closes that loop:
+
+- **It learns in the background.** After a session goes idle, the plugin reviews
+  the transcript and extracts durable facts — preferences, project structure,
+  what worked and what didn't.
+- **It consolidates.** Periodically it merges those notes into a compact,
+  searchable memory, pruning what's stale.
+- **It remembers at the right time.** A short summary is injected into the system
+  prompt, and the agent can search the full memory on demand when a task looks
+  related to past work.
+- **It self-corrects.** When the agent actually uses a memory it cites the source,
+  so useful memories rank higher over time and unused ones fade.
+
+The result: opencode gets more useful the more you use it, without you managing
+anything.
 
 ## Install
 
-1. Add the plugin to your `opencode.json`:
+1. Add the plugin to your `~/.config/opencode/opencode.json`:
 
-```json
-{
-  "plugins": ["opencode-memex"]
-}
-```
+   ```json
+   {
+     "plugins": ["opencode-memex"]
+   }
+   ```
 
-2. The plugin ships its own `opencode.json` with two sub-agents (`memorize`, `memorize-extract`). Merge or copy the agent definitions if your config manager does not auto-merge.
+   (While developing locally, point it at an absolute path to your checkout
+   instead of the package name.)
 
-3. Ensure the memory workspace exists (plugin creates it on first use):
+2. The plugin ships two restricted sub-agents (`memorize`, `memorize-extract`)
+   that do the background learning. If your config manager does not auto-merge
+   plugin configs, copy the `agent` block from the plugin's `opencode.json` into
+   your own config — opencode needs those definitions to run the memory pipeline.
 
-```
-~/.local/share/opencode/memories/
-```
+3. That's it. The memory workspace is created on first use.
 
-## What it does
+Requirements: opencode (official release) and `git` available on your `PATH`.
 
-- **Read path (Stage 0):** Reads `memories/memory_summary.md` (≤2500 tokens) and appends it to every system prompt via `experimental.chat.system.transform`. Byte-identical across turns → provider cache stable.
+## Try it
 
-- **Tools (Stage 1):** `memory_read`, `memory_search`, `memory_add_note` — model can actively read/search/write notes.
+Just use opencode normally. After a session goes idle, the plugin reviews it in
+the background and starts building memory — you don't have to do anything. Come
+back for a later session and ask something like *"what do you know about how I
+work?"* or *"what was I doing in this repo?"* and the agent draws on what it
+learned. The more you use it, the more it knows.
 
-- **Citations:** Model outputs `<memory-citation><citation_entries>session-id,…</citation_entries></memory-citation>`. The plugin strips it from displayed output and records usage counts.
+You can also steer it in plain language, mid-conversation:
 
-- **Write path (Stage 2–3):** On session idle, Phase 1 extracts past transcripts via the `memorize-extract` subagent and stores `raw_memory` + `rollout_summary` in the plugin's SQLite DB (`memory.db`). Phase 2 (global, 6h cooldown) consolidates via the `memorize` subagent and updates `MEMORY.md` / `memory_summary.md`.
+- *"remember that I deploy this project with `make release`"* → saved as a note.
+- *"what was I working on in this repo last week?"* → time-scoped recall.
+- *"reset my memory"* → wipes it and starts over.
 
-- **Reset/inspect:** `memory_reset`, `memory_inspect`, `memory_mode` tools.
-
-## Memory workspace layout
-
-```
-~/.local/share/opencode/memories/
-├── MEMORY.md                 # Searchable index (one line per session)
-├── memory_summary.md         # Compact summary injected into system prompt (≤10k chars)
-├── raw_memories.md           # Merged raw memories (regenerated each Phase 2)
-├── rollout_summaries/        # One file per extracted session
-├── skills/                   # Reusable procedures discovered across sessions
-├── extensions/ad_hoc/notes/  # User-requested notes via memory_add_note
-└── .git/                     # Internal baseline for Phase 2 diffing
-```
-
-## Config options (future)
-
-Currently no plugin options. Future:
-- `generate_memory` (default true)
-- `max_rollout_age_days`, `min_rollout_idle_hours`, `max_unused_days`
-
-## Security & sandboxing
-
-- The `memorize` and `memorize-extract` sub-agents have `bash`/`webfetch`/`websearch`/`task` denied.
-- `memory_reset` refuses to run if the memory root is a symlink (prevents accidental data loss via symlink attack).
-- Secrets are redacted before LLM calls and before storage (OpenAI/Anthropic/AWS/GitHub/Slack keys, bearer tokens, private keys, password assignments).
-
-## Rate limiting
-
-Phase 1/2 check `checkRateLimit()` before spawning extraction/consolidation. Currently a stub that always returns `ok`. Wire to opencode's rate-limit info when exposed.
-
-## Known trade-offs vs codex
-
-| Gap | Codex | This plugin | Mitigation |
-|---|---|---|---|
-| Process sandbox | Seatbelt (network disabled) | Tool-permission deny on sub-agents | `memorize`/`memorize-extract` deny network tools |
-| Token counting | tiktoken | chars/4 estimate | Sufficient for the 2500-token cap |
-| V2 SystemContext.Source | Epoch-aware injection | V1 `experimental.chat.system.transform` + byte-identical append | Content-addressed provider caches treat the string as stable |
-| LLM call API | Internal model client | HTTP API → `memorize*` subagent sessions | Reuses opencode auth/usage; zero credentials in plugin |
-| Transcript access | Direct DB | Read-only `opencode.db` or HTTP API | WAL mode safe; fallback to HTTP if schema changes |
-| Git baseline | gix (libgit2) | Shell out to `git` binary | Functionally equivalent |
-
-## Known weaknesses / TODO (Stage 5+)
-
-- ~~Rate-limit awareness is a stub (`ratelimit.ts`).~~ → Basic time-based heuristic added (30s for Phase 1, 5min for Phase 2). Still not wired to opencode's provider rate-limit info.
-- ~~No `generate_memory` / `extract_model` / retention config options yet.~~ → Plugin now accepts these options via `PluginOptions` and respects them.
-- Sub-agent sessions created for extraction/consolidation are not cleaned up on plugin crash (harmless but noisy).
-- The `experimental.chat.messages.transform` hook mutates assistant text parts in-place. If the hook contract changes, citation stripping will break. (Mitigated with a post-strip sanity check that logs a warning.)
-- ~~Git baseline uses the system `git` binary. On Windows or restricted environments this may fail silently.~~ → Replaced with `isomorphic-git` (pure JS, no external binary needed). Git is now bundled.
-- No automated end-to-end integration test (Jest/Bun test) that drives the write pipeline. A detailed manual/agentic write-pipeline test procedure exists in `tests/WRITE_PIPELINE_TEST.md`; a basic read-path harness exists in `tests/integration.ts`.
-- The plugin ID is `opencode-memex`. If you publish it, use the same name on npm. (`package.json` name already matches.)
-
-## Development
+Want to prime it before the first session has a chance to be learned? You can
+drop a starter summary in yourself — it's just a file:
 
 ```bash
-bun install
-bun test
-bun run typecheck
+mkdir -p ~/.local/share/opencode/memories
+echo 'I prefer TypeScript strict mode and 2-space indentation.' \
+  > ~/.local/share/opencode/memories/memory_summary.md
 ```
 
-Tests live in `tests/`. Store tests use a temp root via `OPENCODE_MEMEX_TEST_ROOT`.
+## Where your data lives
+
+```
+~/.local/share/opencode/
+├── memory.db                       # the plugin's own database (never touches opencode's)
+└── memories/
+    ├── memory_summary.md           # compact summary injected into the system prompt
+    ├── MEMORY.md                   # searchable index of everything learned
+    ├── rollout_summaries/          # one recap per past session
+    ├── skills/                     # reusable procedures discovered over time
+    └── extensions/ad_hoc/notes/    # things you explicitly asked it to remember
+```
+
+It's all plain files and a local SQLite database. Read them, edit them, delete
+them, or check them into a private repo — it's yours.
+
+## Privacy & safety
+
+- **Local only.** Nothing is sent anywhere except through your existing opencode
+  provider, using your existing credentials. The plugin holds no keys of its own.
+- **Secrets are redacted** (API keys, tokens, private keys, passwords) before any
+  memory is written or sent to a model.
+- **The learning agents are sandboxed** — they cannot run shell commands or reach
+  the network.
+- **Reset is safe.** `memory_reset` refuses to run if the memory folder is a
+  symlink, so it can't be tricked into deleting something else.
+- **Web/MCP sessions:** by default, sessions that used web search, fetch, or MCP
+  tools are still eligible for memory (matching codex). If you'd rather exclude
+  them so scraped or external content can't enter your memory, set
+  `disable_on_external_context: true`.
+
+## Configuration
+
+Optional plugin options (all have sensible defaults). Names and defaults match
+codex's `[memories]` config so the two stay easy to compare:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `generate_memories` | `true` | Turn the background learning pipeline on/off |
+| `use_memories` | `true` | Inject the memory summary into the system prompt |
+| `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_add_note` tools |
+| `disable_on_external_context` | `false` | Exclude sessions that used web/MCP tools from memory |
+| `extract_model` | current model | Model used for per-session extraction |
+| `consolidation_model` | current model | Model used for consolidation |
+| `max_raw_memories_for_consolidation` | `256` | How many raw memories feed each consolidation pass |
+| `max_rollout_age_days` | `10` | Ignore sessions older than this for extraction |
+| `min_rollout_idle_hours` | `6` | How long a session must be idle before it's eligible |
+| `max_rollouts_per_startup` | `2` | Max sessions extracted per pass |
+| `max_unused_days` | `30` | Prune memories unused for this long |
+
+Set them in the plugin entry of your `opencode.json` (see opencode's plugin
+options docs).
+
+> Note: `dedicated_tools` defaults to `true` here (codex defaults it to `false`).
+> This is the one intentional default difference — the tools are a core part of a
+> standalone memory plugin. Everything else matches codex's defaults.
+
+## Under the hood
+
+opencode-memex is a faithful port of the memory system from OpenAI's codex.
+If you want to understand the design, the trade-offs, or contribute, see
+[`ARCHITECTURE.md`](./ARCHITECTURE.md). Contributor guidance lives in
+[`AGENTS.md`](./AGENTS.md).
 
 ## License
 
-MIT. Port of codex memory architecture; not affiliated with the codex project.
+MIT. Port of the codex memory architecture; not affiliated with the codex project.
