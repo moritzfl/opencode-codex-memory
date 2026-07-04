@@ -7,7 +7,23 @@ It is intentionally **not** a `bun test` because it requires real user-like sess
 ## Prerequisites
 
 - Official opencode 1.17+ installed and in PATH
-- This plugin configured in `~/.config/opencode/opencode.json` (path or package name)
+- This plugin configured in `~/.config/opencode/opencode.json` (path or package
+  name). The `memorize`/`memorize-extract` sub-agents register themselves — no
+  `agent` block is needed.
+- **Test-friendly plugin options.** The production defaults make the pipeline
+  too patient for a same-day test: sessions only become eligible for
+  extraction after 6 h idle, and at most 2 are extracted per pass. Configure:
+
+  ```json
+  {
+    "plugin": [
+      ["opencode-codex-memory", { "min_rollout_idle_hours": 1, "max_rollouts_per_startup": 8 }]
+    ]
+  }
+  ```
+
+  1 h is the clamp floor for `min_rollout_idle_hours` — Step 3 explains how to
+  backdate sessions instead of waiting.
 - Fresh `~/.local/share/opencode/memories/` (recommended: back it up first)
 - SQLite CLI (`sqlite3`) available for verification
 
@@ -15,13 +31,17 @@ No `git` binary is needed — git is bundled via `isomorphic-git`.
 
 ## Step 0 — Prepare clean state
 
+Quit all running opencode instances first (TUI, web panels, IDE integrations) —
+the plugin keeps an open handle on `memory.db`, and a live instance would keep
+writing to the deleted file.
+
 ```bash
 # Optional: back up existing memory
 cp -r ~/.local/share/opencode/memories ~/.local/share/opencode/memories.bak
 
-# Wipe for a clean test
+# Wipe for a clean test (include WAL/SHM sidecars or old state can resurrect)
 rm -rf ~/.local/share/opencode/memories
-rm -f ~/.local/share/opencode/memory.db
+rm -f ~/.local/share/opencode/memory.db ~/.local/share/opencode/memory.db-wal ~/.local/share/opencode/memory.db-shm
 ```
 
 Create the initial summary (Stage 0 baseline):
@@ -88,32 +108,54 @@ After each session, wait ~10–20 seconds so `updated_at` is distinct.
 
 ## Step 3 — Trigger Phase 1 extraction
 
-The plugin listens for the `session.idle` event. In practice this fires when:
+Two separate conditions must hold, and the doc-follower must arrange both:
 
-- The session has been idle for a short period (usually < 30s), **or**
-- You send any follow-up message in the same working directory.
+1. **A `session.idle` event fires.** opencode emits it whenever a session
+   finishes processing a message, so any trivial run triggers a pass:
 
-**Recommended action:** After finishing a work session, immediately run one trivial follow-up command in the same directory:
+   ```bash
+   opencode run "ok"
+   ```
 
-```bash
-opencode run "ok"
-```
+   (The triggering session itself is excluded from that pass.)
 
-This guarantees the `session.idle` event is emitted and Phase 1 is triggered in the background.
+2. **The work sessions are eligible.** A session is only claimed when it has
+   been idle for `min_rollout_idle_hours` (≥1 h even in test config). Either
+   wait an hour after Step 2, or backdate the sessions — with **all opencode
+   instances stopped**:
 
-Watch the logs (opencode usually prints them to stderr/stdout) for:
+   ```bash
+   sqlite3 ~/.local/share/opencode/opencode.db "
+     UPDATE session SET time_updated = time_updated - 2*3600*1000
+     WHERE parent_id IS NULL AND title NOT LIKE 'codex-memory-%';
+   "
+   ```
 
-```
-[opencode-codex-memory] phase1 ...
-```
+   Then start opencode again and send the trivial run above.
 
-If nothing appears after 30–60 seconds, the current session may have been marked `polluted` or `disabled`. Check with:
+Successful extraction is **silent** — `[opencode-codex-memory]` log lines
+appear only on errors or rate-limit skips, and they go to the server log
+(`~/.local/share/opencode/log/opencode.log`), not the terminal. Verify via the
+job table instead:
 
 ```bash
 sqlite3 ~/.local/share/opencode/memory.db "
-  SELECT session_id, memory_mode, polluted FROM memory_session_meta;
+  SELECT job_key, status, last_error FROM memory_jobs WHERE kind='memory_stage1';
 "
 ```
+
+Notes:
+
+- Consecutive passes are rate-limited to one per 30 s in-process; if you
+  trigger repeatedly, space the trivial runs out.
+- If a session never gets claimed, check whether it was marked `polluted` or
+  `disabled`:
+
+  ```bash
+  sqlite3 ~/.local/share/opencode/memory.db "
+    SELECT session_id, memory_mode, polluted FROM memory_session_meta;
+  "
+  ```
 
 ## Step 4 — Verify Phase 1 outputs
 
@@ -127,7 +169,9 @@ sqlite3 ~/.local/share/opencode/memory.db "
 ```
 
 **Expected:**
-- At least 3 rows with non-empty `raw_memory`
+- At least 3 rows with non-empty `raw_memory` (with the default
+  `max_rollouts_per_startup` of 2 this takes multiple passes — the test config
+  from the prerequisites raises it to 8 so one pass covers all sessions)
 - The polluted session (weather) should **not** appear
 - `usage_count` starts at 0
 
@@ -150,11 +194,20 @@ sqlite3 ~/.local/share/opencode/memory.db "
 
 Then send any message in the project directory to trigger the next `session.idle` → Phase 1 → Phase 2 chain.
 
-Watch the logs for:
+Like Phase 1, a successful run is silent (only errors are logged, to
+`~/.local/share/opencode/log/opencode.log`). Confirm completion via the job
+row — `status` flips to `running` while the consolidation sub-agent works
+(it can take a few minutes) and lands on `done`:
 
+```bash
+sqlite3 ~/.local/share/opencode/memory.db "
+  SELECT status, last_error, finished_at FROM memory_jobs
+  WHERE kind = 'memory_consolidate_global';
+"
 ```
-[opencode-codex-memory] phase2 ...
-```
+
+Note: consecutive Phase 2 attempts are also rate-limited to one per 5 min
+in-process.
 
 ## Step 6 — Verify Phase 2 artifacts
 
@@ -244,8 +297,10 @@ The test passes if:
 
 | Flaky point | Why it happens | Mitigation in this document |
 |-------------|----------------|-----------------------------|
-| Timing of `session.idle` | The event only fires after the session has been idle for a short period. | Explicitly recommend sending `opencode run "ok"` immediately after each work session. |
-| 6h Phase 2 cooldown | The singleton global job has a hard 6-hour success cooldown (and a 1h retry backoff after failures). | Provide the exact `DELETE` statement to clear the job row so the next idle event will run Phase 2. |
+| Session eligibility window | Sessions must be idle ≥ `min_rollout_idle_hours` (floor 1 h) before extraction claims them. | Test config sets it to 1 h; Step 3 shows how to backdate `time_updated` instead of waiting. |
+| Per-pass extraction cap | At most `max_rollouts_per_startup` sessions per pass, plus a 30 s in-process rate gate between passes. | Test config raises the cap to 8; otherwise trigger multiple spaced passes. |
+| 6h Phase 2 cooldown | The singleton global job has a hard 6-hour success cooldown (a 1 h retry backoff after failures, and a 5 min in-process gate). | Provide the exact `DELETE` statement to clear the job row so the next idle event will run Phase 2. |
+| Failed stage-1 jobs back off | A failed extraction retries after 1 h (3 attempts), so re-triggering immediately does nothing for that session. | Check `last_error` in `memory_jobs`; clear the row to retry immediately. |
 
 These are the only known sources of non-determinism when running the write-pipeline test manually. All other steps are deterministic once the prerequisites are met (git is bundled, so no external binary can be missing).
 
