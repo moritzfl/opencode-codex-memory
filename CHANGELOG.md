@@ -65,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `memory_list` tool (port of codex `memories/list`): sorted directory listings with entry types; hidden files and symlinks are skipped.
 - `memory_read` supports `line_offset`/`max_lines` with start-line reporting, so `file:line` citations work on large files.
 - Numeric plugin options are clamped to codex's valid ranges; unknown option keys log a warning; `use_memories: false` now also hides the memory tools (codex extension gating).
+- Default model selection mirrors codex's split via opencode's own config: unset `extract_model` uses opencode's `small_model` (codex: `gpt-5.4-mini`), unset `consolidation_model` uses opencode's main `model` (codex: `gpt-5.4`); both fall back to the session default when not configured.
 
 ### Changed
 

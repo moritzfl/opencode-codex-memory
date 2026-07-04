@@ -47,6 +47,31 @@ interface PromptOptions {
   model?: string
 }
 
+/**
+ * opencode's config carries the same split codex expresses with provider
+ * model preferences: `small_model` for cheap background work (codex:
+ * memory_extraction_preferred_model = gpt-5.4-mini) and `model` for capable
+ * work (codex: memory_consolidation_preferred_model = gpt-5.4). Cached per
+ * plugin instance — opencode reloads plugins on config change.
+ */
+let configModels: { model?: string; smallModel?: string } | null = null
+
+async function getConfigModels(): Promise<{ model?: string; smallModel?: string }> {
+  if (configModels) return configModels
+  const input = getPluginInput()
+  if (!input) return {}
+  try {
+    const res = await input.client.config.get()
+    const cfg = (res as { data?: { model?: string; small_model?: string } })?.data
+    configModels = { model: cfg?.model, smallModel: cfg?.small_model }
+  } catch {
+    // Config endpoint unavailable: leave models unset so the sub-agent runs
+    // on the session default, the previous behavior.
+    configModels = {}
+  }
+  return configModels
+}
+
 // extract_model / consolidation model strings are "providerID/modelID".
 function parseModelRef(ref: string): { providerID: string; modelID: string } | null {
   const slash = ref.indexOf("/")
@@ -111,10 +136,12 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
   const subId = await createSession(agent, `memex-extract-${sessionId}`)
   try {
     const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript)
+    // extract_model option > opencode small_model > session default.
+    const model = opts.model ?? (await getConfigModels()).smallModel
     const raw = await promptSession(subId, prompt, agent, {
       timeoutMs: 180_000,
       system: readTemplate("stage_one_system.md"),
-      model: opts.model,
+      model,
     })
     return parseExtraction(raw)
   } finally {
@@ -132,7 +159,9 @@ export async function consolidateViaSubagent(memoryRoot: string, diffFileName: s
   const subId = await createSession(agent, "memex-consolidate")
   try {
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
-    await promptSession(subId, prompt, agent, { model, timeoutMs: CONSOLIDATION_TIMEOUT_MS })
+    // consolidation_model option > opencode model (main) > session default.
+    const resolved = model ?? (await getConfigModels()).model
+    await promptSession(subId, prompt, agent, { model: resolved, timeoutMs: CONSOLIDATION_TIMEOUT_MS })
   } finally {
     void deleteSession(subId).catch(() => {})
   }

@@ -120,8 +120,8 @@ codex's `[memories]` config so the two stay easy to compare:
 | `use_memories` | `true` | Inject the memory summary into the system prompt |
 | `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_list`/`memory_add_note` tools |
 | `disable_on_external_context` | `false` | Exclude sessions that used web/MCP tools from memory |
-| `extract_model` | current model | Model used for per-session extraction |
-| `consolidation_model` | current model | Model used for consolidation |
+| `extract_model` | opencode `small_model`, else current model | Model used for per-session extraction |
+| `consolidation_model` | opencode `model`, else current model | Model used for consolidation |
 | `max_raw_memories_for_consolidation` | `256` | How many raw memories feed each consolidation pass |
 | `max_rollout_age_days` | `10` | Ignore sessions older than this for extraction |
 | `min_rollout_idle_hours` | `6` | How long a session must be idle before it's eligible |
@@ -143,6 +143,15 @@ See the [opencode plugin docs](https://opencode.ai/docs/plugins/) for details.
 Numeric options are clamped to codex's valid ranges; unknown option keys are
 ignored with a warning. Setting `use_memories: false` also hides the memory
 tools, matching codex's extension gating.
+
+Model selection mirrors codex's cheap-extraction / capable-consolidation
+split using opencode's own concepts: when `extract_model` is unset, the
+`small_model` from your `opencode.json` is used (codex uses `gpt-5.4-mini`);
+when `consolidation_model` is unset, your main `model` is used (codex uses
+`gpt-5.4`). If neither is configured, both fall back to the session's default
+model. (opencode's *automatic* small-model pick is internal to opencode and
+not exposed to plugins — set `small_model` explicitly to get the cheap
+extraction path.)
 
 > Note: `dedicated_tools` defaults to `true` here (codex defaults it to `false`).
 > This is the one intentional default difference — the tools are a core part of a

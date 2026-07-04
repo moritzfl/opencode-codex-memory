@@ -204,8 +204,10 @@ mappings:
       DIVERGENCES: (1) dedicated_tools defaults to true here (codex: false) so the
       standalone plugin ships its memory tools out of the box; (2) codex's
       min_rate_limit_remaining_percent is not implemented — see src/ratelimit.ts
-      stub; (3) unset extract_model/consolidation_model fall back to the host's
-      current/default model, not codex's pinned provider models
-      (gpt-5.4-mini/gpt-5.4) — opencode has no equivalent provider preference;
+      stub; (3) unset extract_model/consolidation_model fall back to opencode's
+      configured small_model/model respectively (mirroring codex's
+      gpt-5.4-mini/gpt-5.4 cheap-vs-capable split), then to the session default
+      — opencode's automatic small-model pick (provider.getSmallModel) is not
+      exposed to plugins, only the explicit config keys are;
       (4) the legacy alias no_memories_if_mcp_or_web_search is not accepted
       (fresh plugin, no legacy configs).
