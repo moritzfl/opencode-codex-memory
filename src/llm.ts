@@ -122,12 +122,17 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
   }
 }
 
+// codex runs the consolidation agent under a 1h job lease with heartbeats;
+// its INIT pass is explicitly allowed to run long ("do not be lazy"). A short
+// timeout here would fail the job after the workspace was already synced.
+const CONSOLIDATION_TIMEOUT_MS = 3600_000
+
 export async function consolidateViaSubagent(memoryRoot: string, diffFileName: string, model?: string): Promise<void> {
   const agent = "memorize"
   const subId = await createSession(agent, "memex-consolidate")
   try {
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
-    await promptSession(subId, prompt, agent, { model })
+    await promptSession(subId, prompt, agent, { model, timeoutMs: CONSOLIDATION_TIMEOUT_MS })
   } finally {
     void deleteSession(subId).catch(() => {})
   }

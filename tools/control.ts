@@ -16,11 +16,13 @@ function isSymlinkedRoot(): boolean {
   }
 }
 
+// Mirrors codex clear_memory_root_contents: deletes EVERY entry including
+// .git, so previously deleted/redacted memory content is not recoverable
+// from git history after a reset.
 function wipeMemoriesDir(): void {
   const root = memoryRoot()
   if (!fs.existsSync(root)) return
   for (const entry of fs.readdirSync(root)) {
-    if (entry === ".git") continue
     const abs = path.join(root, entry)
     try {
       const stat = fs.statSync(abs)
@@ -55,8 +57,9 @@ function listMemoriesDir(): string[] {
 
 export const memory_reset = tool({
   description:
-    "Reset all persistent memory. Wipes the plugin's SQLite tables (stage1 outputs, jobs, session meta) " +
-    "and the contents of the memories directory. Refuses to run if the memory root is a symlink.",
+    "Reset all persistent memory. Wipes the plugin's extracted memories and jobs tables and the entire " +
+    "contents of the memories directory (including git history). Per-session memory modes are preserved, " +
+    "so disabled/polluted sessions stay excluded. Refuses to run if the memory root is a symlink.",
   args: {
     confirm: tool.schema.boolean().describe("Must be true to perform the reset."),
   },
@@ -71,7 +74,7 @@ export const memory_reset = tool({
       wipeMemoriesDir()
       closeDb()
       invalidateCache()
-      return { output: "Memory reset complete. SQLite tables cleared, memories directory wiped, cache invalidated." }
+      return { output: "Memory reset complete. Extracted memories and jobs cleared, memories directory (incl. git history) wiped, cache invalidated. Per-session memory modes were preserved." }
     } catch (err) {
       return { output: `memory_reset error: ${(err as Error).message}` }
     }

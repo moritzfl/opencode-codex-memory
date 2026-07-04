@@ -26,3 +26,14 @@ describe("truncateToTokens", () => {
     expect(result.length).toBe(10000)
   })
 })
+describe("truncateToTokens middle truncation", () => {
+  it("keeps head and tail with a marker like codex truncate_with_head_and_tail", () => {
+    const { truncateToTokens } = require("../src/token.js")
+    const input = "H".repeat(6000) + "T".repeat(6000)
+    const out = truncateToTokens(input, 2500)
+    expect(out.length).toBeLessThanOrEqual(10000)
+    expect(out.startsWith("H")).toBe(true)
+    expect(out.endsWith("T")).toBe(true)
+    expect(out).toContain("[...truncated...]")
+  })
+})

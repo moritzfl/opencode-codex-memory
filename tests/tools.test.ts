@@ -79,3 +79,108 @@ describe("memory_search time filters", () => {
     expect((await search({})).output).toContain("provide a query and/or since/until")
   })
 })
+
+describe("path guard hardening", () => {
+  it("rejects symlinks anywhere in the path", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    const outside = path.join(TEST_ROOT, "outside.md")
+    fs.writeFileSync(outside, "secret outside content\n")
+    fs.symlinkSync(outside, path.join(root, "sneaky.md"))
+    const { memory_read } = require("../tools/memory.js")
+    const r = await memory_read.execute({ path: "sneaky.md" }, CTX)
+    expect(r.output).toContain("symlinks are not allowed")
+  })
+
+  it("hides dot components like .git", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.mkdirSync(path.join(root, ".git"), { recursive: true })
+    fs.writeFileSync(path.join(root, ".git", "config"), "[core]\n")
+    const { memory_read } = require("../tools/memory.js")
+    const r = await memory_read.execute({ path: ".git/config" }, CTX)
+    expect(r.output).toContain("not found")
+  })
+
+  it("search walker skips symlinked files and directories", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    const outsideDir = path.join(TEST_ROOT, "outside-dir")
+    fs.mkdirSync(outsideDir, { recursive: true })
+    fs.writeFileSync(path.join(outsideDir, "leak.md"), "blue-green rollout leak\n")
+    fs.symlinkSync(outsideDir, path.join(root, "linked"))
+    const r = await search({ query: "blue-green" })
+    expect(r.output).not.toContain("leak")
+    expect(r.output).toContain("MEMORY.md")
+  })
+})
+
+describe("memory_search semantics", () => {
+  it("is case-sensitive by default like codex", async () => {
+    const r = await search({ query: "BLUE-GREEN" })
+    expect(r.output).toContain("No matches")
+    const r2 = await search({ query: "BLUE-GREEN", case_sensitive: false })
+    expect(r2.output).toContain("MEMORY.md")
+  })
+
+  it("searches files regardless of extension", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "notes.rst"), "blue-green in rst\n")
+    const r = await search({ query: "blue-green in rst" })
+    expect(r.output).toContain("notes.rst")
+  })
+})
+
+describe("memory_list", () => {
+  it("lists sorted entries with types, skipping hidden files and symlinks", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, ".hidden.md"), "x")
+    fs.symlinkSync(path.join(TEST_ROOT, "outside.txt"), path.join(root, "link.md"))
+    const { memory_list } = require("../tools/memory.js")
+    const r = await memory_list.execute({ path: "", max_results: 2000 }, CTX)
+    expect(r.output).toContain("f MEMORY.md")
+    expect(r.output).toContain("d rollout_summaries")
+    expect(r.output).not.toContain(".hidden")
+    expect(r.output).not.toContain("link.md")
+    const names = (r.metadata.entries as Array<{ path: string }>).map((e) => e.path)
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names)
+  })
+
+  it("errors on files and reports missing paths", async () => {
+    const { memory_list } = require("../tools/memory.js")
+    const r = await memory_list.execute({ path: "MEMORY.md", max_results: 2000 }, CTX)
+    expect(r.output).toContain("not a directory")
+    const r2 = await memory_list.execute({ path: "nope", max_results: 2000 }, CTX)
+    expect(r2.output).toContain("Not found")
+  })
+})
+
+describe("memory_read line windows", () => {
+  it("supports line_offset and max_lines with start-line reporting", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "long.md"), Array.from({ length: 10 }, (_, i) => `line-${i + 1}`).join("\n"))
+    const { memory_read } = require("../tools/memory.js")
+    const r = await memory_read.execute({ path: "long.md", line_offset: 4, max_lines: 2 }, CTX)
+    expect(r.output).toContain("[starting at line 4]")
+    expect(r.output).toContain("line-4")
+    expect(r.output).toContain("line-5")
+    expect(r.output).not.toContain("line-6")
+    const r2 = await memory_read.execute({ path: "long.md", line_offset: 99 }, CTX)
+    expect(r2.output).toContain("exceeds file length")
+  })
+})
+
+describe("memory_add_note collisions", () => {
+  it("never overwrites an existing note (append-only)", async () => {
+    const { memory_add_note } = require("../tools/memory.js")
+    const a = await memory_add_note.execute({ note: "first", title: "same title" }, CTX)
+    const b = await memory_add_note.execute({ note: "second", title: "same title" }, CTX)
+    expect(a.metadata.file).not.toBe(b.metadata.file)
+    const root = path.join(TEST_ROOT, "memories")
+    const first = fs.readFileSync(path.join(root, a.metadata.file), "utf8")
+    expect(first).toContain("first")
+  })
+
+  it("uses the hyphen-separated codex filename layout", async () => {
+    const { memory_add_note } = require("../tools/memory.js")
+    const r = await memory_add_note.execute({ note: "x", title: "my note" }, CTX)
+    expect(r.metadata.file).toMatch(/notes\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-my-note\.md$/)
+  })
+})

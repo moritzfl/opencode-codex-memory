@@ -32,6 +32,15 @@ watch_paths:
   - codex-rs/core/src/stream_events_utils.rs
   - codex-rs/git-utils/src/baseline.rs
   - codex-rs/utils/output-truncation
+  # Added after the 2026-07-04 parity audit — these are where past blind spots
+  # lived (config options, lifecycle triggers, pollution channels, dormant
+  # remote backend):
+  - codex-rs/config/src/types.rs
+  - codex-rs/core/src/session/session.rs
+  - codex-rs/core/src/mcp_tool_call.rs
+  - codex-rs/core/src/tools/registry.rs
+  - codex-rs/app-server/src/request_processors/turn_processor.rs
+  - codex-rs/codex-api/src/endpoint/memories.rs
 
 # ours: path in this repo. theirs: path in the codex checkout.
 # Every `theirs` is existence-checked by the drift script (catches renames like
@@ -50,11 +59,23 @@ mappings:
   - ours: tools/memory.ts
     theirs: codex-rs/ext/memories/src/tools/search.rs
     note: >
-      memory_search/memory_read/memory_add_note. codex splits these across
-      tools/{search,read,ad_hoc_note}.rs and local/{search,read,ad_hoc_note}.rs.
+      memory_search/memory_read/memory_list/memory_add_note. codex splits these
+      across tools/{search,read,list,ad_hoc_note}.rs and local/*.rs.
+      DIVERGENCES (schema-level, semantics match where noted): search is
+      single-query without match_mode/context_lines/cursor/path-scope (codex:
+      queries[], match modes, pagination) but matches codex's case-sensitive
+      default, 200-result cap, all-non-hidden-files set, and (path,line)
+      ordering; port adds since/until time filtering (no upstream equivalent).
+      read uses line_offset/max_lines like codex plus a 256KiB byte backstop
+      (codex: 20k-token budget). add_note generates the filename plugin-side
+      (codex: model supplies it) with codex's hyphen layout and append-only
+      collision handling. list has no cursor (max_results cap only).
   - ours: src/path-guard.ts
     theirs: codex-rs/ext/memories/src/local/path.rs
-    note: safe path resolution that cannot escape the memory root.
+    note: >
+      safe path resolution that cannot escape the memory root: lexical
+      containment + per-component symlink rejection + dot-components hidden,
+      mirroring local.rs resolve_scoped_path.
 
   # --- Citations ---
   - ours: src/citation.ts
@@ -62,6 +83,13 @@ mappings:
     note: >
       strip/parse <memory-citation><citation_entries>/<session_ids>. Also cross-check
       codex-rs/protocol/src/memory_citation.rs for the wire schema.
+      DIVERGENCES: strip target is inverted by platform necessity — codex strips
+      citations from the displayed/persisted message and keeps them in raw
+      history; the port strips from model-facing history (messages.transform)
+      and cannot touch opencode's UI rendering. Port requires a closing tag
+      (codex's stream parser auto-closes at EOF); port drops codex's legacy
+      <thread_ids> alias and instead accepts its own legacy comma-separated id
+      list.
 
   # --- Storage / DB ---
   - ours: src/db.ts
@@ -76,7 +104,13 @@ mappings:
   # --- Write path: phase 1 (extraction) ---
   - ours: src/phase1.ts
     theirs: codex-rs/memories/write/src/phase1.rs
-    note: transcript build + eligibility + stage1 extraction orchestration.
+    note: >
+      transcript build + eligibility + stage1 extraction orchestration.
+      Transcript budget 600k chars head+tail ~ codex's 150k-token fallback
+      (codex uses 70% of the model context window when known).
+      DIVERGENCE: an empty transcript is treated as success-with-no-output
+      (codex fails the job when a rollout cannot be loaded); empty sessions are
+      normal in opencode, not an error.
   - ours: src/capture.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
@@ -84,7 +118,11 @@ mappings:
       port it is split out for opencode's read-only opencode.db access.
   - ours: src/redact.ts
     theirs: codex-rs/memories/write/src/phase1.rs
-    note: secret redaction + isMemoryExcludedFragment logic (co-located in codex phase1).
+    note: >
+      secret redaction (superset of codex secrets/sanitizer.rs patterns; port
+      uses labeled [REDACTED:*] tokens vs codex's [REDACTED_SECRET]) +
+      isMemoryExcludedFragment (AGENTS.md/<skill> user-fragment exclusion,
+      mirrors is_memory_excluded_contextual_user_fragment).
   - ours: src/templates/stage_one_system.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_system.md
   - ours: src/templates/stage_one_input.md
@@ -119,17 +157,27 @@ mappings:
     note: >
       citation extraction from streamed assistant text + session.idle triggering.
       Loosest mapping; the plugin hook wiring is opencode-specific.
+      DELIBERATE DIVERGENCES vs codex lifecycle: (1) codex kicks the write
+      pipeline at turn start (app-server turn_processor.rs -> start.rs); the
+      port triggers on session.idle — same opportunistic-background semantics.
+      (2) codex ships memories default-off behind Feature::MemoryTool with a
+      TUI consent prompt; the port is on-by-default — installing the plugin is
+      the consent (README states this). memory_mode stamping at first
+      session.idle mirrors codex's stamp-at-thread-creation (session.rs);
+      MCP pollution matches every configured server via client.mcp.status()
+      (codex marks all MCP servers pollutes_memory=true).
 
   # --- Utilities ---
   - ours: src/token.ts
     theirs: codex-rs/utils/output-truncation
     note: token-limit truncation for the 2500-token summary cap (chars/4 estimate here).
   - ours: src/ratelimit.ts
-    theirs: codex-rs/memories/write/src/start.rs
+    theirs: codex-rs/memories/write/src/guard.rs
     note: >
-      DELIBERATE DIVERGENCE: codex gates on real provider rate-limit info; the
-      port uses a simple time-based heuristic stub. Revisit if codex's gating
-      is exposed to opencode plugins.
+      DELIBERATE DIVERGENCE: codex gates on real provider rate-limit windows
+      (guard.rs, min_rate_limit_remaining_percent, fails open; called from
+      start.rs); the port uses a simple time-based heuristic stub. Revisit if
+      codex's gating is exposed to opencode plugins.
 
   # --- Extensions (ad-hoc notes) ---
   - ours: src/workspace.ts
@@ -149,7 +197,15 @@ mappings:
       min_rollout_idle_hours, extract_model, consolidation_model. Defaults match
       codex (max_rollout_age_days=10, min_rollout_idle_hours=6,
       max_rollouts_per_startup=2, max_raw_memories_for_consolidation=256).
+      Numeric knobs are clamped to codex's ranges (types.rs From<MemoriesToml>):
+      (1,4096)/(0,365)/(0,90)/(1,128)/(1,48). Unknown option keys warn (codex
+      deny_unknown_fields errors). use_memories=false hides the memory tools
+      like codex's extension gating.
       DIVERGENCES: (1) dedicated_tools defaults to true here (codex: false) so the
       standalone plugin ships its memory tools out of the box; (2) codex's
       min_rate_limit_remaining_percent is not implemented — see src/ratelimit.ts
-      stub.
+      stub; (3) unset extract_model/consolidation_model fall back to the host's
+      current/default model, not codex's pinned provider models
+      (gpt-5.4-mini/gpt-5.4) — opencode has no equivalent provider preference;
+      (4) the legacy alias no_memories_if_mcp_or_web_search is not accepted
+      (fresh plugin, no legacy configs).

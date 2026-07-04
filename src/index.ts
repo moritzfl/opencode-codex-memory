@@ -1,6 +1,6 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
 import { stripCitations, extractCitedSessionIds } from "./citation.js"
-import { memory_read, memory_search, memory_add_note } from "../tools/memory.js"
+import { memory_read, memory_search, memory_list, memory_add_note } from "../tools/memory.js"
 import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
@@ -10,6 +10,9 @@ import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 
 let store: MemoryStore | null = null
 let phase1InFlight = false
+let pluginClient: PluginInput["client"] | null = null
+// Configured MCP server names, fetched lazily; null until first successful fetch.
+let mcpServerNames: Set<string> | null = null
 
 // Option names and defaults mirror codex's MemoriesToml/MemoriesConfig
 // (codex-rs/config/src/types.rs). Keep them 1:1 so the drift script and manual
@@ -68,22 +71,81 @@ export default {
   id: "opencode-memex",
   async server(input: PluginInput, opts?: PluginOptions) {
     setPluginInput(input)
-    if (opts) {
-      if (typeof opts.generate_memories === "boolean") pluginOptions.generate_memories = opts.generate_memories
-      if (typeof opts.use_memories === "boolean") pluginOptions.use_memories = opts.use_memories
-      if (typeof opts.dedicated_tools === "boolean") pluginOptions.dedicated_tools = opts.dedicated_tools
-      if (typeof opts.disable_on_external_context === "boolean") pluginOptions.disable_on_external_context = opts.disable_on_external_context
-      if (typeof opts.extract_model === "string") pluginOptions.extract_model = opts.extract_model
-      if (typeof opts.consolidation_model === "string") pluginOptions.consolidation_model = opts.consolidation_model
-      if (typeof opts.max_raw_memories_for_consolidation === "number") pluginOptions.max_raw_memories_for_consolidation = opts.max_raw_memories_for_consolidation
-      if (typeof opts.max_unused_days === "number") pluginOptions.max_unused_days = opts.max_unused_days
-      if (typeof opts.max_rollout_age_days === "number") pluginOptions.max_rollout_age_days = opts.max_rollout_age_days
-      if (typeof opts.max_rollouts_per_startup === "number") pluginOptions.max_rollouts_per_startup = opts.max_rollouts_per_startup
-      if (typeof opts.min_rollout_idle_hours === "number") pluginOptions.min_rollout_idle_hours = opts.min_rollout_idle_hours
-    }
+    pluginClient = input.client
+    if (opts) applyPluginOptions(opts)
     void cleanupOldSubSessions().catch(() => {})
     return buildHooks()
   },
+}
+
+const KNOWN_OPTION_KEYS = new Set([
+  "generate_memories",
+  "use_memories",
+  "dedicated_tools",
+  "disable_on_external_context",
+  "extract_model",
+  "consolidation_model",
+  "max_raw_memories_for_consolidation",
+  "max_unused_days",
+  "max_rollout_age_days",
+  "max_rollouts_per_startup",
+  "min_rollout_idle_hours",
+])
+
+// codex clamps numeric knobs in From<MemoriesToml> for MemoriesConfig
+// (config/src/types.rs); mirror the exact ranges. Non-finite values fall back
+// to the default.
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.floor(value)))
+}
+
+function applyPluginOptions(opts: PluginOptions): void {
+  for (const key of Object.keys(opts)) {
+    if (!KNOWN_OPTION_KEYS.has(key)) {
+      // codex uses deny_unknown_fields; a plugin can only warn. Covers typos
+      // and the deliberately unimplemented min_rate_limit_remaining_percent.
+      console.warn(`[opencode-memex] unknown/unsupported option '${key}' ignored`)
+    }
+  }
+  if (typeof opts.generate_memories === "boolean") pluginOptions.generate_memories = opts.generate_memories
+  if (typeof opts.use_memories === "boolean") pluginOptions.use_memories = opts.use_memories
+  if (typeof opts.dedicated_tools === "boolean") pluginOptions.dedicated_tools = opts.dedicated_tools
+  if (typeof opts.disable_on_external_context === "boolean") pluginOptions.disable_on_external_context = opts.disable_on_external_context
+  if (typeof opts.extract_model === "string") pluginOptions.extract_model = opts.extract_model
+  if (typeof opts.consolidation_model === "string") pluginOptions.consolidation_model = opts.consolidation_model
+  if ("max_raw_memories_for_consolidation" in opts)
+    pluginOptions.max_raw_memories_for_consolidation = clampInt(opts.max_raw_memories_for_consolidation, 1, 4096, 256)
+  if ("max_unused_days" in opts) pluginOptions.max_unused_days = clampInt(opts.max_unused_days, 0, 365, 30)
+  if ("max_rollout_age_days" in opts) pluginOptions.max_rollout_age_days = clampInt(opts.max_rollout_age_days, 0, 90, 10)
+  if ("max_rollouts_per_startup" in opts) pluginOptions.max_rollouts_per_startup = clampInt(opts.max_rollouts_per_startup, 1, 128, 2)
+  if ("min_rollout_idle_hours" in opts) pluginOptions.min_rollout_idle_hours = clampInt(opts.min_rollout_idle_hours, 1, 48, 6)
+}
+
+/**
+ * codex marks every MCP server as memory-polluting unconditionally
+ * (codex-mcp server.rs pollutes_memory: true). opencode registers MCP tools
+ * as "<server>_<tool>", so match tool names against the configured server
+ * list. Fails closed to the web-tools-only check when the list is unavailable.
+ */
+async function isExternalContextTool(toolName: string): Promise<boolean> {
+  if (toolName === "websearch" || toolName === "webfetch") return true
+  if (!mcpServerNames && pluginClient) {
+    try {
+      const res = await (pluginClient as any).mcp.status()
+      const servers = (res as any)?.data ?? res
+      if (servers && typeof servers === "object") {
+        mcpServerNames = new Set(Object.keys(servers))
+      }
+    } catch {
+      // MCP status unavailable (older opencode); keep web-tools-only checks.
+    }
+  }
+  if (!mcpServerNames) return false
+  for (const server of mcpServerNames) {
+    if (toolName.startsWith(`${server}_`)) return true
+  }
+  return false
 }
 
 function buildHooks() {
@@ -153,12 +215,13 @@ function buildHooks() {
       }
 
       if (ev.type === "tool.execute.after") {
-        // Mirrors codex: external context (web/mcp) only pollutes the session's
-        // memory when disable_on_external_context is enabled. Off by default.
+        // Mirrors codex: external context (web search or any MCP tool) only
+        // pollutes the session's memory when disable_on_external_context is
+        // enabled. Off by default.
         if (!pluginOptions.disable_on_external_context) return
         const props = ev.properties as { tool?: string; sessionID?: string }
         const toolName = props?.tool ?? ""
-        if ((toolName === "websearch" || toolName === "webfetch") && props.sessionID) {
+        if (props.sessionID && (await isExternalContextTool(toolName))) {
           try {
             getStore().markPolluted(props.sessionID)
           } catch (e) {
@@ -168,10 +231,34 @@ function buildHooks() {
         return
       }
 
+      if (ev.type === "session.deleted") {
+        // Mirrors codex delete_thread_memory: drop the extracted memory and
+        // its job when the session is deleted; the file disappears at the
+        // next phase-2 rebuild and the diff drives forgetting.
+        const props = ev.properties as { info?: { id?: string } }
+        const sid = props?.info?.id
+        if (sid) {
+          try {
+            getStore().deleteSessionMemory(sid)
+          } catch (e) {
+            console.error("[opencode-memex] deleteSessionMemory failed:", e)
+          }
+        }
+        return
+      }
+
       if (ev.type === "session.idle") {
         const props = ev.properties as { sessionID?: string }
         const sid = props?.sessionID
         if (!sid || isMemexSubSession(sid)) return
+        // codex stamps memory_mode at thread creation from generate_memories:
+        // sessions seen while generation is off stay excluded permanently,
+        // even if the option is re-enabled later.
+        try {
+          getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
+        } catch (e) {
+          console.error("[opencode-memex] stampMemoryModeIfAbsent failed:", e)
+        }
         void triggerPhase1(sid)
         return
       }
@@ -186,22 +273,25 @@ function buildHooks() {
   }
 
   // Control tools (reset/inspect/mode) are always available. The memory
-  // read/search/add-note tools are gated by dedicated_tools, mirroring codex's
-  // MemoriesExtension.tools() (codex-rs/ext/memories/src/tests.rs).
-  const tool = pluginOptions.dedicated_tools
-    ? {
-        memory_read,
-        memory_search,
-        memory_add_note,
-        memory_reset,
-        memory_inspect,
-        memory_mode,
-      }
-    : {
-        memory_reset,
-        memory_inspect,
-        memory_mode,
-      }
+  // read/search/list/add-note tools require BOTH use_memories and
+  // dedicated_tools, mirroring codex's MemoriesExtension: use_memories=false
+  // disables the whole extension including its tools (extension.rs).
+  const tool =
+    pluginOptions.use_memories && pluginOptions.dedicated_tools
+      ? {
+          memory_read,
+          memory_search,
+          memory_list,
+          memory_add_note,
+          memory_reset,
+          memory_inspect,
+          memory_mode,
+        }
+      : {
+          memory_reset,
+          memory_inspect,
+          memory_mode,
+        }
 
   return { ...base, tool }
 }

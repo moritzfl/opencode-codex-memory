@@ -9,9 +9,12 @@ const MAX_READ_BYTES = 256 * 1024
 export const memory_read = tool({
   description:
     "Read a file from the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*, etc.). " +
-    "Paths are relative to the memory root and cannot escape it.",
+    "Paths are relative to the memory root and cannot escape it. Supports line_offset/max_lines for " +
+    "reading a window of a large file; output line numbers are 1-indexed.",
   args: {
     path: tool.schema.string().describe("Relative path inside the memory workspace (e.g. MEMORY.md, rollout_summaries/session-xyz.md)."),
+    line_offset: tool.schema.number().int().min(1).optional().describe("1-indexed line to start reading from."),
+    max_lines: tool.schema.number().int().min(1).optional().describe("Maximum number of lines to return."),
   },
   async execute(args, ctx) {
     try {
@@ -23,26 +26,103 @@ export const memory_read = tool({
       if (stat.isDirectory()) {
         const entries = fs.readdirSync(fullPath)
         return {
-          output: `Directory ${args.path}/\n` + entries.map((e) => `- ${e}`).join("\n"),
+          output: `Directory ${args.path}/\n` + entries.map((e) => `- ${e}`).join("\n") + "\n(use memory_list for sorted, typed listings)",
           metadata: { kind: "directory", entries },
         }
       }
       const fd = fs.openSync(fullPath, "r")
+      let text: string
+      let byteTruncated: boolean
       try {
         const size = Math.min(stat.size, MAX_READ_BYTES)
         const buf = Buffer.alloc(size)
         fs.readSync(fd, buf, 0, size, 0)
-        const text = buf.toString("utf8")
-        const truncated = stat.size > MAX_READ_BYTES
-        return {
-          output: text + (truncated ? `\n\n[truncated: ${stat.size - MAX_READ_BYTES} bytes omitted]` : ""),
-          metadata: { path: args.path, bytes: stat.size, truncated },
-        }
+        text = buf.toString("utf8")
+        byteTruncated = stat.size > MAX_READ_BYTES
       } finally {
         fs.closeSync(fd)
       }
+      // Line windowing mirrors codex memories/read: 1-indexed offset, bounded
+      // line count, and the start line reported so file:line citations work.
+      const startLine = args.line_offset ?? 1
+      let lines = text.split(/\r?\n/)
+      const totalLines = lines.length
+      if (startLine > totalLines) {
+        return { output: `memory_read error: line_offset ${startLine} exceeds file length (${totalLines} lines).` }
+      }
+      lines = lines.slice(startLine - 1)
+      let lineTruncated = false
+      if (args.max_lines !== undefined && lines.length > args.max_lines) {
+        lines = lines.slice(0, args.max_lines)
+        lineTruncated = true
+      }
+      const body = lines.join("\n")
+      const notes: string[] = []
+      if (lineTruncated) notes.push(`[stopped after ${args.max_lines} lines; file has ${totalLines}]`)
+      if (byteTruncated) notes.push(`[truncated: ${stat.size - MAX_READ_BYTES} bytes omitted]`)
+      const header = startLine > 1 ? `[starting at line ${startLine}]\n` : ""
+      return {
+        output: header + body + (notes.length ? "\n\n" + notes.join("\n") : ""),
+        metadata: { path: args.path, bytes: stat.size, start_line_number: startLine, truncated: byteTruncated || lineTruncated },
+      }
     } catch (err) {
       return { output: `memory_read error: ${(err as Error).message}` }
+    }
+  },
+})
+
+/** Skip hidden entries and symlinks, mirroring codex local/list.rs + local/search.rs walkers. */
+function visibleEntries(dir: string): { name: string; isDir: boolean }[] {
+  let names: string[]
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return []
+  }
+  const out: { name: string; isDir: boolean }[] = []
+  for (const name of names) {
+    if (name.startsWith(".")) continue
+    let st: fs.Stats
+    try {
+      st = fs.lstatSync(path.join(dir, name))
+    } catch {
+      continue
+    }
+    if (st.isSymbolicLink()) continue
+    out.push({ name, isDir: st.isDirectory() })
+  }
+  return out
+}
+
+const LIST_MAX_RESULTS = 2000
+
+export const memory_list = tool({
+  description:
+    "List the immediate entries of a directory in the persistent memory workspace, sorted by name, " +
+    "with entry types. Hidden files and symlinks are skipped. Use path '' (empty) for the memory root.",
+  args: {
+    path: tool.schema.string().default("").describe("Relative directory path inside the memory workspace ('' for the root)."),
+    max_results: tool.schema.number().int().min(1).max(LIST_MAX_RESULTS).default(LIST_MAX_RESULTS).describe("Maximum entries to return."),
+  },
+  async execute(args) {
+    try {
+      const fullPath = safeResolveMemoryPath(args.path || ".")
+      if (!fs.existsSync(fullPath)) return { output: `Not found: ${args.path}` }
+      if (!fs.statSync(fullPath).isDirectory()) return { output: `memory_list error: not a directory: ${args.path}` }
+      const entries = visibleEntries(fullPath).sort((a, b) => a.name.localeCompare(b.name))
+      const truncated = entries.length > args.max_results
+      const shown = entries.slice(0, args.max_results)
+      const prefix = args.path ? `${args.path.replace(/\/+$/, "")}/` : ""
+      const listing = shown.map((e) => ({ path: `${prefix}${e.name}`, entry_type: e.isDir ? "directory" : "file" }))
+      if (listing.length === 0) return { output: `Directory ${args.path || "."} is empty.` }
+      return {
+        output:
+          listing.map((e) => `${e.entry_type === "directory" ? "d" : "f"} ${e.path}`).join("\n") +
+          (truncated ? `\n[truncated: ${entries.length - args.max_results} more entries]` : ""),
+        metadata: { path: args.path, entries: listing, truncated },
+      }
+    } catch (err) {
+      return { output: `memory_list error: ${(err as Error).message}` }
     }
   },
 })
@@ -73,28 +153,18 @@ interface CandidateFile {
   ts: number | null
 }
 
+// Walks every non-hidden, non-symlink file (codex searches all files, not an
+// extension allowlist), in sorted order for deterministic results.
 function collectSearchFiles(root: string): CandidateFile[] {
   const files: CandidateFile[] = []
   const walk = (dir: string, prefix: string) => {
-    let entries: string[]
-    try {
-      entries = fs.readdirSync(dir)
-    } catch {
-      return
-    }
-    for (const name of entries) {
-      if (name.startsWith(".git")) continue
+    const entries = visibleEntries(dir).sort((a, b) => a.name.localeCompare(b.name))
+    for (const { name, isDir } of entries) {
       const abs = path.join(dir, name)
       const rel = prefix ? `${prefix}/${name}` : name
-      let stat
-      try {
-        stat = fs.statSync(abs)
-      } catch {
-        continue
-      }
-      if (stat.isDirectory()) {
+      if (isDir) {
         walk(abs, rel)
-      } else if (/\.(md|txt|json)$/i.test(name)) {
+      } else {
         files.push({ rel, abs, ts: fileTimestamp(name) })
       }
     }
@@ -122,10 +192,11 @@ export const memory_search = tool({
     "what the user was working on around a given time. With since/until and no query, returns a " +
     "chronological listing of that period's sessions/notes.",
   args: {
-    query: tool.schema.string().min(1).optional().describe("Search query (case-insensitive substring match). Optional when since/until is set."),
+    query: tool.schema.string().min(1).optional().describe("Search query (substring match). Optional when since/until is set."),
+    case_sensitive: tool.schema.boolean().default(true).describe("Case-sensitive matching (default true, like codex memories/search)."),
     since: tool.schema.string().optional().describe("Only time-anchored files at/after this time (YYYY-MM-DD or ISO datetime)."),
     until: tool.schema.string().optional().describe("Only time-anchored files at/before this time (YYYY-MM-DD or ISO datetime; whole day for date-only)."),
-    limit: tool.schema.number().int().min(1).max(200).default(50).describe("Max matches to return."),
+    limit: tool.schema.number().int().min(1).max(200).default(200).describe("Max matches to return (default/max 200, like codex)."),
   },
   async execute(args, ctx) {
     try {
@@ -165,8 +236,11 @@ export const memory_search = tool({
         }
       }
 
-      const q = args.query.toLowerCase()
+      const caseSensitive = args.case_sensitive ?? true
+      const q = caseSensitive ? args.query : args.query.toLowerCase()
       const matches: { file: string; line: number; text: string }[] = []
+      // Files are walked in sorted order, so results are ordered by
+      // (path, line) like codex's search response.
       for (const f of files) {
         if (matches.length >= args.limit) break
         let content: string
@@ -177,7 +251,8 @@ export const memory_search = tool({
         }
         for (const [i, line] of content.split(/\r?\n/).entries()) {
           if (matches.length >= args.limit) break
-          if (line.toLowerCase().includes(q)) {
+          const haystack = caseSensitive ? line : line.toLowerCase()
+          if (haystack.includes(q)) {
             matches.push({ file: f.rel, line: i + 1, text: line.slice(0, 240) })
           }
         }
@@ -217,9 +292,21 @@ export const memory_add_note = tool({
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 60)
-      const file = path.join(notesDir, `${ts.slice(0, 19).replace(/[:.]/g, "-")}_${slug}.md`)
+      // Filename layout matches codex: <YYYY-MM-DDTHH-MM-SS>-<slug>.md.
+      const stem = `${ts.slice(0, 19).replace(/[:.]/g, "-")}-${slug}`
       const header = `# ${args.title ?? "Ad-hoc note"}\n\n- created: ${ts}\n- session: ${ctx.sessionID}\n\n`
-      fs.writeFileSync(file, header + args.note + "\n", { flag: "w" })
+      // Notes are append-only (codex create_new semantics): never overwrite an
+      // existing note; disambiguate on collision instead.
+      let file = path.join(notesDir, `${stem}.md`)
+      for (let i = 2; ; i++) {
+        try {
+          fs.writeFileSync(file, header + args.note + "\n", { flag: "wx" })
+          break
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "EEXIST" || i > 20) throw err
+          file = path.join(notesDir, `${stem}-${i}.md`)
+        }
+      }
       return {
         output: `Note saved to ${path.relative(root, file)}`,
         metadata: { file: path.relative(root, file), sessionID: ctx.sessionID },

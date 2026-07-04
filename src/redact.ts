@@ -4,7 +4,8 @@ const REDACTIONS: { re: RegExp; replacement: string }[] = [
   { re: /AKIA[0-9A-Z]{16}/g, replacement: "[REDACTED:aws-key]" },
   { re: /gh[pousr]_[A-Za-z0-9]{36,}/g, replacement: "[REDACTED:github-token]" },
   { re: /xox[baprs]-[A-Za-z0-9\-]{10,}/g, replacement: "[REDACTED:slack-token]" },
-  { re: /Bearer\s+[A-Za-z0-9\-\._~+\/=]{20,}/g, replacement: "Bearer [REDACTED]" },
+  // Case-insensitive with a 16-char floor, matching codex's sanitizer.
+  { re: /bearer\s+[A-Za-z0-9\-\._~+\/=]{16,}/gi, replacement: "Bearer [REDACTED]" },
   {
     re: /-----BEGIN [A-Z]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z]+ PRIVATE KEY-----/g,
     replacement: "[REDACTED:private-key]",
@@ -19,4 +20,25 @@ export function redact(text: string): string {
     out = out.replace(re, replacement)
   }
   return out
+}
+
+function matchesMarkedFragment(text: string, startMarker: string, endMarker: string): boolean {
+  const trimmed = text.trim()
+  return (
+    trimmed.slice(0, startMarker.length).toLowerCase() === startMarker.toLowerCase() &&
+    trimmed.slice(-endMarker.length).toLowerCase() === endMarker.toLowerCase()
+  )
+}
+
+/**
+ * Mirrors codex is_memory_excluded_contextual_user_fragment (phase1.rs):
+ * injected AGENTS.md instruction blocks and <skill> payloads inside user
+ * content are contextual boilerplate, not conversation — they must not be
+ * mined for memories.
+ */
+export function isMemoryExcludedFragment(text: string): boolean {
+  return (
+    matchesMarkedFragment(text, "# AGENTS.md instructions", "</INSTRUCTIONS>") ||
+    matchesMarkedFragment(text, "<skill>", "</skill>")
+  )
 }

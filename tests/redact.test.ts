@@ -36,3 +36,20 @@ describe("redact", () => {
     expect(redact("hello world")).toBe("hello world")
   })
 })
+describe("redact Bearer case-insensitivity", () => {
+  it("redacts lowercase bearer tokens with 16+ chars like codex", () => {
+    const { redact } = require("../src/redact.js")
+    expect(redact("authorization: bearer abcdef1234567890")).not.toContain("abcdef1234567890")
+  })
+})
+
+describe("isMemoryExcludedFragment", () => {
+  it("excludes AGENTS.md instruction blocks and skill payloads", () => {
+    const { isMemoryExcludedFragment } = require("../src/redact.js")
+    expect(isMemoryExcludedFragment("# AGENTS.md instructions\nstuff\n</INSTRUCTIONS>")).toBe(true)
+    expect(isMemoryExcludedFragment("  <skill>\npayload\n</skill>  ")).toBe(true)
+    expect(isMemoryExcludedFragment("# agents.md INSTRUCTIONS\nstuff\n</instructions>")).toBe(true)
+    expect(isMemoryExcludedFragment("normal user message")).toBe(false)
+    expect(isMemoryExcludedFragment("# AGENTS.md instructions but no end marker")).toBe(false)
+  })
+})

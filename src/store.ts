@@ -3,10 +3,13 @@ import { openDb } from "./db.js"
 
 export const DEFAULT_RETRY_REMAINING = 3
 export const STAGE1_LEASE_SECONDS = 3600
-export const PHASE2_LEASE_SECONDS = 1800
+export const PHASE2_LEASE_SECONDS = 3600
+export const STAGE1_RETRY_DELAY_SECONDS = 3600
+export const PHASE2_RETRY_DELAY_SECONDS = 3600
 export const PHASE2_COOLDOWN_MS = 6 * 60 * 60 * 1000
 export const STAGE1_CONCURRENCY = 8
 export const SCAN_LIMIT = 5000
+export const PRUNE_BATCH_SIZE = 200
 
 export type JobKind = "memory_stage1" | "memory_consolidate_global"
 export type JobStatus = "pending" | "running" | "done" | "failed"
@@ -26,6 +29,11 @@ export interface Stage1Output {
 export type ClaimResult =
   | { type: "claimed"; sessionId: string; workerId: string; ownershipToken: string }
   | { type: "skipped" }
+
+export interface Stage1Claim {
+  sessionId: string
+  ownershipToken: string
+}
 
 export interface ClaimableSession {
   id: string
@@ -57,24 +65,34 @@ export class MemoryStore {
       .all() as Stage1Output[]
   }
 
-  /** Deletes stale rows; snapshots consumed by the last successful Phase 2 are protected. */
+  /**
+   * Deletes stale rows; snapshots consumed by the last successful Phase 2 are
+   * protected. Stalest-first, capped per run (codex PRUNE_BATCH_SIZE).
+   */
   pruneStage1Outputs(maxUnusedDays: number): number {
     const cutoff = now() - maxUnusedDays * 24 * 60 * 60 * 1000
     return this.db
       .prepare(
         `DELETE FROM memory_stage1_outputs
-         WHERE selected_for_phase2 = 0
-           AND ((last_usage IS NOT NULL AND last_usage < ?)
-                OR (last_usage IS NULL AND source_updated_at < ?))`,
+         WHERE rowid IN (
+           SELECT rowid FROM memory_stage1_outputs
+           WHERE selected_for_phase2 = 0
+             AND ((last_usage IS NOT NULL AND last_usage < ?)
+                  OR (last_usage IS NULL AND source_updated_at < ?))
+           ORDER BY COALESCE(last_usage, source_updated_at) ASC
+           LIMIT ?
+         )`,
       )
-      .run(cutoff, cutoff).changes
+      .run(cutoff, cutoff, PRUNE_BATCH_SIZE).changes
   }
 
   upsertStage1Output(out: Omit<Stage1Output, "usage_count" | "last_usage">): boolean {
     const existing = this.db
       .prepare("SELECT source_updated_at FROM memory_stage1_outputs WHERE session_id = ?")
       .get(out.session_id) as { source_updated_at: number } | null
-    if (existing && existing.source_updated_at >= out.source_updated_at) {
+    // codex replaces when the incoming watermark is >= the stored one; only a
+    // strictly newer stored row wins.
+    if (existing && existing.source_updated_at > out.source_updated_at) {
       return false
     }
     this.db
@@ -103,21 +121,18 @@ export class MemoryStore {
     for (const id of sessionIds) stmt.run(ts, id)
   }
 
-  claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string, maxClaimed?: number): string[] {
+  claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string, maxClaimed?: number): Stage1Claim[] {
     const workerId = newId()
-    const ownershipToken = newId()
-    const lease = nowSec() + STAGE1_LEASE_SECONDS
     // Cap per-pass claims at codex's max_rollouts_per_startup (max_claimed) when
-    // provided, never exceeding the hard concurrency ceiling.
+    // provided, never exceeding the hard concurrency ceiling. codex also uses
+    // max_claimed as the cross-process running-jobs cap.
     const claimCap = Math.max(1, Math.min(maxClaimed ?? STAGE1_CONCURRENCY, STAGE1_CONCURRENCY))
-    const claimed: string[] = []
-    for (const s of sessions) {
-      if (s.id === excludeSession) continue
-      if (claimed.length >= claimCap) break
+    const claimed: Stage1Claim[] = []
+    const claimOne = this.db.transaction((s: ClaimableSession, ownershipToken: string, lease: number): boolean => {
       const activeRow = this.db
         .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' AND status='running' AND (lease_until IS NULL OR lease_until > ?)")
         .get(nowSec()) as { c: number }
-      if (activeRow.c >= STAGE1_CONCURRENCY) break
+      if (activeRow.c >= claimCap) return false
       // Mirrors codex try_claim_stage1_job: a newer input watermark (session
       // activity) overrides retry backoff and resets exhausted retries; done
       // jobs are reclaimed only when the session advanced past the last
@@ -152,35 +167,50 @@ export class MemoryStore {
                   OR memory_jobs.last_success_watermark < excluded.input_watermark)`,
         )
         .run(s.id, workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING, s.updated_at)
-      if (result.changes > 0) claimed.push(s.id)
+      return result.changes > 0
+    })
+    for (const s of sessions) {
+      if (s.id === excludeSession) continue
+      if (claimed.length >= claimCap) break
+      // Per-claim ownership token (codex uses a fresh UUID per claim) so a
+      // zombie worker cannot finalize a job another worker re-claimed.
+      const ownershipToken = newId()
+      const lease = nowSec() + STAGE1_LEASE_SECONDS
+      if (claimOne.immediate(s, ownershipToken, lease)) claimed.push({ sessionId: s.id, ownershipToken })
     }
     return claimed
   }
 
-  markStage1Succeeded(sessionId: string, out: Omit<Stage1Output, "usage_count" | "last_usage">): void {
-    this.upsertStage1Output(out)
-    this.db
-      .prepare(
-        `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
-          last_success_watermark=?, retry_at=NULL
-         WHERE kind='memory_stage1' AND job_key=?`,
-      )
-      .run(nowSec(), out.source_updated_at, sessionId)
+  markStage1Succeeded(sessionId: string, ownershipToken: string, out: Omit<Stage1Output, "usage_count" | "last_usage">): void {
+    this.db.transaction(() => {
+      const res = this.db
+        .prepare(
+          `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
+            last_success_watermark=?, retry_at=NULL
+           WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
+        )
+        .run(nowSec(), out.source_updated_at, sessionId, ownershipToken)
+      // Ownership lost (lease expired, job re-claimed): do not clobber the new
+      // owner's output. Mirrors codex mark_stage1_job_succeeded.
+      if (res.changes > 0) this.upsertStage1Output(out)
+    }).immediate()
   }
 
   /** Extraction succeeded but produced nothing worth keeping: finish the job and drop any stale output. */
-  markStage1SucceededNoOutput(sessionId: string, sourceUpdatedAt: number): void {
-    this.db
-      .prepare(
-        `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
-          last_success_watermark=?, retry_at=NULL
-         WHERE kind='memory_stage1' AND job_key=?`,
-      )
-      .run(nowSec(), sourceUpdatedAt, sessionId)
-    this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+  markStage1SucceededNoOutput(sessionId: string, ownershipToken: string, sourceUpdatedAt: number): void {
+    this.db.transaction(() => {
+      const res = this.db
+        .prepare(
+          `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
+            last_success_watermark=?, retry_at=NULL
+           WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
+        )
+        .run(nowSec(), sourceUpdatedAt, sessionId, ownershipToken)
+      if (res.changes > 0) this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+    }).immediate()
   }
 
-  markStage1Failed(sessionId: string, error: string): void {
+  markStage1Failed(sessionId: string, ownershipToken: string, error: string): void {
     this.db
       .prepare(
         `UPDATE memory_jobs SET
@@ -190,64 +220,69 @@ export class MemoryStore {
            retry_at = ?,
            finished_at = ?,
            lease_until = NULL
-         WHERE kind='memory_stage1' AND job_key=?`,
+         WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
       )
-      .run(error.slice(0, 4000), nowSec() + 60 * 5, nowSec(), sessionId)
+      .run(error.slice(0, 4000), nowSec() + STAGE1_RETRY_DELAY_SECONDS, nowSec(), sessionId, ownershipToken)
   }
 
   claimGlobalPhase2Job(): Phase2ClaimResult {
     const workerId = newId()
     const ownershipToken = newId()
-    const lease = nowSec() + PHASE2_LEASE_SECONDS
-    const nowMs = now()
-    const row = this.db
-      .prepare("SELECT * FROM memory_jobs WHERE kind='memory_consolidate_global' AND job_key='global'")
-      .get() as
-      | {
-          status: string
-          lease_until: number | null
-          retry_at: number | null
-          retry_remaining: number
-          finished_at: number | null
-          last_success_watermark: number | null
+    const tNow = nowSec()
+    const lease = tNow + PHASE2_LEASE_SECONDS
+    return this.db
+      .transaction((): Phase2ClaimResult => {
+        const row = this.db
+          .prepare("SELECT * FROM memory_jobs WHERE kind='memory_consolidate_global' AND job_key='global'")
+          .get() as
+          | {
+              status: string
+              lease_until: number | null
+              retry_at: number | null
+              finished_at: number | null
+              last_error: string | null
+            }
+          | null
+        if (!row) {
+          this.db
+            .prepare(
+              `INSERT INTO memory_jobs
+                (kind, job_key, status, worker_id, ownership_token, started_at, lease_until, retry_remaining)
+               VALUES ('memory_consolidate_global', 'global', 'running', ?, ?, ?, ?, ?)`,
+            )
+            .run(workerId, ownershipToken, tNow, lease, DEFAULT_RETRY_REMAINING)
+          return { type: "claimed", workerId, ownershipToken }
         }
-      | null
-    if (!row) {
-      this.db
-        .prepare(
-          `INSERT INTO memory_jobs
-            (kind, job_key, status, worker_id, ownership_token, started_at, lease_until, retry_remaining)
-           VALUES ('memory_consolidate_global', 'global', 'running', ?, ?, ?, ?, ?)`,
-        )
-        .run(workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING)
-      return { type: "claimed", workerId, ownershipToken }
-    }
-    if (row.status === "running" && row.lease_until != null && row.lease_until > nowSec()) {
-      return { type: "skipped_running" }
-    }
-    if (row.status === "done" && row.last_success_watermark != null && nowMs - row.last_success_watermark < PHASE2_COOLDOWN_MS) {
-      return { type: "skipped_cooldown" }
-    }
-    if (row.status === "failed" && row.retry_remaining <= 0) {
-      return { type: "skipped_retry_unavailable" }
-    }
-    if (row.status === "failed" && row.retry_at != null && row.retry_at > nowSec()) {
-      return { type: "skipped_retry_unavailable" }
-    }
-    this.db
-      .prepare(
-        `UPDATE memory_jobs SET
-           status='running',
-           worker_id=?,
-           ownership_token=?,
-           started_at=?,
-           lease_until=?,
-           retry_remaining=?,
-           last_error=NULL
-         WHERE kind='memory_consolidate_global' AND job_key='global'`,
-      )
-      .run(workerId, ownershipToken, nowSec(), lease, DEFAULT_RETRY_REMAINING)
-    return { type: "claimed", workerId, ownershipToken }
+        if (row.status === "running" && row.lease_until != null && row.lease_until > tNow) {
+          return { type: "skipped_running" }
+        }
+        // codex: cooldown after a clean success (last_error IS NULL AND
+        // finished_at within the window); failures fall through to retry_at.
+        if (row.last_error == null && row.finished_at != null && tNow - row.finished_at < PHASE2_COOLDOWN_MS / 1000) {
+          return { type: "skipped_cooldown" }
+        }
+        // codex gates on retry_at regardless of status and never exhausts
+        // phase-2 retries; retry_remaining is informational only.
+        if (row.retry_at != null && row.retry_at > tNow) {
+          return { type: "skipped_retry_unavailable" }
+        }
+        this.db
+          .prepare(
+            `UPDATE memory_jobs SET
+               status='running',
+               worker_id=?,
+               ownership_token=?,
+               started_at=?,
+               lease_until=?,
+               finished_at=NULL,
+               retry_at=NULL,
+               last_error=NULL
+             WHERE kind='memory_consolidate_global' AND job_key='global'`,
+          )
+          .run(workerId, ownershipToken, tNow, lease)
+        return { type: "claimed", workerId, ownershipToken }
+      })
+      .immediate()
   }
 
   heartbeatPhase2Job(ownershipToken: string): boolean {
@@ -266,12 +301,16 @@ export class MemoryStore {
    * still back the consolidated artifacts.
    */
   markPhase2Succeeded(ownershipToken: string, selected: Pick<Stage1Output, "session_id" | "source_updated_at">[] = []): void {
+    // codex stores the completion watermark = max source_updated_at consumed;
+    // the 6h cooldown is keyed on finished_at, not on this value.
+    const watermark = selected.reduce((max, s) => Math.max(max, s.source_updated_at), 0)
     const res = this.db
       .prepare(
-        `UPDATE memory_jobs SET status='done', finished_at=?, last_error=NULL, last_success_watermark=?, retry_at=NULL
-         WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=?`,
+        `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL, retry_remaining=?,
+           last_success_watermark=MAX(COALESCE(last_success_watermark, 0), ?), retry_at=NULL
+         WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
       )
-      .run(nowSec(), now(), ownershipToken)
+      .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
     if (res.changes === 0) return
     this.db.exec("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
     const mark = this.db.prepare(
@@ -286,14 +325,15 @@ export class MemoryStore {
     this.db
       .prepare(
         `UPDATE memory_jobs SET
-           status = CASE WHEN retry_remaining > 1 THEN 'pending' ELSE 'failed' END,
+           status = 'failed',
            retry_remaining = MAX(0, retry_remaining - 1),
            last_error = ?,
            retry_at = ?,
-           finished_at = ?
-         WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=?`,
+           finished_at = ?,
+           lease_until = NULL
+         WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
       )
-      .run(error.slice(0, 4000), nowSec() + 60 * 10, nowSec(), ownershipToken)
+      .run(error.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec(), ownershipToken)
   }
 
   /**
@@ -323,10 +363,24 @@ export class MemoryStore {
       .all(cutoff, cutoff, maxRaw) as Stage1Output[]
   }
 
+  /** Mirrors codex delete_thread_memory: remove a deleted session's output + job. */
+  deleteSessionMemory(sessionId: string): void {
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+      this.db.prepare("DELETE FROM memory_jobs WHERE kind='memory_stage1' AND job_key = ?").run(sessionId)
+    }).immediate()
+  }
+
+  /**
+   * codex clear_memory_data deletes extracted memories and jobs but explicitly
+   * preserves per-session memory modes: a reset must not re-enable sessions
+   * the user disabled or that were marked polluted.
+   */
   clearMemoryData(): void {
-    this.db.exec("DELETE FROM memory_stage1_outputs")
-    this.db.exec("DELETE FROM memory_jobs")
-    this.db.exec("DELETE FROM memory_session_meta")
+    this.db.transaction(() => {
+      this.db.exec("DELETE FROM memory_stage1_outputs")
+      this.db.exec("DELETE FROM memory_jobs")
+    }).immediate()
   }
 
   setMemoryMode(sessionId: string, mode: "enabled" | "disabled" | "polluted"): void {
@@ -337,6 +391,21 @@ export class MemoryStore {
          ON CONFLICT(session_id) DO UPDATE SET memory_mode=excluded.memory_mode, polluted=excluded.polluted, updated_at=excluded.updated_at`,
       )
       .run(sessionId, mode, mode === "polluted" ? 1 : 0, now())
+  }
+
+  /**
+   * Stamp a mode only when the session has no meta row yet — used to mark
+   * sessions seen while generate_memories=false as permanently 'disabled'
+   * (codex stamps memory_mode at thread creation, session.rs), without
+   * overriding an explicit user-set or polluted mode.
+   */
+  stampMemoryModeIfAbsent(sessionId: string, mode: "enabled" | "disabled"): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO memory_session_meta (session_id, memory_mode, polluted, updated_at)
+         VALUES (?, ?, 0, ?)`,
+      )
+      .run(sessionId, mode, now())
   }
 
   getMemoryMode(sessionId: string): "enabled" | "disabled" | "polluted" | null {

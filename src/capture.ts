@@ -87,9 +87,12 @@ function extractText(msg: any): string | undefined {
   if (!msg) return undefined
   if (typeof msg.text === "string") return msg.text
   if (msg.type === "tool") {
+    // Full tool payloads: codex serializes complete FunctionCall/Output items
+    // and relies solely on the global transcript truncation. Tool outputs are
+    // the extractor's strongest evidence — do not slice them per call.
     const tool = msg.tool ?? "unknown"
-    const input = msg.state?.input ? JSON.stringify(msg.state.input).slice(0, 200) : ""
-    const output = typeof msg.state?.output === "string" ? msg.state.output.slice(0, 500) : ""
+    const input = msg.state?.input ? JSON.stringify(msg.state.input) : ""
+    const output = typeof msg.state?.output === "string" ? msg.state.output : ""
     return `[tool: ${tool}] ${input}${output ? "\n" + output : ""}`
   }
   if (msg.type === "step-start" || msg.type === "step-finish") return undefined

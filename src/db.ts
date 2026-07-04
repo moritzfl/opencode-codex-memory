@@ -49,8 +49,12 @@ export function openDb(): Database {
   if (dbInstance) return dbInstance
   const dbPath = memoryDbPath()
   const db = new Database(dbPath, { create: true, readwrite: true, strict: false })
+  // Match codex's memories-DB open options (runtime.rs): WAL, NORMAL sync,
+  // 5s busy timeout for cross-process access, incremental auto-vacuum.
   db.exec("PRAGMA journal_mode=WAL")
   db.exec("PRAGMA synchronous=NORMAL")
+  db.exec("PRAGMA busy_timeout=5000")
+  db.exec("PRAGMA auto_vacuum=INCREMENTAL")
   runMigrations(db)
   dbInstance = db
   return db

@@ -1,6 +1,6 @@
 import { MemoryStore, STAGE1_CONCURRENCY } from "./store.js"
 import { loadTranscript, selectEligibleSessions } from "./capture.js"
-import { redact } from "./redact.js"
+import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
 import { extractViaSubagent } from "./llm.js"
 import { checkRateLimit } from "./ratelimit.js"
@@ -10,6 +10,9 @@ export interface Phase1Options {
   minIdleHours: number
   // Max rollouts claimed per pass (codex max_rollouts_per_startup / max_claimed).
   maxClaimed?: number
+  // Retention for stale stage-1 outputs (codex max_unused_days); pruning runs
+  // before the rate gate because it costs no tokens (codex start.rs).
+  maxUnusedDays?: number
   excludeSession?: string
   extractModel?: string
 }
@@ -18,15 +21,20 @@ export const DEFAULT_PHASE1_OPTIONS: Phase1Options = {
   maxAgeDays: 10,
   minIdleHours: 6,
   maxClaimed: 2,
+  maxUnusedDays: 30,
 }
 
-const TRANSCRIPT_MAX_CHARS = 200_000
+// codex serializes the full transcript and truncates at 70% of the model
+// context window, falling back to 150k tokens; ~4 chars/token puts the
+// char-estimate equivalent at 600k.
+const TRANSCRIPT_MAX_CHARS = 600_000
 // When truncating, keep the head and the tail: the start carries the user's
 // framing, the end carries the final outcome and feedback.
-const TRANSCRIPT_HEAD_CHARS = 120_000
-const TRANSCRIPT_TAIL_CHARS = 80_000
+const TRANSCRIPT_HEAD_CHARS = 360_000
+const TRANSCRIPT_TAIL_CHARS = 240_000
 
 export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAULT_PHASE1_OPTIONS): Promise<void> {
+  store.pruneStage1Outputs(opts.maxUnusedDays ?? 30)
   const rl = await checkRateLimit("phase1")
   if (!rl.ok) {
     console.warn("[opencode-memex] skipping phase1 due to rate limit:", rl.reason)
@@ -38,13 +46,14 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
   if (claimed.length === 0) return
   const sessionById = new Map(eligible.map((s) => [s.id, s]))
 
-  await runPool(claimed, STAGE1_CONCURRENCY, async (sid) => {
+  await runPool(claimed, STAGE1_CONCURRENCY, async (claim) => {
+    const sid = claim.sessionId
     try {
       const session = sessionById.get(sid)
       const sourceUpdatedAt = session?.updated_at ?? Date.now()
       const transcript = buildTranscript(sid)
       if (!transcript.trim()) {
-        store.markStage1SucceededNoOutput(sid, sourceUpdatedAt)
+        store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
         return
       }
       const result = await extractViaSubagent(sid, transcript, {
@@ -53,20 +62,21 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
       })
       if (!result) {
         // Extractor judged the session not worth remembering.
-        store.markStage1SucceededNoOutput(sid, sourceUpdatedAt)
+        store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
         return
       }
-      store.markStage1Succeeded(sid, {
+      store.markStage1Succeeded(sid, claim.ownershipToken, {
         session_id: sid,
         source_updated_at: sourceUpdatedAt,
         raw_memory: redact(result.raw_memory),
         rollout_summary: redact(result.rollout_summary),
-        rollout_slug: result.rollout_slug,
+        // codex redacts the slug too — it becomes a filename.
+        rollout_slug: result.rollout_slug ? redact(result.rollout_slug) : result.rollout_slug,
         cwd: session?.directory ?? null,
         generated_at: Date.now(),
       })
     } catch (err) {
-      store.markStage1Failed(sid, (err as Error).message)
+      store.markStage1Failed(sid, claim.ownershipToken, (err as Error).message)
     }
   })
 }
@@ -80,6 +90,9 @@ function buildTranscript(sessionId: string): string {
     const role = m.role ?? m.type
     const text = m.text ?? ""
     if (!text.trim()) continue
+    // Injected AGENTS.md/<skill> blocks in user content are excluded from
+    // extraction (codex is_memory_excluded_contextual_user_fragment).
+    if (role === "user" && isMemoryExcludedFragment(text)) continue
     lines.push(`### ${role}\n${redact(stripCitations(text))}`)
   }
   const full = lines.join("\n\n")

@@ -10,7 +10,6 @@ const AUTHOR = { name: "opencode-memex", email: "memex@opencode.local" }
 // commits (mirrors codex's remove_workspace_diff) so it never enters the
 // baseline history or shows up as memory content.
 export const DIFF_ARTIFACT = "phase2_workspace_diff.md"
-const PER_FILE_DIFF_MAX_BYTES = 64 * 1024
 
 export interface WorkspaceChange {
   status: "A" | "M" | "D"
@@ -54,18 +53,35 @@ async function stageAll(dir: string): Promise<number> {
   return changes
 }
 
-async function addAndCommit(dir: string, message: string): Promise<string | null> {
-  await ensureInit(dir)
-  const changes = await stageAll(dir)
-  if (changes === 0) return null
-  return isogit.commit({ fs, dir, message, author: AUTHOR })
+async function hasHeadCommit(dir: string): Promise<boolean> {
+  try {
+    await isogit.resolveRef({ fs, dir, ref: "HEAD" })
+    return true
+  } catch {
+    return false
+  }
 }
 
+async function commitBaseline(dir: string): Promise<string> {
+  await stageAll(dir)
+  return isogit.commit({ fs, dir, message: "memex baseline", author: AUTHOR })
+}
+
+/**
+ * Mirrors codex prepare_memory_workspace: an existing baseline is preserved
+ * untouched so the phase-2 diff spans last-successful-run -> now — including
+ * manual user edits and newly added ad-hoc notes. Committing here would
+ * swallow those changes and consolidation would never see them. Only a root
+ * without any commit gets a fresh baseline.
+ */
 export async function ensureBaseline(): Promise<boolean> {
   try {
     const dir = memoryRoot()
     removeDiffArtifact(dir)
-    await addAndCommit(dir, "memex baseline")
+    await ensureInit(dir)
+    if (!(await hasHeadCommit(dir))) {
+      await commitBaseline(dir)
+    }
     return true
   } catch (err) {
     console.error("[opencode-memex] ensureBaseline error:", err)
@@ -115,12 +131,9 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
     for (const [filepath, head, workdir] of changedRows) {
       const oldText = head === 1 && headOid ? await readBaselineText(dir, headOid, filepath) : ""
       const newText = workdir === 0 ? "" : readWorkdirText(dir, filepath)
-      const patch = createPatch(filepath, oldText, newText)
-      patches.push(
-        patch.length > PER_FILE_DIFF_MAX_BYTES
-          ? `Index: ${filepath}\n[diff omitted: ${patch.length} bytes]\n`
-          : patch,
-      )
+      // No per-file cap: codex renders every file's patch in full and relies
+      // on the global 4 MiB truncation in writeWorkspaceDiff.
+      patches.push(createPatch(filepath, oldText, newText))
     }
     return { changes, unifiedDiff: patches.join("\n") }
   } catch (err) {
@@ -129,11 +142,18 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
   }
 }
 
+/**
+ * Mirrors codex reset_git_repository: delete .git and re-create a fresh
+ * single-commit baseline so deleted/redacted memory content is not retained
+ * in unreachable git objects (history is intentionally dropped).
+ */
 export async function resetBaseline(): Promise<boolean> {
   try {
     const dir = memoryRoot()
     removeDiffArtifact(dir)
-    await addAndCommit(dir, "memex consolidated")
+    fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true })
+    await isogit.init({ fs, dir })
+    await commitBaseline(dir)
     return true
   } catch (err) {
     console.error("[opencode-memex] resetBaseline error:", err)

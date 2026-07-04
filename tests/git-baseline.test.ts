@@ -58,13 +58,32 @@ describe("git-baseline", () => {
     expect(diff.unifiedDiff).toContain("+hello")
   })
 
-  it("ensureBaseline commits pre-existing deletions instead of failing", async () => {
+  it("ensureBaseline preserves an existing baseline so pre-existing changes stay in the diff", async () => {
     const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
     fs.writeFileSync(memFile("stale.md"), "old summary\n")
     expect(await ensureBaseline()).toBe(true)
+    // Changes made since the last baseline (user edits, ad-hoc notes) must NOT
+    // be swallowed by a fresh commit — codex keeps the baseline untouched so
+    // consolidation sees them in the diff.
     fs.unlinkSync(memFile("stale.md"))
+    fs.writeFileSync(memFile("note.md"), "remember this\n")
     expect(await ensureBaseline()).toBe(true)
-    expect((await captureWorkspaceDiff()).changes).toEqual([])
+    const diff = await captureWorkspaceDiff()
+    expect(statusLines(diff)).toEqual(["A note.md", "D stale.md"])
+  })
+
+  it("resetBaseline drops previous git history", async () => {
+    const { ensureBaseline, resetBaseline } = require("../src/git-baseline.js")
+    const isogit = require("isomorphic-git")
+    const { memoryRoot } = require("../src/paths.js")
+    fs.writeFileSync(memFile("secret.md"), "leaked token\n")
+    expect(await ensureBaseline()).toBe(true)
+    fs.unlinkSync(memFile("secret.md"))
+    fs.writeFileSync(memFile("clean.md"), "ok\n")
+    expect(await resetBaseline()).toBe(true)
+    // Fresh single-commit history: deleted content is not recoverable.
+    const log = await isogit.log({ fs, dir: memoryRoot() })
+    expect(log.length).toBe(1)
   })
 
   it("removes the phase2 diff artifact before diffing and committing", async () => {
@@ -77,14 +96,15 @@ describe("git-baseline", () => {
     expect(fs.existsSync(memFile("phase2_workspace_diff.md"))).toBe(false)
   })
 
-  it("replaces oversized per-file patches with a stub", async () => {
+  it("renders large per-file patches in full (only the global cap truncates)", async () => {
     const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
     expect(await ensureBaseline()).toBe(true)
     const big = Array.from({ length: 5000 }, (_, i) => `line ${i} ${"x".repeat(20)}`).join("\n")
     fs.writeFileSync(memFile("big.md"), big)
     fs.writeFileSync(memFile("small.md"), "tiny\n")
     const diff = await captureWorkspaceDiff()
-    expect(diff.unifiedDiff).toContain("[diff omitted:")
+    expect(diff.unifiedDiff).not.toContain("[diff omitted:")
+    expect(diff.unifiedDiff).toContain("+line 4999")
     expect(diff.unifiedDiff).toContain("+tiny")
   })
 })

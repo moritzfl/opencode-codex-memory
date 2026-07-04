@@ -85,17 +85,21 @@ describe("workspace rendering", () => {
 })
 
 describe("pruneExtensionResources", () => {
-  it("prunes only old timestamped notes and never instructions.md", () => {
+  it("prunes old timestamped resources but never notes or instructions.md", () => {
     const { ensureLayout, pruneExtensionResources } = require("../src/workspace.js")
     const { memoryRoot } = require("../src/paths.js")
     ensureLayout()
     const notes = path.join(memoryRoot(), "extensions", "ad_hoc", "notes")
-    fs.writeFileSync(path.join(notes, "2020-01-01T00-00-00_old-note.md"), "old")
-    fs.writeFileSync(path.join(notes, "2999-01-01T00-00-00_future-note.md"), "new")
-    fs.writeFileSync(path.join(notes, "untimestamped.md"), "keep")
+    const resources = path.join(memoryRoot(), "extensions", "ad_hoc", "resources")
+    fs.mkdirSync(resources, { recursive: true })
+    // Notes are explicit user requests: codex never prunes them.
+    fs.writeFileSync(path.join(notes, "2020-01-01T00-00-00-old-note.md"), "old")
+    fs.writeFileSync(path.join(resources, "2020-01-01T00-00-00_old-res.md"), "old")
+    fs.writeFileSync(path.join(resources, "2999-01-01T00-00-00_future-res.md"), "new")
+    fs.writeFileSync(path.join(resources, "untimestamped.md"), "keep")
     pruneExtensionResources(7)
-    const remaining = fs.readdirSync(notes).sort()
-    expect(remaining).toEqual(["2999-01-01T00-00-00_future-note.md", "untimestamped.md"])
+    expect(fs.readdirSync(notes).sort()).toEqual(["2020-01-01T00-00-00-old-note.md"])
+    expect(fs.readdirSync(resources).sort()).toEqual(["2999-01-01T00-00-00_future-res.md", "untimestamped.md"])
     expect(fs.existsSync(path.join(memoryRoot(), "extensions", "ad_hoc", "instructions.md"))).toBe(true)
   })
 })

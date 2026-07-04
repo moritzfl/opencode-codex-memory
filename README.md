@@ -47,7 +47,10 @@ anything.
    plugin configs, copy the `agent` block from the plugin's `opencode.json` into
    your own config — opencode needs those definitions to run the memory pipeline.
 
-3. That's it. The memory workspace is created on first use.
+3. That's it. The memory workspace is created on first use. Installing the
+   plugin is the opt-in: background learning and summary injection are active
+   immediately (codex ships the same system behind an experimental flag with a
+   consent prompt; a standalone memory plugin *is* the consent).
 
 Requires only opencode (official release). Git is bundled (`isomorphic-git`) —
 no `git` binary or any other external tool needed.
@@ -115,7 +118,7 @@ codex's `[memories]` config so the two stay easy to compare:
 |---|---|---|
 | `generate_memories` | `true` | Turn the background learning pipeline on/off |
 | `use_memories` | `true` | Inject the memory summary into the system prompt |
-| `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_add_note` tools |
+| `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_list`/`memory_add_note` tools |
 | `disable_on_external_context` | `false` | Exclude sessions that used web/MCP tools from memory |
 | `extract_model` | current model | Model used for per-session extraction |
 | `consolidation_model` | current model | Model used for consolidation |
@@ -136,6 +139,10 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 ```
 
 See the [opencode plugin docs](https://opencode.ai/docs/plugins/) for details.
+
+Numeric options are clamped to codex's valid ranges; unknown option keys are
+ignored with a warning. Setting `use_memories: false` also hides the memory
+tools, matching codex's extension gating.
 
 > Note: `dedicated_tools` defaults to `true` here (codex defaults it to `false`).
 > This is the one intentional default difference — the tools are a core part of a
