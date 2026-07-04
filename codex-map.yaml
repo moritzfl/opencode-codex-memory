@@ -1,0 +1,139 @@
+# codex-map.yaml
+#
+# Provenance map: opencode-memex is a TypeScript port of codex's Rust memory
+# system. This file is the single source of truth for "which codex file does
+# each of our files come from" and "which codex commit did we last audit".
+#
+# Update flow:
+#   1. Point CODEX_REPO at a codex checkout.
+#   2. Run scripts/check-codex-drift.sh
+#   3. Port intentional upstream changes; record deliberate divergences in `note`.
+#   4. Bump `codex_ref` / `codex_ref_date` to the commit you audited against.
+#
+# Design invariant (do not break without codex breaking it first):
+#   Memory is GLOBAL. Project/cwd separation exists ONLY as a soft routing hint
+#   inside the consolidation + read-path prompts, never as schema-level,
+#   read-path, or job-level partitioning. See consolidation.md mapping note.
+
+# codex commit this map was last verified against.
+codex_ref: 0ccb676dd0904a424a84080d4ec8755677aea22e
+codex_ref_date: 2026-07-02
+
+# Upstream directories/files to watch for ANY change since codex_ref.
+# The drift script diffs these path prefixes between codex_ref..HEAD.
+watch_paths:
+  - codex-rs/ext/memories
+  - codex-rs/memories
+  - codex-rs/state/src/runtime/memories.rs
+  - codex-rs/state/src/model/memories.rs
+  - codex-rs/state/memory_migrations
+  - codex-rs/protocol/src/memory_citation.rs
+  - codex-rs/core/src/memory_usage.rs
+  - codex-rs/core/src/stream_events_utils.rs
+  - codex-rs/git-utils/src/baseline.rs
+  - codex-rs/utils/output-truncation
+
+# ours: path in this repo. theirs: path in the codex checkout.
+# Every `theirs` is existence-checked by the drift script (catches renames like
+# the read_path.md move from memories/read/ -> ext/memories/).
+mappings:
+  # --- Read path (system-prompt injection + tools) ---
+  - ours: src/templates/read_path.md
+    theirs: codex-rs/ext/memories/templates/memories/read_path.md
+    note: >
+      Read-path developer instructions. Injects a SINGLE global memory_summary.md
+      regardless of project. codex moved this from codex-rs/memories/read/ to
+      codex-rs/ext/memories/ after the plan was written.
+  - ours: src/source.ts
+    theirs: codex-rs/ext/memories/src/prompts.rs
+    note: builds the injected summary block; takes codex_home only, no cwd/project arg.
+  - ours: tools/memory.ts
+    theirs: codex-rs/ext/memories/src/tools/search.rs
+    note: >
+      memory_search/memory_read/memory_add_note. codex splits these across
+      tools/{search,read,ad_hoc_note}.rs and local/{search,read,ad_hoc_note}.rs.
+  - ours: src/path-guard.ts
+    theirs: codex-rs/ext/memories/src/local/path.rs
+    note: safe path resolution that cannot escape the memory root.
+
+  # --- Citations ---
+  - ours: src/citation.ts
+    theirs: codex-rs/memories/read/src/citations.rs
+    note: >
+      strip/parse <memory-citation><citation_entries>/<session_ids>. Also cross-check
+      codex-rs/protocol/src/memory_citation.rs for the wire schema.
+
+  # --- Storage / DB ---
+  - ours: src/db.ts
+    theirs: codex-rs/state/memory_migrations/0001_memories.sql
+    note: SQLite schema (stage1 outputs, jobs, session meta).
+  - ours: src/store.ts
+    theirs: codex-rs/state/src/runtime/memories.rs
+    note: >
+      claim/lease/retry job logic, phase2 input selection, usage recording,
+      pruning. The behavioral heart of the port; audit carefully on any change.
+
+  # --- Write path: phase 1 (extraction) ---
+  - ours: src/phase1.ts
+    theirs: codex-rs/memories/write/src/phase1.rs
+    note: transcript build + eligibility + stage1 extraction orchestration.
+  - ours: src/capture.ts
+    theirs: codex-rs/memories/write/src/phase1.rs
+    note: >
+      transcript/session loading. In codex this lives inside phase1.rs; in the
+      port it is split out for opencode's read-only opencode.db access.
+  - ours: src/redact.ts
+    theirs: codex-rs/memories/write/src/phase1.rs
+    note: secret redaction + isMemoryExcludedFragment logic (co-located in codex phase1).
+  - ours: src/templates/stage_one_system.md
+    theirs: codex-rs/memories/write/templates/memories/stage_one_system.md
+  - ours: src/templates/stage_one_input.md
+    theirs: codex-rs/memories/write/templates/memories/stage_one_input.md
+
+  # --- Write path: phase 2 (consolidation) ---
+  - ours: src/phase2.ts
+    theirs: codex-rs/memories/write/src/phase2.rs
+    note: consolidation orchestration + heartbeat/lease.
+  - ours: src/workspace.ts
+    theirs: codex-rs/memories/write/src/storage.rs
+    note: rebuild raw_memories, write rollout summaries, prune extension resources.
+  - ours: src/git-baseline.ts
+    theirs: codex-rs/git-utils/src/baseline.rs
+    note: >
+      git baseline diffing for phase 2. Port uses isomorphic-git instead of
+      libgit2; also see codex-rs/memories/write/src/workspace.rs for the diff wiring.
+  - ours: src/templates/consolidation.md
+    theirs: codex-rs/memories/write/templates/memories/consolidation.md
+    note: >
+      INVARIANT: project/cwd scoping lives ONLY here, as an LLM instruction to
+      "organize the index first by cwd / project scope, then by topic". This is
+      the entire extent of codex's project separation. Do not add hard scoping
+      elsewhere unless codex does.
+
+  # --- Control / lifecycle ---
+  - ours: tools/control.ts
+    theirs: codex-rs/memories/write/src/control.rs
+    note: memory_reset/inspect/mode; clearMemoryRootsContents equivalent.
+  - ours: src/index.ts
+    theirs: codex-rs/core/src/stream_events_utils.rs
+    note: >
+      citation extraction from streamed assistant text + session.idle triggering.
+      Loosest mapping; the plugin hook wiring is opencode-specific.
+
+  # --- Utilities ---
+  - ours: src/token.ts
+    theirs: codex-rs/utils/output-truncation
+    note: token-limit truncation for the 2500-token summary cap (chars/4 estimate here).
+  - ours: src/ratelimit.ts
+    theirs: codex-rs/memories/write/src/start.rs
+    note: >
+      DELIBERATE DIVERGENCE: codex gates on real provider rate-limit info; the
+      port uses a simple time-based heuristic stub. Revisit if codex's gating
+      is exposed to opencode plugins.
+
+  # --- Extensions (ad-hoc notes) ---
+  - ours: src/workspace.ts
+    theirs: codex-rs/memories/write/src/extensions
+    note: >
+      ad-hoc notes extension instructions + retention pruning. codex keeps this
+      in a dedicated extensions/ module; the port folds it into workspace.ts.

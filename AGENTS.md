@@ -1,0 +1,53 @@
+# AGENTS.md
+
+Guidance for agents working on `opencode-memex`.
+
+## What this is
+
+A TypeScript port of codex's memory system, packaged as a standalone opencode
+plugin. Read `ARCHITECTURE.md` before changing memory behavior — it explains the
+design and the load-bearing workarounds (D1–D5).
+
+## Staying aligned with codex
+
+This plugin mirrors codex's Rust memory implementation. Alignment is tracked, not
+assumed:
+
+- `codex-map.yaml` — provenance map: each source file → its codex origin, plus the
+  codex commit last audited (`codex_ref`).
+- `scripts/check-codex-drift.sh` — reports moved/renamed upstream files and any
+  changes to codex memory code since `codex_ref`.
+
+Before changing anything in the memory pipeline:
+
+1. Find the upstream source for the file in `codex-map.yaml`.
+2. Run `CODEX_REPO=/path/to/codex ./scripts/check-codex-drift.sh`.
+3. If it reports drift, read the upstream diff and either port it intentionally or
+   record a deliberate divergence in that mapping's `note:`.
+4. Bump `codex_ref` / `codex_ref_date` once re-audited.
+
+Do not put alignment *status* in prose (it rots). Facts live in `codex-map.yaml`;
+this file only points at the procedure.
+
+## Design invariant
+
+Memory is **global**. Project/cwd separation exists only as a soft routing hint
+inside `src/templates/consolidation.md` and the read-path prompt, mirroring codex.
+Do not add schema-level, read-path, or job-level project partitioning unless codex
+does it first. If you believe scoping is needed, confirm codex's current behavior
+via the drift script before proposing structural changes.
+
+## Conventions
+
+- `./gradlew` is not used here. Dev commands: `bun install`, `bun test`,
+  `bun run typecheck`.
+- Store/DB tests use a temp root via `OPENCODE_MEMEX_TEST_ROOT`.
+- Templates in `src/templates/*.md` generate prompts/JS-like strings the compiler
+  does not validate — review `git diff` before running tests.
+- Keep the `memorize` / `memorize-extract` subagents network-denied
+  (`bash`/`webfetch`/`websearch`/`task`); that is the sandbox (D2).
+
+## Commit hygiene
+
+- Do not add `Co-Authored-By` trailers. Keep messages concise and factual.
+- Only commit/push when explicitly asked.
