@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-04
+
+First npm release, published as `opencode-codex-memory`.
+
 ### Fixed
 
 - **Parity pass after a full subsystem audit vs codex** (`codex-map.yaml` now
@@ -134,5 +138,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/moritzfl/opencode-codex-memory/releases/tag/v0.1.0
