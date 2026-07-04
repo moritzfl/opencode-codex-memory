@@ -1,4 +1,4 @@
-# opencode-memex
+# opencode-codex-memory (memex)
 
 Persistent memory for [opencode](https://opencode.ai). Your agent remembers what
 it learned in past sessions — your conventions, your projects, the decisions you
@@ -13,7 +13,7 @@ cloud service. Everything stays on your machine under
 By default every opencode session starts from zero. You re-explain your build
 commands, your code style, and the quirks of each repo over and over.
 
-opencode-memex closes that loop:
+opencode-codex-memory closes that loop:
 
 - **It learns in the background.** After a session goes idle, the plugin reviews
   the transcript and extracts durable facts — preferences, project structure,
@@ -35,7 +35,7 @@ anything.
 
    ```json
    {
-     "plugin": ["opencode-memex"]
+     "plugin": ["opencode-codex-memory"]
    }
    ```
 
@@ -133,7 +133,7 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 ```json
 {
   "plugin": [
-    ["opencode-memex", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
@@ -159,7 +159,7 @@ extraction path.)
 
 ## Under the hood
 
-opencode-memex is a faithful port of the memory system from OpenAI's codex.
+opencode-codex-memory is a faithful port of the memory system from OpenAI's codex.
 If you want to understand the design, the trade-offs, or contribute, see
 [`ARCHITECTURE.md`](./ARCHITECTURE.md). Contributor guidance lives in
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md) —

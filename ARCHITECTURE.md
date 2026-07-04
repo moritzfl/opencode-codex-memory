@@ -1,6 +1,6 @@
 # Architecture
 
-`opencode-memex` is a TypeScript port of codex's memory system, packaged as a
+`opencode-codex-memory` is a TypeScript port of codex's memory system, packaged as a
 standalone opencode plugin (no core changes, no MCP server, no separate process).
 This document explains *how the system is shaped and why*, and how to keep it
 aligned with upstream codex over time.
@@ -45,7 +45,7 @@ partitioning unless codex does it first.
 ## Architecture overview
 
 ```
-opencode-memex plugin
+opencode-codex-memory plugin
 
 READ PATH
   experimental.chat.system.transform hook

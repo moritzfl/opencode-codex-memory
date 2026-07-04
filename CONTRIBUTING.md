@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in improving `opencode-memex`.
+Thanks for your interest in improving `opencode-codex-memory`.
 
 ## What this project is (and isn't)
 

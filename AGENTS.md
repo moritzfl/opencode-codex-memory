@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for agents working on `opencode-memex`.
+Guidance for agents working on `opencode-codex-memory`.
 
 ## What this is
 
