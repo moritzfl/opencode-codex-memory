@@ -1,19 +1,33 @@
 {
-  "name": "opencode-memex",
-  "version": "0.0.1",
+  "name": "opencode-codex-memory",
+  "version": "0.1.0",
   "description": "Persistent memory plugin for opencode — ports codex's two-phase memory system (extraction → consolidation → injection → citation feedback)",
   "type": "module",
   "main": "src/index.ts",
+  "files": [
+    "src",
+    "tools",
+    "opencode.json",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moritzfl/opencode-codex-memory.git"
+  },
+  "homepage": "https://github.com/moritzfl/opencode-codex-memory#readme",
+  "bugs": {
+    "url": "https://github.com/moritzfl/opencode-codex-memory/issues"
+  },
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["opencode", "memory", "plugin", "ai", "persistent-context"],
+  "keywords": ["opencode", "memory", "plugin", "ai", "persistent-context", "codex"],
   "license": "Apache-2.0",
   "dependencies": {
-    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/plugin": "^1.17.13",
     "diff": "^9.0.0",
     "isomorphic-git": "^1.38.6"
   },
@@ -21,7 +35,7 @@
     "typescript": "^5.5.0",
     "@types/bun": "^1.1.0"
   },
-  "peerDependencies": {
-    "bun": "^1.1.0"
+  "engines": {
+    "bun": ">=1.1.0"
   }
 }

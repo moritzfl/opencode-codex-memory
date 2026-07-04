@@ -68,7 +68,7 @@ export function takeNewCitations(partKey: string, ids: string[]): string[] {
 }
 
 export default {
-  id: "opencode-memex",
+  id: "opencode-codex-memory",
   async server(input: PluginInput, opts?: PluginOptions) {
     setPluginInput(input)
     pluginClient = input.client
@@ -105,7 +105,7 @@ function applyPluginOptions(opts: PluginOptions): void {
     if (!KNOWN_OPTION_KEYS.has(key)) {
       // codex uses deny_unknown_fields; a plugin can only warn. Covers typos
       // and the deliberately unimplemented min_rate_limit_remaining_percent.
-      console.warn(`[opencode-memex] unknown/unsupported option '${key}' ignored`)
+      console.warn(`[opencode-codex-memory] unknown/unsupported option '${key}' ignored`)
     }
   }
   if (typeof opts.generate_memories === "boolean") pluginOptions.generate_memories = opts.generate_memories
@@ -163,7 +163,7 @@ function buildHooks() {
         output.system.push(memoryPrompt)
       }
     } catch (err) {
-      console.error("[opencode-memex] system.transform error:", err)
+      console.error("[opencode-codex-memory] system.transform error:", err)
     }
   },
 
@@ -179,13 +179,13 @@ function buildHooks() {
             const before = part.text
             part.text = stripCitations(part.text)
             if (part.text.includes("<memory-citation>")) {
-              console.warn("[opencode-memex] citation marker still present after stripCitations — hook contract may have changed")
+              console.warn("[opencode-codex-memory] citation marker still present after stripCitations — hook contract may have changed")
             }
           }
         }
       }
     } catch (err) {
-      console.error("[opencode-memex] messages.transform error:", err)
+      console.error("[opencode-codex-memory] messages.transform error:", err)
     }
   },
 
@@ -208,7 +208,7 @@ function buildHooks() {
           try {
             getStore().recordUsage(fresh)
           } catch (e) {
-            console.error("[opencode-memex] recordUsage failed:", e)
+            console.error("[opencode-codex-memory] recordUsage failed:", e)
           }
         }
         return
@@ -225,7 +225,7 @@ function buildHooks() {
           try {
             getStore().markPolluted(props.sessionID)
           } catch (e) {
-            console.error("[opencode-memex] markPolluted failed:", e)
+            console.error("[opencode-codex-memory] markPolluted failed:", e)
           }
         }
         return
@@ -241,7 +241,7 @@ function buildHooks() {
           try {
             getStore().deleteSessionMemory(sid)
           } catch (e) {
-            console.error("[opencode-memex] deleteSessionMemory failed:", e)
+            console.error("[opencode-codex-memory] deleteSessionMemory failed:", e)
           }
         }
         return
@@ -257,13 +257,13 @@ function buildHooks() {
         try {
           getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
         } catch (e) {
-          console.error("[opencode-memex] stampMemoryModeIfAbsent failed:", e)
+          console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
         }
         void triggerPhase1(sid)
         return
       }
     } catch (err) {
-      console.error("[opencode-memex] event error:", err)
+      console.error("[opencode-codex-memory] event error:", err)
     }
   },
 
@@ -308,7 +308,7 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
       extractModel: pluginOptions.extract_model,
     })
   } catch (err) {
-    console.error("[opencode-memex] phase1 error:", err)
+    console.error("[opencode-codex-memory] phase1 error:", err)
   } finally {
     phase1InFlight = false
   }
@@ -325,6 +325,6 @@ async function triggerPhase2(): Promise<void> {
       consolidationModel: pluginOptions.consolidation_model,
     })
   } catch (err) {
-    console.error("[opencode-memex] phase2 error:", err)
+    console.error("[opencode-codex-memory] phase2 error:", err)
   }
 }

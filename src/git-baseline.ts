@@ -4,7 +4,7 @@ import { memoryRoot } from "./paths.js"
 import * as isogit from "isomorphic-git"
 import { createPatch } from "diff"
 
-const AUTHOR = { name: "opencode-memex", email: "memex@opencode.local" }
+const AUTHOR = { name: "opencode-codex-memory", email: "memex@opencode.local" }
 
 // Generated prompt artifact; removed before diffing and before baseline
 // commits (mirrors codex's remove_workspace_diff) so it never enters the
@@ -84,7 +84,7 @@ export async function ensureBaseline(): Promise<boolean> {
     }
     return true
   } catch (err) {
-    console.error("[opencode-memex] ensureBaseline error:", err)
+    console.error("[opencode-codex-memory] ensureBaseline error:", err)
     return false
   }
 }
@@ -137,7 +137,7 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
     }
     return { changes, unifiedDiff: patches.join("\n") }
   } catch (err) {
-    console.error("[opencode-memex] captureWorkspaceDiff error:", err)
+    console.error("[opencode-codex-memory] captureWorkspaceDiff error:", err)
     return { changes: [], unifiedDiff: "" }
   }
 }
@@ -156,7 +156,7 @@ export async function resetBaseline(): Promise<boolean> {
     await commitBaseline(dir)
     return true
   } catch (err) {
-    console.error("[opencode-memex] resetBaseline error:", err)
+    console.error("[opencode-codex-memory] resetBaseline error:", err)
     return false
   }
 }

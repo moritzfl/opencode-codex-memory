@@ -37,7 +37,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
   store.pruneStage1Outputs(opts.maxUnusedDays ?? 30)
   const rl = await checkRateLimit("phase1")
   if (!rl.ok) {
-    console.warn("[opencode-memex] skipping phase1 due to rate limit:", rl.reason)
+    console.warn("[opencode-codex-memory] skipping phase1 due to rate limit:", rl.reason)
     return
   }
   const eligible = selectEligibleSessions(store, opts)

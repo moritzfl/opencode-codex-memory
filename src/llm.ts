@@ -195,10 +195,10 @@ async function deleteSession(id: string): Promise<void> {
   try {
     const res = await input.client.session.delete({ path: { id } })
     if (res.error) {
-      console.warn(`[opencode-memex] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
+      console.warn(`[opencode-codex-memory] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
     }
   } catch (err) {
-    console.warn(`[opencode-memex] error deleting sub-session ${id}:`, err)
+    console.warn(`[opencode-codex-memory] error deleting sub-session ${id}:`, err)
   }
 }
 
