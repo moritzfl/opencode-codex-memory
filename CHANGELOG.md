@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-04
+
 ### Added
 
 - The `memorize` / `memorize-extract` sub-agents register themselves via the
@@ -15,8 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name always wins. Skipped when `generate_memories` is off.
 
 ## [0.1.1] - 2026-07-04
-
-First npm release, published as `opencode-codex-memory`.
 
 ### Fixed
 
@@ -145,6 +145,7 @@ First npm release, published as `opencode-codex-memory`.
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/moritzfl/opencode-codex-memory/releases/tag/v0.1.0
