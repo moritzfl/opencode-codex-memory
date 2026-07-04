@@ -42,18 +42,18 @@ anything.
    (While developing locally, point it at an absolute path to your checkout
    instead of the package name.)
 
-2. The plugin ships two restricted sub-agents (`memorize`, `memorize-extract`)
-   that do the background learning. If your config manager does not auto-merge
-   plugin configs, copy the `agent` block from the plugin's `opencode.json` into
-   your own config — opencode needs those definitions to run the memory pipeline.
-
-3. That's it. The memory workspace is created on first use. Installing the
+2. That's it. The memory workspace is created on first use. Installing the
    plugin is the opt-in: background learning and summary injection are active
    immediately (codex ships the same system behind an experimental flag with a
    consent prompt; a standalone memory plugin *is* the consent).
 
 Requires only opencode (official release). Git is bundled (`isomorphic-git`) —
 no `git` binary or any other external tool needed.
+
+The two restricted sub-agents that do the background learning (`memorize`,
+`memorize-extract`) register themselves automatically. To customize one — e.g.
+pin a cheaper model for extraction — define an agent with the same name in your
+own config; your definition wins and the plugin leaves it alone.
 
 ## Try it
 

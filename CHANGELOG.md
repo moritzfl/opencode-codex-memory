@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `memorize` / `memorize-extract` sub-agents register themselves via the
+  plugin `config` hook — no manual `agent` block needed anymore. Definitions
+  come from the bundled `opencode.json`; a user-defined agent with the same
+  name always wins. Skipped when `generate_memories` is off.
+
 ## [0.1.1] - 2026-07-04
 
 First npm release, published as `opencode-codex-memory`.

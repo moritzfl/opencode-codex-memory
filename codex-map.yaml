@@ -165,7 +165,10 @@ mappings:
       the consent (README states this). memory_mode stamping at first
       session.idle mirrors codex's stamp-at-thread-creation (session.rs);
       MCP pollution matches every configured server via client.mcp.status()
-      (codex marks all MCP servers pollutes_memory=true).
+      (codex marks all MCP servers pollutes_memory=true). (3) the memorize /
+      memorize-extract sub-agents self-register through the plugin config
+      hook (user-defined agents of the same name win) — pure opencode
+      packaging; codex ships its memory agents inside the binary.
 
   # --- Utilities ---
   - ours: src/token.ts

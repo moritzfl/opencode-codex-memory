@@ -7,6 +7,8 @@ import { runPhase1, DEFAULT_PHASE1_OPTIONS } from "./phase1.js"
 import { runPhase2, DEFAULT_PHASE2_OPTIONS } from "./phase2.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession } from "./llm.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
+import fs from "fs"
+import path from "path"
 
 let store: MemoryStore | null = null
 let phase1InFlight = false
@@ -148,8 +150,42 @@ async function isExternalContextTool(toolName: string): Promise<boolean> {
   return false
 }
 
+/**
+ * Registers the memorize / memorize-extract sub-agents through the config
+ * hook so installing the plugin requires no manual agent setup. Definitions
+ * are read from the plugin's bundled opencode.json (single source of truth
+ * with the dev checkout). A user-defined agent of the same name always wins —
+ * only missing entries are filled. opencode-specific packaging: codex ships
+ * its memory agents inside the binary.
+ */
+export function injectAgentDefinitions(config: { agent?: Record<string, unknown> }): void {
+  let defs: Record<string, unknown>
+  try {
+    const raw = fs.readFileSync(path.join(import.meta.dirname, "..", "opencode.json"), "utf8")
+    defs = (JSON.parse(raw) as { agent?: Record<string, unknown> }).agent ?? {}
+  } catch (err) {
+    console.warn("[opencode-codex-memory] could not load bundled agent definitions:", err)
+    return
+  }
+  config.agent ??= {}
+  for (const [name, def] of Object.entries(defs)) {
+    if (!config.agent[name]) config.agent[name] = def
+  }
+}
+
 function buildHooks() {
   const base = {
+  async config(input: { agent?: Record<string, unknown> }): Promise<void> {
+    try {
+      // The write pipeline is the only consumer of the sub-agents; with
+      // generation off they would just pollute the user's agent list.
+      if (!pluginOptions.generate_memories) return
+      injectAgentDefinitions(input)
+    } catch (err) {
+      console.error("[opencode-codex-memory] config hook error:", err)
+    }
+  },
+
   async "experimental.chat.system.transform"(
     input: { sessionID?: string; model: unknown },
     output: { system: string[] },
