@@ -64,6 +64,26 @@ describe("MemoryStore stage1", () => {
     expect(store.claimStage1Jobs(many, undefined, 2).length).toBe(0)
   })
 
+  it("enforces the running-jobs cap across separate DB connections", () => {
+    // Regression for the multi-instance extraction storm: every opencode
+    // instance (TUI, web panel, per-project) loads the plugin and runs its
+    // own phase-1 pass, so the cap must hold via memory.db, not process state.
+    const { MemoryStore } = require("../src/store.js")
+    const { memoryDbPath } = require("../src/paths.js")
+    const { Database } = require("bun:sqlite")
+    const many = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
+    const storeA = new MemoryStore()
+    expect(storeA.claimStage1Jobs(many, undefined, 2).length).toBe(2)
+    const dbB = new Database(memoryDbPath(), { readwrite: true })
+    dbB.exec("PRAGMA busy_timeout=5000")
+    try {
+      const storeB = new MemoryStore(dbB)
+      expect(storeB.claimStage1Jobs(many, undefined, 2).length).toBe(0)
+    } finally {
+      dbB.close()
+    }
+  })
+
   it("clamps maxClaimed to the concurrency ceiling", () => {
     const { MemoryStore, STAGE1_CONCURRENCY } = require("../src/store.js")
     const store = new MemoryStore()
