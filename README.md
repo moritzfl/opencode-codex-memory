@@ -1,4 +1,4 @@
-# opencode-codex-memory (memex)
+# opencode-codex-memory
 
 Persistent memory for [opencode](https://opencode.ai). Your agent remembers what
 it learned in past sessions — your conventions, your projects, the decisions you

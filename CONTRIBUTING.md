@@ -46,7 +46,7 @@ bun test
 bun run typecheck
 ```
 
-- Store/DB tests use a temp root via `OPENCODE_MEMEX_TEST_ROOT`.
+- Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
 - Templates in `src/templates/*.md` generate prompt text the compiler cannot
   validate — review your `git diff` carefully.
 - Keep the `memorize` / `memorize-extract` subagents network-denied

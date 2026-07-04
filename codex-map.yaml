@@ -1,6 +1,6 @@
 # codex-map.yaml
 #
-# Provenance map: opencode-memex is a TypeScript port of codex's Rust memory
+# Provenance map: opencode-codex-memory is a TypeScript port of codex's Rust memory
 # system. This file is the single source of truth for "which codex file does
 # each of our files come from" and "which codex commit did we last audit".
 #

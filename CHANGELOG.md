@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Phase 2 input selection kept dropping old-but-actively-cited memories (recent activity *or* recent usage now qualifies), and `pruneStage1Outputs` is now actually called each Phase 2 run.
 - Citation usage was counted once per streaming delta instead of once per message part, inflating `usage_count`.
 - Template substitution no longer expands `$&`/`$'`/`$n` patterns contained in transcripts or the memory summary.
-- memex's own sub-sessions are isolated: no memory prompt injection, no phase-1 triggering on their idle events, and excluded from session capture at the SQL level.
+- The plugin's own sub-sessions are isolated: no memory prompt injection, no phase-1 triggering on their idle events, and excluded from session capture at the SQL level.
 
 ### Added
 
@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Renamed to `opencode-codex-memory`** for npm publishing (`opencode-memex` is
+  taken by an unrelated plugin). Plugin id, log prefixes, baseline commit
+  author/message, the test-root env var (`OPENCODE_CODEX_MEMORY_TEST_ROOT`), and
+  the sub-session title prefix (`codex-memory-`) all follow. Sub-sessions titled
+  with the old prefix are no longer auto-cleaned or excluded from capture —
+  delete any stragglers from before the rename.
 - **Behavior change (parity):** `memory_search` is now case-sensitive by default (pass `case_sensitive: false` for the old behavior), searches all non-hidden files instead of only `.md`/`.txt`/`.json`, and returns results in `(path, line)` order with a default limit of 200. Ad-hoc note filenames use codex's hyphen layout (`<timestamp>-<slug>.md`) and never overwrite on collision.
 - **Behavior change from new defaults:** memory now waits longer before extracting a session (idle ≥6h, was ≥1h), only looks back 10 days (was 14), and processes at most 2 sessions per pass. Web/MCP sessions are no longer excluded from memory by default — set `disable_on_external_context: true` to restore that.
 - Renamed the `generate_memory` option to `generate_memories` to match codex; update your `opencode.json` if you set it.
@@ -81,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session `cwd` captured and rendered through raw_memories.md and rollout summaries; summary files named `<timestamp>-<shorthash>-<slug>.md`; transcripts strip citation blocks and truncate head+tail.
   - `extensions/ad_hoc/instructions.md` seeded; resource pruning is filename-timestamp based and never touches notes or instructions; `extract_model` and `consolidation_model` plugin options wired to sub-agent prompts.
 - `phase2_workspace_diff.md` now matches codex's format: a `## Status` listing plus a `## Diff` section with the real unified content diff since the last consolidation (per-file diffs rendered in full, total bounded at 4 MiB with a truncation marker). Previously the consolidation agent only got the file-status list. The artifact is removed before diffing and before baseline commits so it never enters baseline history.
-- Full implementation of the codex memory architecture as a standalone opencode plugin (`opencode-memex`).
+- Full implementation of the codex memory architecture as a standalone opencode plugin (`opencode-codex-memory`).
 - **Stage 0 (Read path MVP)**: `memory_summary.md` (≤2500 tokens) is read from `~/.local/share/opencode/memories/` and injected into every system prompt via `experimental.chat.system.transform`. Byte-identical append → provider cache stable.
 - **Stage 1 (Tools + Citations)**:
   - Tools: `memory_read`, `memory_search`, `memory_add_note`.
@@ -109,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Comprehensive unit tests (42 tests).
 - Basic read-path integration harness (`tests/integration.ts`) and a detailed manual/agentic write-pipeline test procedure (`tests/WRITE_PIPELINE_TEST.md`) added. No automated Jest/Bun end-to-end harness yet.
   - Documentation: `README.md`, `RUNNING.md` (official opencode + plugin install), implementation plan preserved.
-  - Plugin renamed from `opencode-memory` to `opencode-memex` for clarity.
+  - Plugin renamed from its `opencode-memory` working title.
 
 ### Changed
 
@@ -128,5 +134,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/anomalyco/opencode-memex/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/anomalyco/opencode-memex/releases/tag/v0.1.0
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/moritzfl/opencode-codex-memory/releases/tag/v0.1.0

@@ -41,7 +41,7 @@ via the drift script before proposing structural changes.
 
 - `./gradlew` is not used here. Dev commands: `bun install`, `bun test`,
   `bun run typecheck`.
-- Store/DB tests use a temp root via `OPENCODE_MEMEX_TEST_ROOT`.
+- Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
 - Templates in `src/templates/*.md` generate prompts/JS-like strings the compiler
   does not validate — review `git diff` before running tests.
 - Keep the `memorize` / `memorize-extract` subagents network-denied

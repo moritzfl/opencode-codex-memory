@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# check-codex-drift.sh — report how far opencode-memex has drifted from the
+# check-codex-drift.sh — report how far opencode-codex-memory has drifted from the
 # codex memory implementation it was ported from.
 #
 # It answers two questions against a local codex checkout:
