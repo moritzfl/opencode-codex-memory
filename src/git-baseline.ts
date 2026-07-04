@@ -4,7 +4,7 @@ import { memoryRoot } from "./paths.js"
 import * as isogit from "isomorphic-git"
 import { createPatch } from "diff"
 
-const AUTHOR = { name: "opencode-codex-memory", email: "memex@opencode.local" }
+const AUTHOR = { name: "opencode-codex-memory", email: "memory@opencode.local" }
 
 // Generated prompt artifact; removed before diffing and before baseline
 // commits (mirrors codex's remove_workspace_diff) so it never enters the
