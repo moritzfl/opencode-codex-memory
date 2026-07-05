@@ -167,7 +167,10 @@ export async function consolidateViaSubagent(memoryRoot: string, diffFileName: s
   }
 }
 
-export async function cleanupOldSubSessions(maxAgeMinutes = 30): Promise<void> {
+// Must exceed the longest legitimate sub-session lifetime (consolidation may
+// run up to CONSOLIDATION_TIMEOUT_MS = 60min), or a second opencode instance /
+// plugin reload would delete a working sub-session mid-run.
+export async function cleanupOldSubSessions(maxAgeMinutes = 90): Promise<void> {
   const input = getPluginInput()
   if (!input) return
   try {
