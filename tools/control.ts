@@ -4,7 +4,6 @@ import { tool } from "@opencode-ai/plugin"
 import { memoryRoot, memorySummaryPath } from "@/paths"
 import { MemoryStore } from "@/store"
 import { invalidateCache } from "@/source"
-import { closeDb } from "@/db"
 import { estimateTokens } from "@/token"
 
 function isSymlinkedRoot(): boolean {
@@ -72,7 +71,8 @@ export const memory_reset = tool({
       const store = new MemoryStore()
       store.clearMemoryData()
       wipeMemoriesDir()
-      closeDb()
+      // codex keeps its state DB pool open across resets (clear_memory_roots_contents
+      // only wipes directories); closing here would strand cached handles elsewhere.
       invalidateCache()
       return { output: "Memory reset complete. Extracted memories and jobs cleared, memories directory (incl. git history) wiped, cache invalidated. Per-session memory modes were preserved." }
     } catch (err) {

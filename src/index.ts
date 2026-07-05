@@ -10,7 +10,6 @@ import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import fs from "fs"
 import path from "path"
 
-let store: MemoryStore | null = null
 let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
 // Configured MCP server names, fetched lazily; null until first successful fetch.
@@ -43,9 +42,10 @@ let pluginOptions: {
   min_rollout_idle_hours: 6,
 }
 
+// Deliberately uncached: openDb() is already a singleton, and caching a store
+// here would hold a stale handle across closeDb() (e.g. after memory_reset).
 function getStore(): MemoryStore {
-  if (!store) store = new MemoryStore()
-  return store
+  return new MemoryStore()
 }
 
 // Citation blocks arrive via message.part.updated once per streaming delta,
