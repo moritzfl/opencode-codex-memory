@@ -1,4 +1,4 @@
-import { MemoryStore, PHASE2_COOLDOWN_MS } from "./store.js"
+import { MemoryStore } from "./store.js"
 import { ensureLayout, rebuildRawMemories, writeRolloutSummaries, pruneExtensionResources, writeWorkspaceDiff } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
 import { consolidateViaSubagent } from "./llm.js"
@@ -97,5 +97,3 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
     phase2InFlight = false
   }
 }
-
-export const PHASE2_COOLDOWN = PHASE2_COOLDOWN_MS

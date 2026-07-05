@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { memoryDbPath } from "./paths.js"
 
-export const SCHEMA_V1 = [
+const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS memory_stage1_outputs (
     session_id TEXT PRIMARY KEY,
     source_updated_at INTEGER NOT NULL,
@@ -77,8 +77,4 @@ export function closeDb(): void {
     dbInstance.close()
     dbInstance = null
   }
-}
-
-export function resetDbForTest(): void {
-  closeDb()
 }

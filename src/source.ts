@@ -55,8 +55,5 @@ export function buildMemorySystemPrompt(): string | null {
 }
 
 export function ensureMemoryLayout(): void {
-  const root = memoryRoot()
-  if (!fs.existsSync(root)) {
-    fs.mkdirSync(root, { recursive: true })
-  }
+  fs.mkdirSync(memoryRoot(), { recursive: true })
 }

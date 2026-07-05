@@ -14,7 +14,7 @@ export function setPluginInput(input: PluginInput): void {
   inputRef = input
 }
 
-export function getPluginInput(): PluginInput | null {
+function getPluginInput(): PluginInput | null {
   return inputRef
 }
 
@@ -207,7 +207,7 @@ async function deleteSession(id: string): Promise<void> {
 export function fillTemplate(tmpl: string, vars: Record<string, string>): string {
   let out = tmpl
   for (const [key, value] of Object.entries(vars)) {
-    out = out.replace(`{{ ${key} }}`, () => value)
+    out = out.replaceAll(`{{ ${key} }}`, () => value)
   }
   return out
 }
@@ -221,12 +221,10 @@ function buildExtractionInput(sessionId: string, cwd: string, transcript: string
 }
 
 function buildConsolidationPrompt(memoryRoot: string, diffFileName: string): string {
-  const tmpl = readTemplate("consolidation.md")
-  let out = tmpl
-  // These placeholders appear many times in the template; replace all occurrences.
-  out = out.split("{{ memory_root }}").join(memoryRoot)
-  out = out.split("{{ phase2_workspace_diff_file }}").join(diffFileName)
-  return out
+  return fillTemplate(readTemplate("consolidation.md"), {
+    memory_root: memoryRoot,
+    phase2_workspace_diff_file: diffFileName,
+  })
 }
 
 function readTemplate(name: string): string {

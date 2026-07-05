@@ -26,10 +26,6 @@ export interface Stage1Output {
   last_usage: number | null
 }
 
-export type ClaimResult =
-  | { type: "claimed"; sessionId: string; workerId: string; ownershipToken: string }
-  | { type: "skipped" }
-
 export interface Stage1Claim {
   sessionId: string
   ownershipToken: string

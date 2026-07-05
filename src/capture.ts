@@ -43,7 +43,6 @@ export interface TranscriptMessage {
   type: string
   role?: string
   text?: string
-  seq: number
 }
 
 export function loadTranscript(sessionId: string): TranscriptMessage[] {
@@ -59,7 +58,7 @@ export function loadTranscript(sessionId: string): TranscriptMessage[] {
          ORDER BY p.time_created ASC`,
       )
       .all(sessionId) as { data: string; msg_data: string }[]
-    return rows.map((r, i) => {
+    return rows.map((r) => {
       let parsed: any = {}
       try {
         parsed = JSON.parse(r.data)
@@ -72,7 +71,6 @@ export function loadTranscript(sessionId: string): TranscriptMessage[] {
       } catch {
       }
       return {
-        seq: i,
         type: parsed.type ?? "unknown",
         role,
         text: extractText(parsed),

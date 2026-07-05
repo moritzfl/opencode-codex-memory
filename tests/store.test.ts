@@ -8,12 +8,12 @@ const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-store-${process.
 beforeEach(() => {
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
-  const { resetDbForTest } = require("../src/db.js")
-  resetDbForTest()
+  const { closeDb } = require("../src/db.js")
+  closeDb()
 })
 afterEach(() => {
-  const { resetDbForTest } = require("../src/db.js")
-  resetDbForTest()
+  const { closeDb } = require("../src/db.js")
+  closeDb()
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })

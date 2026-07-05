@@ -1,3 +1,4 @@
+import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
@@ -65,17 +66,7 @@ export function rolloutSummaryFileStem(o: Pick<Stage1Output, "session_id" | "sou
   const ts = new Date(o.source_updated_at)
   const pad = (n: number) => String(n).padStart(2, "0")
   const timestamp = `${ts.getUTCFullYear()}-${pad(ts.getUTCMonth() + 1)}-${pad(ts.getUTCDate())}T${pad(ts.getUTCHours())}-${pad(ts.getUTCMinutes())}-${pad(ts.getUTCSeconds())}`
-  let h = 0
-  for (let i = 0; i < o.session_id.length; i++) {
-    h = (h * 31 + o.session_id.charCodeAt(i)) >>> 0
-  }
-  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-  let hash = ""
-  let v = h % 36 ** 4
-  for (let i = 0; i < 4; i++) {
-    hash = alphabet[v % 36] + hash
-    v = Math.floor(v / 36)
-  }
+  const hash = createHash("sha1").update(o.session_id).digest("hex").slice(0, 4)
   const prefix = `${timestamp}-${hash}`
   const slug = (o.rollout_slug ?? "")
     .toLowerCase()
