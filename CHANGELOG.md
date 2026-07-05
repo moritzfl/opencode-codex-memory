@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-05
+
+### Fixed
+
+- `memory_reset` no longer breaks memory until restart: it closed the SQLite
+  handle while the plugin kept using a cached store, so every subsequent
+  hook-driven DB operation failed silently. The DB now stays open across resets
+  (matching codex, which only wipes directories) and the store is no longer
+  cached.
+- Startup sub-session cleanup no longer can kill an in-flight consolidation:
+  the cutoff was 30 minutes while consolidation is allowed 60; it is now
+  90 minutes.
+
+### Changed
+
+- Internal cleanup: dead code removed, `node:crypto` short hash for summary
+  filenames (was hand-rolled base36), template fill via `replaceAll`.
+
 ## [0.1.2] - 2026-07-04
 
 ### Added
@@ -145,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/moritzfl/opencode-codex-memory/releases/tag/v0.1.0
