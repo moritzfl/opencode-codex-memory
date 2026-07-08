@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ESNext", "DOM"],
     "types": ["bun"],
     "strict": true,
@@ -12,11 +12,12 @@
     "resolveJsonModule": true,
     "declaration": true,
     "outDir": "dist",
+    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "tools/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts", "tools/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
 }

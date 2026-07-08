@@ -1,12 +1,21 @@
 {
   "name": "opencode-codex-memory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Persistent memory plugin for opencode — ports codex's two-phase memory system (extraction → consolidation → injection → citation feedback)",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "./dist/src/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+    },
+    "./tools/*": {
+      "import": "./dist/tools/*.js",
+      "types": "./dist/tools/*.d.ts"
+    }
+  },
   "files": [
-    "src",
-    "tools",
+    "dist",
     "opencode.json",
     "NOTICE"
   ],
@@ -20,7 +29,8 @@
   },
   "scripts": {
     "dev": "bun --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target bun",
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

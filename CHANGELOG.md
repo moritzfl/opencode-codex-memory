@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-07-08
+
+### Fixed
+
+- Plugin was published as TypeScript source (`"main": "src/index.ts"`) with no compiled JavaScript output, so the opencode binary could not load or execute it even though it appeared in the plugin list. The package now compiles to `dist/` with `tsc`, ships only compiled JS, and points `main`/`exports` at `dist/src/index.js`.
+- `tools/control.ts` and `tools/memory.ts` used Bun path aliases (`@/...`) that `tsc` does not rewrite; they now import from `../src/*.js` so the compiled output resolves under Node/Bun module resolution.
+
 ## [0.1.3] - 2026-07-05
 
 ### Fixed
