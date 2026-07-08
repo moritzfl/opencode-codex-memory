@@ -1,6 +1,6 @@
 {
   "name": "opencode-codex-memory",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Persistent memory plugin for opencode — ports codex's two-phase memory system (extraction → consolidation → injection → citation feedback)",
   "type": "module",
   "main": "./dist/src/index.js",
@@ -34,7 +34,14 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["opencode", "memory", "plugin", "ai", "persistent-context", "codex"],
+  "keywords": [
+    "opencode",
+    "memory",
+    "plugin",
+    "ai",
+    "persistent-context",
+    "codex"
+  ],
   "license": "Apache-2.0",
   "dependencies": {
     "@opencode-ai/plugin": "^1.17.13",
