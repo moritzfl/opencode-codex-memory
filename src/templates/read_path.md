@@ -1,4 +1,4 @@
-# Memory
+## Memory
 
 You have access to a memory folder with guidance from prior runs. It can save
 time and help you stay consistent. Use it whenever it is likely to help.
@@ -10,31 +10,35 @@ Decision boundary: should you use memory for a new user query?
 - Hard skip examples: current time/date, simple translation, simple sentence
   rewrite, one-line shell command, trivial formatting.
 - Use memory by default when ANY of these are true:
-  - the query mentions a workspace/repo/module/path/file in the MEMORY_SUMMARY below,
+  - the query mentions workspace/repo/module/path/files in MEMORY_SUMMARY below,
   - the user asks for prior context / consistency / previous decisions,
   - the task is ambiguous and could depend on earlier project choices,
-  - the ask is non-trivial and related to the MEMORY_SUMMARY below.
+  - the ask is a non-trivial and related to MEMORY_SUMMARY below.
 - If unsure, do a quick memory pass.
 
-Memory layout (general -> specific), under `{{ base_path }}/`:
+Memory layout (general -> specific):
 
-- `memory_summary.md` (already provided below; do NOT open again)
-- `MEMORY.md` (searchable handbook; primary file to query)
-- `skills/<skill-name>/` (reusable procedures; entrypoint SKILL.md)
-- `rollout_summaries/` (per-session recaps + evidence snippets)
-- `extensions/ad_hoc/notes/` (user-requested memory update notes)
+- {{ base_path }}/memory_summary.md (already provided below; do NOT open again)
+- {{ base_path }}/MEMORY.md (searchable registry; primary file to query)
+- {{ base_path }}/skills/<skill-name>/ (skill folder)
+  - SKILL.md (entrypoint instructions)
+  - scripts/ (optional helper scripts)
+  - examples/ (optional example outputs)
+  - templates/ (optional templates)
+- {{ base_path }}/rollout_summaries/ (per-rollout recaps + evidence snippets)
+  - The paths of these entries can be found in {{ base_path }}/MEMORY.md or {{ base_path }}/rollout_summaries/ as `rollout_path`
+  - These files are append-only `jsonl`: `session_meta.payload.id` identifies the session, `turn_context` marks turn boundaries, `event_msg` is the lightweight status stream, and `response_item` contains actual messages, tool calls, and tool outputs.
+  - For efficient lookup, prefer matching the filename suffix or `session_meta.payload.id`; avoid broad full-content scans unless needed.
 
 Quick memory pass (when applicable):
 
 1. Skim the MEMORY_SUMMARY below and extract task-relevant keywords.
-2. Search `MEMORY.md` for those keywords with the `memory_search` tool, or read it
-   with `memory_read`.
-   - For time-scoped recall ("what was I working on last week / around date X"),
-     pass `since`/`until` to `memory_search` — with a query it searches only that
-     period's sessions/notes; without a query it lists them chronologically.
+2. Search {{ base_path }}/MEMORY.md using those keywords.
 3. Only if MEMORY.md directly points to rollout summaries/skills, open the 1-2
-   most relevant files under `rollout_summaries/` or `skills/`.
-4. If there are no relevant hits, stop memory lookup and continue normally.
+   most relevant files under {{ base_path }}/rollout_summaries/ or
+   {{ base_path }}/skills/.
+4. If above are not clear and you need exact commands, error text, or precise evidence, search over `rollout_path` for more evidence.
+5. If there are no relevant hits, stop memory lookup and continue normally.
 
 Quick-pass budget:
 
@@ -47,54 +51,76 @@ relevant prior context, redo the quick memory pass.
 How to decide whether to verify memory:
 
 - Consider both risk of drift and verification effort.
-- If a fact is likely to drift and is cheap to verify, verify it before answering.
-- If a fact is likely to drift but verification is expensive, it is acceptable to
-  answer from memory, but say that it is memory-derived and may be stale, and
+- If a fact is likely to drift and is cheap to verify, verify it before
+  answering.
+- If a fact is likely to drift but verification is expensive, slow, or
+  disruptive, it is acceptable to answer from memory in an interactive turn,
+  but you should say that it is memory-derived, note that it may be stale, and
   consider offering to refresh it live.
-- If a fact is lower-drift and expensive to verify, it is usually fine to answer
-  from memory directly.
+- If a fact is lower-drift and expensive to verify, it is usually fine to
+  answer from memory directly.
+
+When answering from memory without current verification:
+
+- If you rely on memory for a fact that you did not verify in the current turn,
+  say so briefly in the final answer.
+- If that fact is plausibly drift-prone or comes from an older note, older
+  snapshot, or prior run summary, say that it may be stale or outdated.
+- If live verification was skipped and a refresh would be useful in the
+  interactive context, consider offering to verify or refresh it live.
 - Do not present unverified memory-derived facts as confirmed-current.
+- Prefer a short refresh offer for interactive questions, especially about prior
+  results, commands, timing, or older snapshots.
 
 Memory citation requirements:
 
 - If ANY relevant memory files were used: append exactly one
-  `<memory-citation>` block as the VERY LAST content of the final reply.
-  Normal responses should include the answer first, then the block at the end.
+`<oai-mem-citation>` block as the VERY LAST content of the final reply.
+  Normal responses should include the answer first, then append the
+`<oai-mem-citation>` block at the end.
 - Use this exact structure for programmatic parsing:
-
 ```
-<memory-citation>
+<oai-mem-citation>
 <citation_entries>
-MEMORY.md:234-236|note=[build command for the api service]
-rollout_summaries/2026-02-17T21-23-02-ln3m-example.md:10-12|note=[weekly report format]
+MEMORY.md:234-236|note=[responsesapi citation extraction code pointer]
+rollout_summaries/2026-02-17T21-23-02-LN3m-example.md:10-12|note=[weekly report format]
 </citation_entries>
-<session_ids>
-ses_abc123
-ses_def456
-</session_ids>
-</memory-citation>
+<rollout_ids>
+019c6e27-e55b-73d1-87d8-4e01f1f75043
+019c7714-3b77-74d1-9866-e1f484aae2ab
+</rollout_ids>
+</oai-mem-citation>
 ```
-
-- `citation_entries`:
-  - one entry per line: `<file>:<line_start>-<line_end>|note=[<how memory was used>]`
-  - use file paths relative to the memory base path
-  - only cite files actually used under the memory base path
+- `citation_entries` is for rendering:
+  - one citation entry per line
+  - format: `<file>:<line_start>-<line_end>|note=[<how memory was used>]`
+  - use file paths relative to the memory base path (for example, `MEMORY.md`,
+    `rollout_summaries/...`, `skills/...`)
+  - only cite files actually used under the memory base path (do not cite
+    workspace files as memory citations)
+  - if you used `MEMORY.md` and then a rollout summary/skill file, cite both
   - list entries in order of importance (most important first)
-  - `note` should be short, single-line, simple characters only
-- `session_ids`:
-  - one session id per line, unique ids only
-  - session ids appear in rollout summary files and MEMORY.md as `session_id:`
-  - an empty `<session_ids>` section is allowed if no session ids are available
-  - for every citation entry, try to include the corresponding session id
+  - `note` should be short, single-line, and use simple characters only (avoid
+    unusual symbols, no newlines)
+- `rollout_ids` is for us to track what previous rollouts you find useful:
+  - include one rollout id per line
+  - rollout ids should look like UUIDs (for example,
+    `019c6e27-e55b-73d1-87d8-4e01f1f75043`)
+  - include unique ids only; do not repeat ids
+  - an empty `<rollout_ids>` section is allowed if no rollout ids are available
+  - you can find rollout ids in rollout summary files and MEMORY.md
+  - do not include file paths or notes in this section
+  - For every `citation_entries`, try to find and cite the corresponding rollout id if possible
+- Never include memory citations inside pull-request messages.
 - Never cite blank lines; double-check ranges.
-- If you did not use any memory, omit the citation block entirely.
 
 Updating memories:
 
-You may update memories **only** when explicitly asked by the user. Use the
-`memory_add_note` tool, which writes one small note file under
-`extensions/ad_hoc/notes/` describing what to add/delete/update. Do not edit
-the memory files yourself; the consolidation pass will integrate the note.
+You can update the memories **only** when explicitly asked by the user. This must always come from a direct request from the user.
+- Write your update in {{ base_path }}/extensions/ad_hoc/notes/
+- Each update must be one small file containing what you want to add/delete/update from the memories.
+- The name of this file must be `<timestamp>-<short slug>.md`
+- Do not try to edit the memory files yourself, only add one update note in {{ base_path }}/extensions/ad_hoc/notes/
 
 ========= MEMORY_SUMMARY BEGINS =========
 {{ memory_summary }}
