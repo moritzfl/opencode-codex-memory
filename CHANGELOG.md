@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-10
+
 ### Fixed
 
 - Phase 2 now validates consolidation artifacts like codex (#32193): early
@@ -214,7 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.3...v0.1.6
 [0.1.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.0...v0.1.1

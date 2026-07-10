@@ -1,6 +1,6 @@
 {
   "name": "opencode-codex-memory",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Persistent memory plugin for opencode — ports codex's two-phase memory system (extraction → consolidation → injection → citation feedback)",
   "type": "module",
   "main": "./dist/src/index.js",
