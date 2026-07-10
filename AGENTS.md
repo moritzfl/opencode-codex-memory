@@ -40,12 +40,31 @@ via the drift script before proposing structural changes.
 ## Conventions
 
 - `./gradlew` is not used here. Dev commands: `bun install`, `bun test`,
-  `bun run typecheck`.
+  `bun run typecheck`, `bun run build`, `bun run smoke`.
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
-- Templates in `src/templates/*.md` generate prompts/JS-like strings the compiler
-  does not validate — review `git diff` before running tests.
+- Templates in `src/templates/*.md` are ported from codex with deliberate
+  platform adaptations (citation tags, memory-tool guidance, session metadata,
+  placeholder inventory). **Never byte-copy them from codex.** Before syncing a
+  template, read its mapping `note:` in `codex-map.yaml` and re-apply the listed
+  adaptations; `tests/prompts.test.ts` fails on contract breaks.
 - Keep the `memorize` / `memorize-extract` subagents network-denied
   (`bash`/`webfetch`/`websearch`/`task`); that is the sandbox (D2).
+
+## Packaging & releases
+
+- Runtime assets must ship inside `dist/`: `bun run build` compiles and copies
+  `src/templates/` and `opencode.json` there. Anything the plugin reads via
+  `import.meta.dirname` at runtime has to exist under `dist/` in the published
+  package — `bun run smoke` loads the built entry the way opencode does and
+  runs automatically at prepack, gating `npm pack`/`npm publish`.
+- npm versions are immutable: fix a broken release by bumping the patch
+  version, never by re-publishing.
+- opencode installs npm plugins once into `~/.cache/opencode/packages/<spec>/`
+  and never re-resolves while `node_modules/` exists there; delete those dirs
+  to pick up a new release. To test the packed artifact without publishing:
+  `npm pack`, install the tarball into a scratch dir, and point a test
+  config's `plugin` at the installed directory (`file://...`) — or install it
+  into the cache dir and use the bare npm spec.
 
 ## Commit hygiene
 

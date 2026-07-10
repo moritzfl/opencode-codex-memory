@@ -47,8 +47,10 @@ bun run typecheck
 ```
 
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
-- Templates in `src/templates/*.md` generate prompt text the compiler cannot
-  validate — review your `git diff` carefully.
+- Templates in `src/templates/*.md` are ported from codex with deliberate
+  platform adaptations — never byte-copy them from upstream. Read the mapping
+  `note:` in `codex-map.yaml` first; `tests/prompts.test.ts` guards the
+  citation/tool/placeholder contracts.
 - Keep the `memorize` / `memorize-extract` subagents network-denied
   (`bash`/`webfetch`/`websearch`/`task` denied); that is the sandbox.
 
