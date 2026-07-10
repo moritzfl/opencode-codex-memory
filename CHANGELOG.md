@@ -19,8 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Re-synced `stage_one_system.md`, `consolidation.md`, and `read_path.md` from
-  codex HEAD (were ~half the upstream size). `stage_one_input.md` stays
-  platform-shaped (session placeholders). Bumped `codex_ref` in `codex-map.yaml`.
+  codex HEAD (were ~half the upstream size), re-applying the port's platform
+  adaptations on top: the `<memory-citation>`/`<session_ids>` citation contract
+  that `citation.ts` parses, `memory_search`/`memory_read`/`memory_add_note`
+  tool guidance (the memory dir lives outside the workspace), per-session
+  markdown rollout summaries with `session_id` metadata (codex references raw
+  `.jsonl` rollouts via `rollout_path`/`thread_id`), and codex's
+  memory-extension prompt blocks now rendered by `buildConsolidationPrompt`
+  (prompts.rs parity). `stage_one_input.md` stays platform-shaped. New
+  `tests/prompts.test.ts` guards the placeholder inventory and citation/tool
+  contracts. Bumped `codex_ref` in `codex-map.yaml`.
 
 ## [0.1.6] - 2026-07-10
 

@@ -50,8 +50,15 @@ mappings:
   - ours: src/templates/read_path.md
     theirs: codex-rs/ext/memories/templates/memories/read_path.md
     note: >
-      Byte-synced from codex_ref. Read-path developer instructions. Injects a
-      SINGLE global memory_summary.md regardless of project.
+      Synced from codex_ref with platform adaptations (do NOT byte-sync):
+      citation block is <memory-citation>/<session_ids> with ses_* ids (codex:
+      <oai-mem-citation>/<rollout_ids> UUIDs) — citation.ts parses these tags;
+      quick-pass instructs the memory_search/memory_read tools incl. since/until
+      (memory dir lives outside the workspace; codex agents read the FS);
+      rollout_summaries described as per-session .md recaps (codex: raw .jsonl
+      rollouts with session_meta/rollout_path); updating memories goes through
+      the memory_add_note tool (codex: agent writes note files directly).
+      Injects a SINGLE global memory_summary.md regardless of project.
   - ours: src/source.ts
     theirs: codex-rs/ext/memories/src/prompts.rs
     note: builds the injected summary block; takes codex_home only, no cwd/project arg.
@@ -155,11 +162,14 @@ mappings:
   - ours: src/templates/consolidation.md
     theirs: codex-rs/memories/write/templates/memories/consolidation.md
     note: >
-      Byte-synced from codex_ref. INVARIANT: project/cwd scoping lives ONLY here,
+      Synced from codex_ref with platform adaptations (do NOT byte-sync):
+      rollout annotations demand cwd/session_id/updated_at (codex:
+      cwd/rollout_path/thread_id — metadata our artifacts do not have).
+      {{ memory_extensions_* }} placeholders are rendered by
+      buildConsolidationPrompt in src/llm.ts, mirroring codex prompts.rs +
+      lib.rs prompt_blocks. INVARIANT: project/cwd scoping lives ONLY here,
       as an LLM instruction to "organize the index first by cwd / project scope,
       then by topic". Do not add hard scoping elsewhere unless codex does.
-      Mentions of rollout_path/thread_id are codex metadata fields; our written
-      rollout_summaries carry session_id/cwd/updated_at instead.
 
   # --- Control / lifecycle ---
   - ours: tools/control.ts
@@ -182,6 +192,15 @@ mappings:
       memorize-extract sub-agents self-register through the plugin config
       hook (user-defined agents of the same name win) — pure opencode
       packaging; codex ships its memory agents inside the binary.
+
+  # --- Prompt building ---
+  - ours: src/llm.ts
+    theirs: codex-rs/memories/write/src/prompts.rs
+    note: >
+      buildConsolidationPrompt ports build_consolidation_prompt including the
+      lib.rs prompt_blocks extension blocks (rendered only when
+      <memory_root>/extensions exists). The rest of llm.ts (sub-agent session
+      plumbing) is opencode-specific — see D3 in ARCHITECTURE.md.
 
   # --- Utilities ---
   - ours: src/token.ts
