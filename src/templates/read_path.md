@@ -25,19 +25,25 @@ Memory layout (general -> specific):
   - scripts/ (optional helper scripts)
   - examples/ (optional example outputs)
   - templates/ (optional templates)
-- {{ base_path }}/rollout_summaries/ (per-rollout recaps + evidence snippets)
-  - The paths of these entries can be found in {{ base_path }}/MEMORY.md or {{ base_path }}/rollout_summaries/ as `rollout_path`
-  - These files are append-only `jsonl`: `session_meta.payload.id` identifies the session, `turn_context` marks turn boundaries, `event_msg` is the lightweight status stream, and `response_item` contains actual messages, tool calls, and tool outputs.
-  - For efficient lookup, prefer matching the filename suffix or `session_meta.payload.id`; avoid broad full-content scans unless needed.
+- {{ base_path }}/rollout_summaries/ (per-session recaps + evidence snippets)
+  - Each file is a markdown recap of one past session, with `session_id:`,
+    `cwd:`, and `updated_at:` header lines followed by the summary.
+  - For efficient lookup, prefer matching the filename (timestamp + slug) or the
+    `session_id:` header; avoid broad full-content scans unless needed.
 
 Quick memory pass (when applicable):
 
 1. Skim the MEMORY_SUMMARY below and extract task-relevant keywords.
-2. Search {{ base_path }}/MEMORY.md using those keywords.
+2. Search {{ base_path }}/MEMORY.md for those keywords with the `memory_search`
+   tool, or read it with `memory_read`.
+   - For time-scoped recall ("what was I working on last week / around date X"),
+     pass `since`/`until` to `memory_search` — with a query it searches only that
+     period's sessions/notes; without a query it lists them chronologically.
 3. Only if MEMORY.md directly points to rollout summaries/skills, open the 1-2
    most relevant files under {{ base_path }}/rollout_summaries/ or
    {{ base_path }}/skills/.
-4. If above are not clear and you need exact commands, error text, or precise evidence, search over `rollout_path` for more evidence.
+4. If the above are not clear and you need exact commands, error text, or precise
+   evidence, read the most relevant rollout summary files for more evidence.
 5. If there are no relevant hits, stop memory lookup and continue normally.
 
 Quick-pass budget:
@@ -75,21 +81,21 @@ When answering from memory without current verification:
 Memory citation requirements:
 
 - If ANY relevant memory files were used: append exactly one
-`<oai-mem-citation>` block as the VERY LAST content of the final reply.
+`<memory-citation>` block as the VERY LAST content of the final reply.
   Normal responses should include the answer first, then append the
-`<oai-mem-citation>` block at the end.
+`<memory-citation>` block at the end.
 - Use this exact structure for programmatic parsing:
 ```
-<oai-mem-citation>
+<memory-citation>
 <citation_entries>
-MEMORY.md:234-236|note=[responsesapi citation extraction code pointer]
-rollout_summaries/2026-02-17T21-23-02-LN3m-example.md:10-12|note=[weekly report format]
+MEMORY.md:234-236|note=[build command for the api service]
+rollout_summaries/2026-02-17T21-23-02-ln3m-example.md:10-12|note=[weekly report format]
 </citation_entries>
-<rollout_ids>
-019c6e27-e55b-73d1-87d8-4e01f1f75043
-019c7714-3b77-74d1-9866-e1f484aae2ab
-</rollout_ids>
-</oai-mem-citation>
+<session_ids>
+ses_abc123
+ses_def456
+</session_ids>
+</memory-citation>
 ```
 - `citation_entries` is for rendering:
   - one citation entry per line
@@ -102,25 +108,24 @@ rollout_summaries/2026-02-17T21-23-02-LN3m-example.md:10-12|note=[weekly report 
   - list entries in order of importance (most important first)
   - `note` should be short, single-line, and use simple characters only (avoid
     unusual symbols, no newlines)
-- `rollout_ids` is for us to track what previous rollouts you find useful:
-  - include one rollout id per line
-  - rollout ids should look like UUIDs (for example,
-    `019c6e27-e55b-73d1-87d8-4e01f1f75043`)
+- `session_ids` is for us to track which past sessions you find useful:
+  - include one session id per line
+  - session ids look like `ses_...` and appear in rollout summary files and
+    MEMORY.md as `session_id:`
   - include unique ids only; do not repeat ids
-  - an empty `<rollout_ids>` section is allowed if no rollout ids are available
-  - you can find rollout ids in rollout summary files and MEMORY.md
+  - an empty `<session_ids>` section is allowed if no session ids are available
   - do not include file paths or notes in this section
-  - For every `citation_entries`, try to find and cite the corresponding rollout id if possible
+  - for every citation entry, try to find and cite the corresponding session id
 - Never include memory citations inside pull-request messages.
 - Never cite blank lines; double-check ranges.
 
 Updating memories:
 
-You can update the memories **only** when explicitly asked by the user. This must always come from a direct request from the user.
-- Write your update in {{ base_path }}/extensions/ad_hoc/notes/
-- Each update must be one small file containing what you want to add/delete/update from the memories.
-- The name of this file must be `<timestamp>-<short slug>.md`
-- Do not try to edit the memory files yourself, only add one update note in {{ base_path }}/extensions/ad_hoc/notes/
+You may update memories **only** when explicitly asked by the user. This must
+always come from a direct request from the user. Use the `memory_add_note`
+tool, which writes one small note file under `extensions/ad_hoc/notes/`
+describing what to add/delete/update. Do not edit the memory files yourself;
+the consolidation pass will integrate the note.
 
 ========= MEMORY_SUMMARY BEGINS =========
 {{ memory_summary }}
