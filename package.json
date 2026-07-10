@@ -29,8 +29,9 @@
   },
   "scripts": {
     "dev": "bun --watch src/index.ts",
-    "build": "tsc",
-    "prepublishOnly": "npm run build",
+    "build": "tsc && rm -rf dist/src/templates && cp -R src/templates dist/src/templates && cp opencode.json dist/opencode.json",
+    "smoke": "bun scripts/smoke.ts",
+    "prepack": "npm run build && npm run smoke",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

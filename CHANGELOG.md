@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Published package was missing every runtime asset outside compiled JS: `tsc`
+  does not copy `src/templates/*.md` into `dist/`, and the bundled
+  `opencode.json` was shipped at the package root while `injectAgentDefinitions`
+  resolves it relative to `dist/src/` (`dist/opencode.json`). Memory extraction,
+  consolidation, read-path injection, and agent auto-registration were all
+  broken in the npm artifact (dev checkouts were unaffected). The build now
+  copies templates to `dist/src/templates/` and `opencode.json` to `dist/`.
+- Added a `prepack` smoke test (`scripts/smoke.ts`) that loads the built entry
+  the same way opencode does (V1 module -> `server()` -> hooks) and exercises
+  template reads and agent injection, so this class of packaging bug fails
+  `npm pack`/`npm publish` instead of shipping. Pattern borrowed from
+  opencode-gemini-auth's prepack import smoke test.
+
 ## [0.1.5] - 2026-07-08
 
 (No functional changes — release artifact only.)
