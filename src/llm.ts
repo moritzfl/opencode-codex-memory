@@ -223,10 +223,47 @@ function buildExtractionInput(sessionId: string, cwd: string, transcript: string
   })
 }
 
-function buildConsolidationPrompt(memoryRoot: string, diffFileName: string): string {
+// codex lib.rs prompt_blocks: rendered into consolidation.md's
+// {{ memory_extensions_* }} placeholders when <memory_root>/extensions exists
+// (prompts.rs build_consolidation_prompt), empty strings otherwise.
+const EXTENSIONS_FOLDER_STRUCTURE = `
+Memory extensions (under {{ memory_extensions_root }}/):
+
+- <extension_name>/instructions.md
+  - Source-specific guidance for interpreting additional memory signals. If an
+    extension folder exists, you must read its instructions.md to determine how to use this memory
+    source.
+
+If the user has any memory extensions, you MUST read the instructions for each extension to
+determine how to use the memory source. If the workspace diff shows deleted extension resource files,
+remove stale memories derived only from those resources. If it has no extension folders, continue
+with the standard memory inputs only.
+`
+
+const EXTENSIONS_PRIMARY_INPUTS = `
+Optional source-specific inputs:
+Under \`{{ memory_extensions_root }}/\`:
+
+- \`<extension_name>/instructions.md\`
+  - If extension folders exist, read each instructions.md first and follow it when interpreting
+    that extension's memory source.
+
+If the workspace diff shows deleted memory extension resources, use that extension-specific deletion
+signal to remove stale memories derived only from those resources.
+`
+
+export function buildConsolidationPrompt(memoryRoot: string, diffFileName: string): string {
+  const extensionsRoot = path.join(memoryRoot, "extensions")
+  let extensionsExist = false
+  try {
+    extensionsExist = fs.statSync(extensionsRoot).isDirectory()
+  } catch {}
+  const blockVars = { memory_extensions_root: extensionsRoot }
   return fillTemplate(readTemplate("consolidation.md"), {
     memory_root: memoryRoot,
     phase2_workspace_diff_file: diffFileName,
+    memory_extensions_folder_structure: extensionsExist ? fillTemplate(EXTENSIONS_FOLDER_STRUCTURE, blockVars) : "",
+    memory_extensions_primary_inputs: extensionsExist ? fillTemplate(EXTENSIONS_PRIMARY_INPUTS, blockVars) : "",
   })
 }
 
