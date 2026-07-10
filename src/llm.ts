@@ -247,7 +247,8 @@ export function parseExtraction(raw: string): ExtractionResult | null {
   if (typeof obj.raw_memory !== "string" || typeof obj.rollout_summary !== "string") {
     throw new Error("extraction response missing required fields")
   }
-  if (!obj.raw_memory.trim() && !obj.rollout_summary.trim()) {
+  // codex phase1: either field empty → SucceededNoOutput (not a partial upsert).
+  if (!obj.raw_memory.trim() || !obj.rollout_summary.trim()) {
     return null
   }
   // Guard against the model echoing the format skeleton from the system prompt.

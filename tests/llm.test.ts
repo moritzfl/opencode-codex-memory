@@ -43,6 +43,17 @@ describe("parseExtraction", () => {
     expect(parseExtraction(raw)).toBeNull()
   })
 
+  // codex phase1: empty raw_memory OR empty rollout_summary → SucceededNoOutput
+  it("returns null when only raw_memory is empty", () => {
+    const raw = JSON.stringify({ raw_memory: "", rollout_summary: "rs", rollout_slug: "x" })
+    expect(parseExtraction(raw)).toBeNull()
+  })
+
+  it("returns null when only rollout_summary is empty", () => {
+    const raw = JSON.stringify({ raw_memory: "rm", rollout_summary: "  ", rollout_slug: "x" })
+    expect(parseExtraction(raw)).toBeNull()
+  })
+
   it("normalizes an empty slug to null", () => {
     const raw = JSON.stringify({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" })
     expect(parseExtraction(raw)!.rollout_slug).toBeNull()
