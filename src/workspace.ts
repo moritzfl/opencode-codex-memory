@@ -52,6 +52,35 @@ export function ensureLayout(): void {
   if (!fs.existsSync(adhocInstructions)) fs.writeFileSync(adhocInstructions, ADHOC_INSTRUCTIONS, { flag: "w" })
 }
 
+/**
+ * Mirrors codex `validate_consolidation_artifacts` (workspace.rs): after
+ * consolidation (or when deciding an early no-diff succeed), MEMORY.md must be
+ * a regular file and memory_summary.md must start with the exact line `v1`.
+ * Invalid artifacts force a consolidator re-run and block baseline reset.
+ */
+export function validateConsolidationArtifacts(root: string = memoryRoot()): { ok: true } | { ok: false; reason: string } {
+  const memoryPath = path.join(root, "MEMORY.md")
+  try {
+    const st = fs.statSync(memoryPath)
+    if (!st.isFile()) return { ok: false, reason: `consolidated memory artifact is not a file: ${memoryPath}` }
+  } catch {
+    return { ok: false, reason: `missing consolidated memory artifact: ${memoryPath}` }
+  }
+
+  const summaryPath = path.join(root, "memory_summary.md")
+  let summary: string
+  try {
+    summary = fs.readFileSync(summaryPath, "utf8")
+  } catch {
+    return { ok: false, reason: `missing memory summary artifact: ${summaryPath}` }
+  }
+  const first = summary.split(/\r?\n/, 1)[0]
+  if (first !== "v1") {
+    return { ok: false, reason: `memory summary artifact does not start with v1: ${summaryPath}` }
+  }
+  return { ok: true }
+}
+
 const RAW_MEMORY_MAX_CHARS = 10_000
 
 function truncate(text: string, limit: number): string {

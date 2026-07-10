@@ -1,5 +1,12 @@
 import { MemoryStore } from "./store.js"
-import { ensureLayout, rebuildRawMemories, writeRolloutSummaries, pruneExtensionResources, writeWorkspaceDiff } from "./workspace.js"
+import {
+  ensureLayout,
+  rebuildRawMemories,
+  writeRolloutSummaries,
+  pruneExtensionResources,
+  writeWorkspaceDiff,
+  validateConsolidationArtifacts,
+} from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
 import { consolidateViaSubagent } from "./llm.js"
 import { invalidateCache } from "./source.js"
@@ -50,9 +57,16 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       pruneExtensionResources(opts.extensionRetentionDays)
 
       const diff = await captureWorkspaceDiff()
+      // codex: early succeed only when there are no changes AND artifacts are
+      // already valid. Invalid/empty summary (e.g. ensureLayout's empty file)
+      // falls through so the consolidator can INIT/repair.
       if (diff.changes.length === 0) {
-        store.markPhase2Succeeded(claim.ownershipToken, outputs)
-        return { status: "no_workspace_changes" }
+        const valid = validateConsolidationArtifacts()
+        if (valid.ok) {
+          store.markPhase2Succeeded(claim.ownershipToken, outputs)
+          return { status: "no_workspace_changes" }
+        }
+        console.warn("[opencode-codex-memory] no workspace changes but artifacts invalid; running consolidator:", valid.reason)
       }
 
       writeWorkspaceDiff(diff)
@@ -64,8 +78,10 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         }
       }, 90_000)
 
+      let agentCompleted = false
       try {
         await consolidateViaSubagent(memoryRoot(), DIFF_ARTIFACT, opts.consolidationModel)
+        agentCompleted = true
       } finally {
         clearInterval(heartbeat)
       }
@@ -79,6 +95,19 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
         store.markPhase2Failed(claim.ownershipToken, "ownership lost")
         return { status: "heartbeat_lost" }
+      }
+
+      if (!agentCompleted) {
+        store.markPhase2Failed(claim.ownershipToken, "failed_agent")
+        return { status: "failed_agent" }
+      }
+
+      // codex failed_invalid_artifacts: do not reset baseline on bad output so
+      // the next run still sees a diff / can re-INIT.
+      const artifacts = validateConsolidationArtifacts()
+      if (!artifacts.ok) {
+        store.markPhase2Failed(claim.ownershipToken, `failed_invalid_artifacts: ${artifacts.reason}`)
+        return { status: "failed_invalid_artifacts" }
       }
 
       if (!await resetBaseline()) {

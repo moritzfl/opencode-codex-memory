@@ -84,6 +84,39 @@ describe("workspace rendering", () => {
   })
 })
 
+describe("validateConsolidationArtifacts", () => {
+  it("rejects missing MEMORY.md, empty summary, and non-v1 header", () => {
+    const { ensureLayout, validateConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    ensureLayout()
+    // ensureLayout seeds empty summary → invalid
+    let r = validateConsolidationArtifacts()
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/does not start with v1/)
+
+    fs.writeFileSync(path.join(memoryRoot(), "memory_summary.md"), "v1\n\n## User Profile\n")
+    r = validateConsolidationArtifacts()
+    expect(r.ok).toBe(true)
+
+    fs.unlinkSync(path.join(memoryRoot(), "MEMORY.md"))
+    r = validateConsolidationArtifacts()
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/missing consolidated memory/)
+  })
+
+  it("rejects a directory named MEMORY.md", () => {
+    const { ensureLayout, validateConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    ensureLayout()
+    fs.unlinkSync(path.join(memoryRoot(), "MEMORY.md"))
+    fs.mkdirSync(path.join(memoryRoot(), "MEMORY.md"))
+    fs.writeFileSync(path.join(memoryRoot(), "memory_summary.md"), "v1\n")
+    const r = validateConsolidationArtifacts()
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/not a file/)
+  })
+})
+
 describe("pruneExtensionResources", () => {
   it("prunes old timestamped resources but never notes or instructions.md", () => {
     const { ensureLayout, pruneExtensionResources } = require("../src/workspace.js")
