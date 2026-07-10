@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Phase 2 now validates consolidation artifacts like codex (#32193): early
+  no-diff succeed only when `MEMORY.md` exists and `memory_summary.md` starts
+  with `v1`; after the consolidator, invalid artifacts fail the job without
+  resetting the git baseline so INIT/repair can run again.
+- Stage-1 extraction treats either empty `raw_memory` or empty `rollout_summary`
+  as no-output (codex parity); previously only both-empty was discarded.
+
+### Changed
+
+- Re-synced `stage_one_system.md`, `consolidation.md`, and `read_path.md` from
+  codex HEAD (were ~half the upstream size). `stage_one_input.md` stays
+  platform-shaped (session placeholders). Bumped `codex_ref` in `codex-map.yaml`.
+
 ## [0.1.6] - 2026-07-10
 
 ### Fixed

@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 0ccb676dd0904a424a84080d4ec8755677aea22e
-codex_ref_date: 2026-07-02
+codex_ref: 414217dc8accc5c0e2542239cbab6eaa815dc605
+codex_ref_date: 2026-07-10
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -50,9 +50,8 @@ mappings:
   - ours: src/templates/read_path.md
     theirs: codex-rs/ext/memories/templates/memories/read_path.md
     note: >
-      Read-path developer instructions. Injects a SINGLE global memory_summary.md
-      regardless of project. codex moved this from codex-rs/memories/read/ to
-      codex-rs/ext/memories/ after the plan was written.
+      Byte-synced from codex_ref. Read-path developer instructions. Injects a
+      SINGLE global memory_summary.md regardless of project.
   - ours: src/source.ts
     theirs: codex-rs/ext/memories/src/prompts.rs
     note: builds the injected summary block; takes codex_home only, no cwd/project arg.
@@ -110,7 +109,8 @@ mappings:
       (codex uses 70% of the model context window when known).
       DIVERGENCE: an empty transcript is treated as success-with-no-output
       (codex fails the job when a rollout cannot be loaded); empty sessions are
-      normal in opencode, not an error.
+      normal in opencode, not an error. Partial-empty stage-1 fields
+      (empty raw_memory OR empty rollout_summary) match codex → no-output.
   - ours: src/capture.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
@@ -125,16 +125,28 @@ mappings:
       mirrors is_memory_excluded_contextual_user_fragment).
   - ours: src/templates/stage_one_system.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_system.md
+    note: >
+      Byte-synced from codex_ref with title only retitled "Single Session"
+      (opencode UX); keeps codex "rollout" domain language for artifacts.
   - ours: src/templates/stage_one_input.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_input.md
+    note: >
+      Platform-shaped: session_id/session_cwd/transcript placeholders instead of
+      codex rollout_path/rollout_cwd/rollout_contents (opencode has no rollout file).
 
   # --- Write path: phase 2 (consolidation) ---
   - ours: src/phase2.ts
     theirs: codex-rs/memories/write/src/phase2.rs
-    note: consolidation orchestration + heartbeat/lease.
+    note: >
+      consolidation orchestration + heartbeat/lease. Ports codex #32193
+      validate_consolidation_artifacts gating: early no-diff succeed only when
+      MEMORY.md exists and memory_summary.md starts with `v1`; post-agent
+      invalid artifacts fail the job without baseline reset.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
-    note: rebuild raw_memories, write rollout summaries, prune extension resources.
+    note: >
+      rebuild raw_memories, write rollout summaries, prune extension resources,
+      validate_consolidation_artifacts (also codex workspace.rs).
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >
@@ -143,10 +155,11 @@ mappings:
   - ours: src/templates/consolidation.md
     theirs: codex-rs/memories/write/templates/memories/consolidation.md
     note: >
-      INVARIANT: project/cwd scoping lives ONLY here, as an LLM instruction to
-      "organize the index first by cwd / project scope, then by topic". This is
-      the entire extent of codex's project separation. Do not add hard scoping
-      elsewhere unless codex does.
+      Byte-synced from codex_ref. INVARIANT: project/cwd scoping lives ONLY here,
+      as an LLM instruction to "organize the index first by cwd / project scope,
+      then by topic". Do not add hard scoping elsewhere unless codex does.
+      Mentions of rollout_path/thread_id are codex metadata fields; our written
+      rollout_summaries carry session_id/cwd/updated_at instead.
 
   # --- Control / lifecycle ---
   - ours: tools/control.ts
