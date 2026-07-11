@@ -34,11 +34,7 @@ Memory layout (general -> specific):
 Quick memory pass (when applicable):
 
 1. Skim the MEMORY_SUMMARY below and extract task-relevant keywords.
-2. Search {{ base_path }}/MEMORY.md for those keywords with the `memory_search`
-   tool, or read it with `memory_read`.
-   - For time-scoped recall ("what was I working on last week / around date X"),
-     pass `since`/`until` to `memory_search` — with a query it searches only that
-     period's sessions/notes; without a query it lists them chronologically.
+{{ search_step }}
 3. Only if MEMORY.md directly points to rollout summaries/skills, open the 1-2
    most relevant files under {{ base_path }}/rollout_summaries/ or
    {{ base_path }}/skills/.
@@ -122,10 +118,8 @@ ses_def456
 Updating memories:
 
 You may update memories **only** when explicitly asked by the user. This must
-always come from a direct request from the user. Use the `memory_add_note`
-tool, which writes one small note file under `extensions/ad_hoc/notes/`
-describing what to add/delete/update. Do not edit the memory files yourself;
-the consolidation pass will integrate the note.
+always come from a direct request from the user.
+{{ update_instructions }}
 
 ========= MEMORY_SUMMARY BEGINS =========
 {{ memory_summary }}

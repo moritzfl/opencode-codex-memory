@@ -53,15 +53,21 @@ mappings:
       Synced from codex_ref with platform adaptations (do NOT byte-sync):
       citation block is <memory-citation>/<session_ids> with ses_* ids (codex:
       <oai-mem-citation>/<rollout_ids> UUIDs) — citation.ts parses these tags;
-      quick-pass instructs the memory_search/memory_read tools incl. since/until
-      (memory dir lives outside the workspace; codex agents read the FS);
+      quick-pass search + update-note guidance are {{ search_step }} /
+      {{ update_instructions }} placeholders filled by source.ts: with
+      dedicated_tools on they instruct the memory_search/memory_read/
+      memory_add_note tools incl. since/until (memory dir lives outside the
+      workspace), with dedicated_tools off they revert to codex's file-based
+      wording (agent reads/writes the FS directly, like codex);
       rollout_summaries described as per-session .md recaps (codex: raw .jsonl
-      rollouts with session_meta/rollout_path); updating memories goes through
-      the memory_add_note tool (codex: agent writes note files directly).
+      rollouts with session_meta/rollout_path).
       Injects a SINGLE global memory_summary.md regardless of project.
   - ours: src/source.ts
     theirs: codex-rs/ext/memories/src/prompts.rs
-    note: builds the injected summary block; takes codex_home only, no cwd/project arg.
+    note: >
+      builds the injected summary block; takes no cwd/project arg (codex takes
+      codex_home only). Extra dedicatedTools flag selects tool-based vs
+      codex-style file-based guidance snippets for read_path.md.
   - ours: tools/memory.ts
     theirs: codex-rs/ext/memories/src/tools/search.rs
     note: >

@@ -49,7 +49,7 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     const { memorySummaryPath } = require("../src/paths.js")
     ensureMemoryLayout()
     fs.writeFileSync(memorySummaryPath(), "v1\n\n## User Profile\ntest\n")
-    const prompt = buildMemorySystemPrompt()!
+    const prompt = buildMemorySystemPrompt(true)!
     expect(prompt).not.toMatch(PLACEHOLDER_RE)
     // citation.ts parses these exact tags — read_path must instruct them
     expect(prompt).toContain("<memory-citation>")
@@ -61,13 +61,32 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     expect(prompt).toContain("memory_read")
     expect(prompt).toContain("memory_add_note")
   })
+
+  it("falls back to codex's file-based guidance when dedicated_tools is off", () => {
+    const { ensureMemoryLayout, buildMemorySystemPrompt } = require("../src/source.js")
+    const { memorySummaryPath, memoryRoot } = require("../src/paths.js")
+    ensureMemoryLayout()
+    fs.writeFileSync(memorySummaryPath(), "v1\n\n## User Profile\ntest\n")
+    const prompt = buildMemorySystemPrompt(false)!
+    expect(prompt).not.toMatch(PLACEHOLDER_RE)
+    // no references to tools that are not registered
+    expect(prompt).not.toContain("memory_search")
+    expect(prompt).not.toContain("memory_read")
+    expect(prompt).not.toContain("memory_add_note")
+    // codex-style direct file access instead
+    expect(prompt).toContain(`Search ${memoryRoot()}/MEMORY.md using those keywords.`)
+    expect(prompt).toContain(`Write your update in ${memoryRoot()}/extensions/ad_hoc/notes/`)
+    // citation contract is tool-independent and must survive
+    expect(prompt).toContain("<memory-citation>")
+    expect(prompt).toContain("<session_ids>")
+  })
 })
 
 describe("template placeholder inventory", () => {
   it("templates contain only placeholders the code fills", () => {
     const dir = path.join(import.meta.dirname, "..", "src", "templates")
     const known: Record<string, string[]> = {
-      "read_path.md": ["base_path", "memory_summary"],
+      "read_path.md": ["base_path", "memory_summary", "search_step", "update_instructions"],
       "consolidation.md": [
         "memory_root",
         "phase2_workspace_diff_file",

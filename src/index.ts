@@ -202,7 +202,7 @@ function buildHooks() {
       if (!pluginOptions.use_memories) return
       if (input.sessionID && isMemorySubSession(input.sessionID)) return
       ensureMemoryLayout()
-      const memoryPrompt = buildMemorySystemPrompt()
+      const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
       if (memoryPrompt) {
         output.system.push(memoryPrompt)
       }
