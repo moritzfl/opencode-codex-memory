@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 414217dc8accc5c0e2542239cbab6eaa815dc605
-codex_ref_date: 2026-07-10
+codex_ref: 5c19155cbd93bfa099016e7487259f61669823ff
+codex_ref_date: 2026-07-11
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -74,15 +74,20 @@ mappings:
       memory_search/memory_read/memory_list/memory_add_note. codex splits these
       across tools/{search,read,list,ad_hoc_note}.rs and local/*.rs.
       DIVERGENCES (schema-level, semantics match where noted): search is
-      single-query without match_mode/context_lines/cursor/path-scope (codex:
-      queries[], match modes, pagination) but matches codex's case-sensitive
-      default, 200-result cap, all-non-hidden-files set, and (path,line)
-      ordering; port adds since/until time filtering (no upstream equivalent).
+      single-query without match_mode/context_lines/cursor/path-scope/normalized
+      (codex: queries[], match modes, pagination) but matches codex's
+      case-sensitive default, 200-result cap, all-non-hidden-files set, and
+      (path,line) ordering; a capped result set is flagged with "result limit
+      reached" + truncated metadata (ports codex's truncated/next_cursor
+      signal); port adds since/until time filtering (no upstream equivalent).
       read uses line_offset/max_lines like codex plus a 256KiB byte backstop
-      (codex: 20k-token budget). add_note generates the filename plugin-side
-      (codex: model supplies it) with codex's hyphen layout and append-only
-      collision handling. list has no cursor (max_results cap only).
-  - ours: src/path-guard.ts
+      (codex: 20k-token budget); read on a directory returns a listing (codex:
+      NotFile error). add_note generates the filename plugin-side (codex: model
+      supplies it) with codex's hyphen layout and append-only collision
+      handling; port caps note<=4000/title<=120 chars and prepends a
+      title/created/session header (codex: verbatim unlimited note body).
+      list has no cursor (max_results cap only) and errors on file paths
+      (codex: returns the single entry).
     theirs: codex-rs/ext/memories/src/local/path.rs
     note: >
       safe path resolution that cannot escape the memory root: lexical
@@ -112,18 +117,29 @@ mappings:
     note: >
       claim/lease/retry job logic, phase2 input selection, usage recording,
       pruning. The behavioral heart of the port; audit carefully on any change.
+      DIVERGENCES: stage-1 claim gates on the jobs watermark only (codex also
+      probes stage1_outputs.source_updated_at — diverges only in exotic DB
+      states); phase-2 success watermark = max(selected source_updated_at)
+      (codex additionally folds in the claim-time input_watermark;
+      informational column, nothing reads it); phase-2 selection trusts
+      memory_session_meta + session.deleted events (codex re-validates each
+      row against the live threads table at selection time).
 
   # --- Write path: phase 1 (extraction) ---
   - ours: src/phase1.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
       transcript build + eligibility + stage1 extraction orchestration.
-      Transcript budget 600k chars head+tail ~ codex's 150k-token fallback
-      (codex uses 70% of the model context window when known).
-      DIVERGENCE: an empty transcript is treated as success-with-no-output
+      Transcript budget 600k chars, 50/50 head+tail split ~ codex's 150k-token
+      fallback (codex uses 70% of the model context window when known).
+      Reasoning parts are excluded like codex (rollout policy Reasoning=false).
+      DIVERGENCES: an empty transcript is treated as success-with-no-output
       (codex fails the job when a rollout cannot be loaded); empty sessions are
       normal in opencode, not an error. Partial-empty stage-1 fields
       (empty raw_memory OR empty rollout_summary) match codex → no-output.
+      Citation blocks are stripped from the transcript before extraction
+      (codex rollouts retain them; keeps the extractor from mining our own
+      citation markup).
   - ours: src/capture.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
@@ -160,17 +176,38 @@ mappings:
     note: >
       rebuild raw_memories, write rollout summaries, prune extension resources,
       validate_consolidation_artifacts (also codex workspace.rs).
+      DIVERGENCES: raw_memories.md entries are truncated at 10k chars each
+      (codex: unbounded; guards the consolidation prompt against giant
+      extractions); rollout summary headers add usage_count and drop
+      rollout_path/git_branch (metadata the port does not have); ensureLayout
+      pre-seeds placeholder MEMORY.md + empty memory_summary.md (codex: the
+      consolidator INITs them; outcome-equivalent, first diff shows M not A).
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >
       git baseline diffing for phase 2. Port uses isomorphic-git instead of
-      libgit2; also see codex-rs/memories/write/src/workspace.rs for the diff wiring.
+      libgit2; also see codex-rs/memories/write/src/workspace.rs for the diff
+      wiring. captureWorkspaceDiff throws on failure (ports codex
+      failed_workspace_status — an errored diff must not look like "no
+      changes"); ensureBaseline self-heals corrupt git metadata by destructive
+      re-init (ports reset_git_repository_sync-on-unusable).
+      DIVERGENCES: patches use the `diff` package's createPatch headers
+      (Index:/---/+++) instead of codex's git-style `diff --git` rendering; no
+      file-mode/symlink diff handling (the memory root contains neither).
   - ours: src/templates/consolidation.md
     theirs: codex-rs/memories/write/templates/memories/consolidation.md
     note: >
       Synced from codex_ref with platform adaptations (do NOT byte-sync):
       rollout annotations demand cwd/session_id/updated_at (codex:
-      cwd/rollout_path/thread_id — metadata our artifacts do not have).
+      cwd/rollout_path/thread_id — metadata our artifacts do not have);
+      thread-id terminology replaced with session ids throughout; shell-command
+      examples replaced with file-tool equivalents (codex's consolidator has a
+      sandboxed shell — wc -l / rg --files; our memorize agent has
+      read/edit/write/glob/grep only); the optional housekeeping step tells the
+      agent it cannot delete files (summary pruning is plugin-side keep-set
+      logic in workspace.ts, codex expects agent-driven deletion); secret
+      replacement token is [REDACTED:secret] (redact.ts style, codex:
+      [REDACTED_SECRET]); "managed by Codex" branding rewritten to the plugin.
       {{ memory_extensions_* }} placeholders are rendered by
       buildConsolidationPrompt in src/llm.ts, mirroring codex prompts.rs +
       lib.rs prompt_blocks. INVARIANT: project/cwd scoping lives ONLY here,
@@ -180,7 +217,15 @@ mappings:
   # --- Control / lifecycle ---
   - ours: tools/control.ts
     theirs: codex-rs/memories/write/src/control.rs
-    note: memory_reset/inspect/mode; clearMemoryRootsContents equivalent.
+    note: >
+      memory_reset/inspect/mode; clearMemoryRootsContents equivalent.
+      DELIBERATE DIVERGENCE: these are model-invocable tools, always registered
+      (codex exposes reset/mode only as client-side RPCs / CLI, never to the
+      model) — a plugin has no client-UI surface, and "reset my memory" in
+      plain language is core plugin UX; opencode's generic tool permissions are
+      the guard rail. memory_mode additionally accepts "polluted" (codex
+      protocol: enabled|disabled, polluted is set only automatically);
+      memory_inspect is a port addition (read-only status).
   - ours: src/index.ts
     theirs: codex-rs/core/src/stream_events_utils.rs
     note: >
@@ -190,14 +235,22 @@ mappings:
       pipeline at turn start (app-server turn_processor.rs -> start.rs); the
       port triggers on session.idle — same opportunistic-background semantics.
       (2) codex ships memories default-off behind Feature::MemoryTool with a
-      TUI consent prompt; the port is on-by-default — installing the plugin is
-      the consent (README states this). memory_mode stamping at first
-      session.idle mirrors codex's stamp-at-thread-creation (session.rs);
-      MCP pollution matches every configured server via client.mcp.status()
-      (codex marks all MCP servers pollutes_memory=true). (3) the memorize /
-      memorize-extract sub-agents self-register through the plugin config
-      hook (user-defined agents of the same name win) — pure opencode
-      packaging; codex ships its memory agents inside the binary.
+      TUI consent prompt (the feature is Stable now, still default-off); the
+      port is on-by-default — installing the plugin is the consent (README
+      states this). memory_mode stamping at first session.idle mirrors codex's
+      stamp-at-thread-creation (session.rs); pollution marking runs in the
+      tool.execute.after plugin hook and matches websearch/webfetch plus every
+      configured MCP server via client.mcp.status() (codex marks all MCP
+      servers pollutes_memory=true). (3) the memorize / memorize-extract
+      sub-agents self-register through the plugin config hook (user-defined
+      agents of the same name win) — pure opencode packaging; codex ships its
+      memory agents inside the binary; the memorize prompt adds a
+      10k-char/2500-token summary-size instruction codex's consolidator does
+      not get (both sides also truncate at 2500 tokens on read).
+      (4) generate_memories=false turns off the whole write pipeline, agent
+      injection, and delete-triggered consolidation (README documents it as
+      the pipeline switch); codex only stamps NEW threads memory_mode=disabled
+      and keeps the pipeline running for previously-enabled ones.
 
   # --- Prompt building ---
   - ours: src/llm.ts
@@ -207,6 +260,13 @@ mappings:
       lib.rs prompt_blocks extension blocks (rendered only when
       <memory_root>/extensions exists). The rest of llm.ts (sub-agent session
       plumbing) is opencode-specific — see D3 in ARCHITECTURE.md.
+      D3-adjacent DIVERGENCES: stage-1 has no strict output schema (codex:
+      output_schema_strict + deny_unknown_fields; opencode's prompt API has no
+      response-format knob) — parseExtraction scrapes the first JSON object,
+      tolerates unknown fields, and rejects prompt-skeleton echoes; per-request
+      timeouts mirror the 1h job leases (codex relies on the lease alone);
+      reasoning effort is not pinned (codex: Low for extraction, Medium for
+      consolidation; no session.prompt equivalent).
 
   # --- Utilities ---
   - ours: src/token.ts
@@ -251,4 +311,6 @@ mappings:
       — opencode's automatic small-model pick (provider.getSmallModel) is not
       exposed to plugins, only the explicit config keys are;
       (4) the legacy alias no_memories_if_mcp_or_web_search is not accepted
-      (fresh plugin, no legacy configs).
+      (fresh plugin, no legacy configs); (5) wrong-TYPED values on known keys
+      silently fall back to the default (codex: serde hard-fails the whole
+      config parse — a plugin must not break the host on bad options).
