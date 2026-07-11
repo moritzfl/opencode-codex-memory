@@ -72,7 +72,11 @@ export function takeNewCitations(partKey: string, ids: string[]): string[] {
 export function handleSessionDeleted(
   sessionId: string,
   store: Pick<MemoryStore, "deleteSessionMemory"> = getStore(),
-  schedulePhase2: () => void = () => { void triggerPhase2() },
+  // With generation off the memorize agent is not injected, so a consolidation
+  // attempt could only fail; the row deletion above still happens, and the
+  // enqueued job runs when generation is re-enabled (codex: delete only
+  // enqueues; the pipeline itself is gated elsewhere).
+  schedulePhase2: () => void = () => { if (pluginOptions.generate_memories) void triggerPhase2() },
 ): void {
   if (store.deleteSessionMemory(sessionId)) schedulePhase2()
 }
@@ -233,6 +237,21 @@ function buildHooks() {
     }
   },
 
+  // Dedicated plugin hook (NOT an event-bus type): fires after every tool
+  // call. Mirrors codex: external context (web search or any MCP tool) only
+  // pollutes the session's memory when disable_on_external_context is
+  // enabled. Off by default.
+  async "tool.execute.after"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
+    try {
+      if (!pluginOptions.disable_on_external_context) return
+      if (input.sessionID && (await isExternalContextTool(input.tool))) {
+        getStore().markPolluted(input.sessionID)
+      }
+    } catch (err) {
+      console.error("[opencode-codex-memory] tool.execute.after error:", err)
+    }
+  },
+
   async event(input: { event: { type: string; properties: unknown } }): Promise<void> {
     try {
       const ev = input.event
@@ -253,23 +272,6 @@ function buildHooks() {
             getStore().recordUsage(fresh)
           } catch (e) {
             console.error("[opencode-codex-memory] recordUsage failed:", e)
-          }
-        }
-        return
-      }
-
-      if (ev.type === "tool.execute.after") {
-        // Mirrors codex: external context (web search or any MCP tool) only
-        // pollutes the session's memory when disable_on_external_context is
-        // enabled. Off by default.
-        if (!pluginOptions.disable_on_external_context) return
-        const props = ev.properties as { tool?: string; sessionID?: string }
-        const toolName = props?.tool ?? ""
-        if (props.sessionID && (await isExternalContextTool(toolName))) {
-          try {
-            getStore().markPolluted(props.sessionID)
-          } catch (e) {
-            console.error("[opencode-codex-memory] markPolluted failed:", e)
           }
         }
         return
@@ -296,8 +298,8 @@ function buildHooks() {
         const sid = props?.sessionID
         if (!sid || isMemorySubSession(sid)) return
         // codex stamps memory_mode at thread creation from generate_memories:
-        // sessions seen while generation is off stay excluded permanently,
-        // even if the option is re-enabled later.
+        // sessions first seen while generation is off keep that stamp when the
+        // option is re-enabled (manual override: the memory_mode tool).
         try {
           getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
         } catch (e) {
@@ -348,6 +350,7 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
       maxAgeDays: pluginOptions.max_rollout_age_days,
       minIdleHours: pluginOptions.min_rollout_idle_hours,
       maxClaimed: pluginOptions.max_rollouts_per_startup,
+      maxUnusedDays: pluginOptions.max_unused_days,
       excludeSession: currentSessionId,
       extractModel: pluginOptions.extract_model,
     })
