@@ -1,4 +1,4 @@
-Analyze this opencode session and produce JSON with `raw_memory`, `rollout_summary`, and `rollout_slug` (use empty strings for a no-op).
+Analyze this opencode session and produce JSON with `raw_memory`, `rollout_summary`, and `rollout_slug` (use empty string when unknown).
 
 session_context:
 - session_id: {{ session_id }}

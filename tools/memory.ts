@@ -10,7 +10,7 @@ export const memory_read = tool({
   description:
     "Read a file from the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*, etc.). " +
     "Paths are relative to the memory root and cannot escape it. Supports line_offset/max_lines for " +
-    "reading a window of a large file; output line numbers are 1-indexed.",
+    "reading a window of a large file; line_offset is 1-indexed and the starting line is reported.",
   args: {
     path: tool.schema.string().describe("Relative path inside the memory workspace (e.g. MEMORY.md, rollout_summaries/session-xyz.md)."),
     line_offset: tool.schema.number().int().min(1).optional().describe("1-indexed line to start reading from."),
@@ -261,9 +261,13 @@ export const memory_search = tool({
       const out = matches
         .map((m) => `${m.file}:${m.line}: ${m.text}`)
         .join("\n")
+      // codex signals a capped result set (truncated/next_cursor); without an
+      // indicator the model cannot tell "exactly N" from "stopped at N".
+      const capped = matches.length >= args.limit
       return {
-        output: `${matches.length} match(es) for "${args.query}"${rangeLabel}:\n${out}`,
-        metadata: { count: matches.length, query: args.query, since: args.since, until: args.until },
+        output:
+          `${matches.length} match(es) for "${args.query}"${rangeLabel}${capped ? " (result limit reached; more may exist)" : ""}:\n${out}`,
+        metadata: { count: matches.length, query: args.query, since: args.since, until: args.until, truncated: capped },
       }
     } catch (err) {
       return { output: `memory_search error: ${(err as Error).message}` }
