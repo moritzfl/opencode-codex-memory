@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-11
+
+### Fixed
+
+- Stage-1 output changes now enqueue global consolidation, so new extractions
+  and deleted sessions trigger a phase-2 pass without waiting for the next
+  session.idle. If phase 2 is already running, its lease is preserved and only
+  the input watermark advances.
+- Deleting a session whose stage-1 output was already consumed by phase 2 now
+  enqueues a forgetting pass, so the diff drives removal of the stale memory.
+- Shipped memory subagents (`memorize`, `memorize-extract`) now default-deny
+  unknown tools so IDE and MCP integrations cannot bypass the shell/network
+  restrictions.
+
 ## [0.1.7] - 2026-07-10
 
 ### Fixed
@@ -216,7 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.3...v0.1.6
 [0.1.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.2...v0.1.3
