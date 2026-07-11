@@ -29,9 +29,10 @@ export const DEFAULT_PHASE1_OPTIONS: Phase1Options = {
 // char-estimate equivalent at 600k.
 const TRANSCRIPT_MAX_CHARS = 600_000
 // When truncating, keep the head and the tail: the start carries the user's
-// framing, the end carries the final outcome and feedback.
-const TRANSCRIPT_HEAD_CHARS = 360_000
-const TRANSCRIPT_TAIL_CHARS = 240_000
+// framing, the end carries the final outcome and feedback. codex splits the
+// budget 50/50 between head and tail (truncate.rs split_budget).
+const TRANSCRIPT_HEAD_CHARS = 300_000
+const TRANSCRIPT_TAIL_CHARS = 300_000
 
 export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAULT_PHASE1_OPTIONS): Promise<void> {
   store.pruneStage1Outputs(opts.maxUnusedDays ?? 30)

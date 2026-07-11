@@ -139,7 +139,10 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
     // extract_model option > opencode small_model > session default.
     const model = opts.model ?? (await getConfigModels()).smallModel
     const raw = await promptSession(subId, prompt, agent, {
-      timeoutMs: 180_000,
+      // Mirrors the stage-1 job lease (1h): codex has no per-request timeout,
+      // and a near-600k-char transcript on a slow model can easily exceed a
+      // short one — repeated timeouts would exhaust the job's retries.
+      timeoutMs: 3600_000,
       system: readTemplate("stage_one_system.md"),
       model,
     })

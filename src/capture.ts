@@ -83,6 +83,10 @@ export function loadTranscript(sessionId: string): TranscriptMessage[] {
 
 function extractText(msg: any): string | undefined {
   if (!msg) return undefined
+  // codex excludes reasoning items from extraction transcripts
+  // (rollout policy: ResponseItem::Reasoning => false); opencode reasoning
+  // parts carry `text`, so they must be dropped before the text check.
+  if (msg.type === "reasoning") return undefined
   if (typeof msg.text === "string") return msg.text
   if (msg.type === "tool") {
     // Full tool payloads: codex serializes complete FunctionCall/Output items
