@@ -188,7 +188,10 @@ export class MemoryStore {
         .run(nowSec(), out.source_updated_at, sessionId, ownershipToken)
       // Ownership lost (lease expired, job re-claimed): do not clobber the new
       // owner's output. Mirrors codex mark_stage1_job_succeeded.
-      if (res.changes > 0) this.upsertStage1Output(out)
+      if (res.changes > 0) {
+        this.upsertStage1Output(out)
+        this.enqueueGlobalConsolidation(out.source_updated_at)
+      }
     }).immediate()
   }
 
@@ -202,7 +205,9 @@ export class MemoryStore {
            WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
         )
         .run(nowSec(), sourceUpdatedAt, sessionId, ownershipToken)
-      if (res.changes > 0) this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+      if (res.changes === 0) return
+      const deleted = this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+      if (deleted.changes > 0) this.enqueueGlobalConsolidation(sourceUpdatedAt)
     }).immediate()
   }
 
@@ -219,6 +224,35 @@ export class MemoryStore {
          WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
       )
       .run(error.slice(0, 4000), nowSec() + STAGE1_RETRY_DELAY_SECONDS, nowSec(), sessionId, ownershipToken)
+  }
+
+  /**
+   * Enqueues global consolidation after stage-1 state changes. If phase 2 is
+   * already running, preserve its lease and advance only the input watermark.
+   */
+  private enqueueGlobalConsolidation(inputWatermark: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO memory_jobs
+          (kind, job_key, status, retry_remaining, input_watermark, last_success_watermark)
+         VALUES ('memory_consolidate_global', 'global', 'pending', ?, ?, 0)
+         ON CONFLICT(kind, job_key) DO UPDATE SET
+           status = CASE
+             WHEN memory_jobs.status = 'running' THEN 'running'
+             ELSE 'pending'
+           END,
+           retry_at = CASE
+             WHEN memory_jobs.status = 'running' THEN memory_jobs.retry_at
+             ELSE NULL
+           END,
+           retry_remaining = MAX(memory_jobs.retry_remaining, excluded.retry_remaining),
+           input_watermark = CASE
+             WHEN excluded.input_watermark > COALESCE(memory_jobs.input_watermark, 0)
+               THEN excluded.input_watermark
+             ELSE COALESCE(memory_jobs.input_watermark, 0) + 1
+           END`,
+      )
+      .run(DEFAULT_RETRY_REMAINING, inputWatermark)
   }
 
   claimGlobalPhase2Job(): Phase2ClaimResult {

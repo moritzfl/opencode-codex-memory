@@ -113,6 +113,7 @@ describe("MemoryStore stage1", () => {
 
   it("marks succeeded and stores output", () => {
     const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
     const store = new MemoryStore()
     const token = claimOne(store, "s1")
     store.markStage1Succeeded("s1", token, {
@@ -127,6 +128,31 @@ describe("MemoryStore stage1", () => {
     expect(outs.length).toBe(1)
     expect(outs[0].session_id).toBe("s1")
     expect(outs[0].usage_count).toBe(0)
+    const phase2 = openDb()
+      .prepare("SELECT status, input_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; input_watermark: number }
+    expect(phase2).toEqual({ status: "pending", input_watermark: 1000 })
+  })
+
+  it("advances the phase-2 watermark for every changed stage-1 output", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    for (const [id, watermark] of [["newer", 2000], ["older", 1000]] as const) {
+      const token = claimOne(store, id, watermark)
+      store.markStage1Succeeded(id, token, {
+        session_id: id,
+        source_updated_at: watermark,
+        raw_memory: "raw",
+        rollout_summary: "sum",
+        rollout_slug: null,
+        generated_at: watermark,
+      })
+    }
+    const phase2 = openDb()
+      .prepare("SELECT status, input_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; input_watermark: number }
+    expect(phase2).toEqual({ status: "pending", input_watermark: 2001 })
   })
 
   it("a stale ownership token cannot finalize a re-claimed job or clobber its output", () => {
@@ -215,13 +241,33 @@ describe("MemoryStore stage1", () => {
 
   it("markStage1SucceededNoOutput finishes the job and drops the output row", () => {
     const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
     const store = new MemoryStore()
     let token = claimOne(store, "s1")
     store.markStage1Succeeded("s1", token, { session_id: "s1", source_updated_at: 500, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 500 })
+    const phase2Claim = store.claimGlobalPhase2Job()
+    if (phase2Claim.type !== "claimed") throw new Error("expected phase2 claim")
+    store.markPhase2Succeeded(phase2Claim.ownershipToken)
     token = claimOne(store, "s1")
     store.markStage1SucceededNoOutput("s1", token, 1000)
     expect(store.stage1Outputs().length).toBe(0)
     expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
+    const phase2 = openDb()
+      .prepare("SELECT status, input_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; input_watermark: number }
+    expect(phase2).toEqual({ status: "pending", input_watermark: 1000 })
+  })
+
+  it("does not enqueue phase 2 when no-output removed nothing", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const token = claimOne(store, "s1")
+    store.markStage1SucceededNoOutput("s1", token, 1000)
+    const phase2 = openDb()
+      .prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get()
+    expect(phase2).toBeNull()
   })
 })
 
