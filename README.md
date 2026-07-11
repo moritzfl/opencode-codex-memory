@@ -56,9 +56,11 @@ Requires only opencode (official release). Git is bundled (`isomorphic-git`) —
 no `git` binary or any other external tool needed.
 
 The two restricted sub-agents that do the background learning (`memorize`,
-`memorize-extract`) register themselves automatically. To customize one — e.g.
-pin a cheaper model for extraction — define an agent with the same name in your
-own config; your definition wins and the plugin leaves it alone.
+`memorize-extract`) register themselves automatically. To choose which models
+they use, set the `extract_model` / `consolidation_model` plugin options (see
+[Configuration](#configuration)) — don't override the agents for that. Defining
+an agent with the same name in your own config is only for advanced tweaks
+(e.g. permissions); your definition then replaces the shipped one.
 
 ## Try it
 
@@ -158,9 +160,22 @@ model. (opencode's *automatic* small-model pick is internal to opencode and
 not exposed to plugins — set `small_model` explicitly to get the cheap
 extraction path.)
 
+The full precedence per phase: plugin option (`extract_model` /
+`consolidation_model`) → opencode config (`small_model` / `model`) → a `model`
+on your own `memorize-extract`/`memorize` agent definition, if you overrode
+one → the provider's default model. Note that the first two pass the model
+explicitly, so they win over an agent-level `model`.
+
 > Note: `dedicated_tools` defaults to `true` here (codex defaults it to `false`).
 > This is the one intentional default difference — the tools are a core part of a
 > standalone memory plugin. Everything else matches codex's defaults.
+>
+> Turning `dedicated_tools` off doesn't break anything: background learning,
+> summary injection, and citation tracking all keep working. The injected
+> guidance switches to codex's file-based mode — the agent reads the memory
+> files with its normal file tools and writes "remember this" notes directly
+> into `extensions/ad_hoc/notes/`. The maintenance tools (`memory_reset`,
+> `memory_inspect`, `memory_mode`) stay available either way.
 
 ## Under the hood
 
