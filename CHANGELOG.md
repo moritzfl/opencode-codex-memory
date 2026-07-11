@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `disable_on_external_context` now works: pollution marking moved to the real
+  `tool.execute.after` plugin hook (it previously listened for a nonexistent
+  event-bus type and never fired).
+- `max_unused_days` is now honored by the phase-1 prune (it was hardcoded to
+  30 days there while phase-2 selection used the configured value, so raising
+  it silently still pruned at 30).
+- Reasoning/chain-of-thought parts are excluded from extraction transcripts,
+  matching codex's rollout policy.
+- A failed workspace diff no longer looks like "no changes" and falsely marks
+  consolidation succeeded; the job now fails and retries (codex
+  `failed_workspace_status`).
+- A corrupt git baseline is recovered by re-initializing instead of failing
+  every consolidation run (codex `reset_git_repository_sync`).
+- Stuck unowned phase-2 jobs are recovered by the failure path (codex
+  `failed_if_unowned`); the heartbeat no longer dies silently on store errors.
+- The stage-1 claim cap follows `max_rollouts_per_startup` (1-128) instead of
+  being silently limited to the execution concurrency of 8; the extraction
+  timeout mirrors the 1h job lease so large transcripts cannot exhaust retries.
+- Session deletion no longer triggers a consolidation attempt while
+  `generate_memories` is off (the memorize agent is not registered then).
+- The consolidation prompt no longer instructs shell commands or file deletion
+  the sandboxed memorize agent cannot perform; stage-1 input restores codex's
+  "empty string when unknown" contract; `memory_search` flags capped result
+  sets; transcript head/tail truncation uses codex's 50/50 split.
+
+### Changed
+
+- README: clarified that no codex subscription or OpenAI account is needed,
+  documented the model-selection precedence chain and `dedicated_tools: false`
+  behavior, and corrected several claims (idle timing, read-only opencode.db
+  access, redaction scope, sandbox wording, data layout).
+- With `dedicated_tools: false` the injected memory guidance now uses codex's
+  file-based wording instead of referencing unregistered `memory_*` tools.
+
 ## [0.1.8] - 2026-07-11
 
 ### Fixed

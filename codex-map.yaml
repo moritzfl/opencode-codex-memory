@@ -266,7 +266,10 @@ mappings:
       tolerates unknown fields, and rejects prompt-skeleton echoes; per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
       reasoning effort is not pinned (codex: Low for extraction, Medium for
-      consolidation; no session.prompt equivalent).
+      consolidation; no session.prompt equivalent); a consolidator that loses
+      phase-2 ownership mid-run is not aborted (codex kills the agent thread on
+      heartbeat loss) — it runs to completion/timeout but the token-guarded
+      final ownership confirm in phase2.ts blocks it from finalizing.
 
   # --- Utilities ---
   - ours: src/token.ts
