@@ -8,6 +8,11 @@ It's a single plugin. No core changes, no MCP server, no separate process, no
 cloud service. Everything stays on your machine under
 `~/.local/share/opencode/`.
 
+Despite the name: **no codex subscription or OpenAI account is needed.** This
+project ports the memory *design* from OpenAI's codex to opencode. It works out
+of the box with zero extra configuration and uses whatever models you already
+have set up in opencode.
+
 ## Why
 
 By default every opencode session starts from zero. You re-explain your build
