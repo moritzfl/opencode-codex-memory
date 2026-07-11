@@ -393,11 +393,21 @@ export class MemoryStore {
       .all(cutoff, cutoff, maxRaw) as Stage1Output[]
   }
 
-  /** Mirrors codex delete_thread_memory: remove a deleted session's output + job. */
-  deleteSessionMemory(sessionId: string): void {
-    this.db.transaction(() => {
-      this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+  /**
+   * Mirrors codex delete_thread_memory: remove a deleted session's output and
+   * job, then enqueue forgetting if phase 2 had consumed that output.
+   */
+  deleteSessionMemory(sessionId: string): boolean {
+    return this.db.transaction((): boolean => {
+      const existing = this.db
+        .prepare("SELECT selected_for_phase2 FROM memory_stage1_outputs WHERE session_id = ?")
+        .get(sessionId) as { selected_for_phase2: number } | null
+      const deleted = this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
       this.db.prepare("DELETE FROM memory_jobs WHERE kind='memory_stage1' AND job_key = ?").run(sessionId)
+      const shouldConsolidate =
+        deleted.changes > 0 && existing !== null && existing.selected_for_phase2 !== 0
+      if (shouldConsolidate) this.enqueueGlobalConsolidation(now())
+      return shouldConsolidate
     }).immediate()
   }
 

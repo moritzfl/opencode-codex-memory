@@ -69,6 +69,14 @@ export function takeNewCitations(partKey: string, ids: string[]): string[] {
   return fresh
 }
 
+export function handleSessionDeleted(
+  sessionId: string,
+  store: Pick<MemoryStore, "deleteSessionMemory"> = getStore(),
+  schedulePhase2: () => void = () => { void triggerPhase2() },
+): void {
+  if (store.deleteSessionMemory(sessionId)) schedulePhase2()
+}
+
 export default {
   id: "opencode-codex-memory",
   async server(input: PluginInput, opts?: PluginOptions) {
@@ -269,13 +277,13 @@ function buildHooks() {
 
       if (ev.type === "session.deleted") {
         // Mirrors codex delete_thread_memory: drop the extracted memory and
-        // its job when the session is deleted; the file disappears at the
-        // next phase-2 rebuild and the diff drives forgetting.
+        // its job when the session is deleted. If phase 2 had consumed it,
+        // enqueue and attempt consolidation so the diff drives forgetting.
         const props = ev.properties as { info?: { id?: string } }
         const sid = props?.info?.id
         if (sid) {
           try {
-            getStore().deleteSessionMemory(sid)
+            handleSessionDeleted(sid)
           } catch (e) {
             console.error("[opencode-codex-memory] deleteSessionMemory failed:", e)
           }

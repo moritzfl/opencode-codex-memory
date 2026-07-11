@@ -398,6 +398,47 @@ describe("MemoryStore phase2 input selection", () => {
     expect(store.stage1Outputs().map((o: any) => o.session_id)).toEqual(["kept"])
   })
 
+  it("deleting a selected output enqueues phase 2 to forget it", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const sourceUpdatedAt = Date.now() - DAY
+    seed(store, "selected", sourceUpdatedAt)
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(claim.ownershipToken, [
+      { session_id: "selected", source_updated_at: sourceUpdatedAt },
+    ])
+
+    expect(store.deleteSessionMemory("selected")).toBe(true)
+    expect(store.stage1Outputs()).toEqual([])
+    const phase2 = openDb()
+      .prepare("SELECT status, input_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; input_watermark: number }
+    expect(phase2.status).toBe("pending")
+    expect(phase2.input_watermark).toBeGreaterThan(sourceUpdatedAt)
+    expect(
+      openDb().prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_stage1' AND job_key='selected'").get(),
+    ).toBeNull()
+  })
+
+  it("deleting an unselected output does not enqueue forgetting", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const sourceUpdatedAt = Date.now() - DAY
+    seed(store, "unselected", sourceUpdatedAt)
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(claim.ownershipToken, [])
+
+    expect(store.deleteSessionMemory("unselected")).toBe(false)
+    const phase2 = openDb()
+      .prepare("SELECT status, input_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; input_watermark: number }
+    expect(phase2).toEqual({ status: "done", input_watermark: sourceUpdatedAt })
+  })
+
   it("pruneStage1Outputs deletes only old unused rows", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")
