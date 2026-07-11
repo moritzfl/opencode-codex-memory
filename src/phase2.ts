@@ -73,8 +73,15 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
 
       let heartbeatLost = false
       const heartbeat = setInterval(() => {
-        if (!store.heartbeatPhase2Job(claim.ownershipToken)) {
-          heartbeatLost = true
+        try {
+          if (!store.heartbeatPhase2Job(claim.ownershipToken)) {
+            heartbeatLost = true
+          }
+        } catch (err) {
+          // Transient DB error (e.g. SQLITE_BUSY): don't treat as ownership
+          // loss — the token+status-guarded final confirmation below stays
+          // authoritative. Uncaught, this would kill the interval silently.
+          console.warn("[opencode-codex-memory] phase2 heartbeat error:", err)
         }
       }, 90_000)
 

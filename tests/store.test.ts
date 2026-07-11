@@ -46,12 +46,12 @@ describe("MemoryStore stage1", () => {
     expect(claimed[0].ownershipToken).not.toBe(claimed[1].ownershipToken)
   })
 
-  it("respects the concurrency cap", () => {
-    const { MemoryStore, STAGE1_CONCURRENCY } = require("../src/store.js")
+  it("defaults the claim cap to codex's max_rollouts_per_startup default (2)", () => {
+    const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    const many = Array.from({ length: STAGE1_CONCURRENCY + 5 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
+    const many = Array.from({ length: 10 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
     const claimed = store.claimStage1Jobs(many)
-    expect(claimed.length).toBe(STAGE1_CONCURRENCY)
+    expect(claimed.length).toBe(2)
   })
 
   it("uses maxClaimed as the running-jobs cap like codex max_running_jobs", () => {
@@ -84,12 +84,15 @@ describe("MemoryStore stage1", () => {
     }
   })
 
-  it("clamps maxClaimed to the concurrency ceiling", () => {
+  it("claims above the execution concurrency when maxClaimed allows (codex claims up to 128)", () => {
+    // codex claims up to max_rollouts_per_startup (clamp 1-128) and only the
+    // EXECUTION runs 8-wide (buffer_unordered); the claim count must not be
+    // silently capped at STAGE1_CONCURRENCY.
     const { MemoryStore, STAGE1_CONCURRENCY } = require("../src/store.js")
     const store = new MemoryStore()
     const many = Array.from({ length: STAGE1_CONCURRENCY + 5 }, (_, i) => ({ id: `s${i}`, updated_at: 1000 }))
-    const claimed = store.claimStage1Jobs(many, undefined, 999)
-    expect(claimed.length).toBe(STAGE1_CONCURRENCY)
+    const claimed = store.claimStage1Jobs(many, undefined, STAGE1_CONCURRENCY + 5)
+    expect(claimed.length).toBe(STAGE1_CONCURRENCY + 5)
   })
 
   it("reclaims a running job once its lease expires", () => {
@@ -318,6 +321,33 @@ describe("MemoryStore phase2", () => {
     openDb().prepare("UPDATE memory_jobs SET retry_at = NULL WHERE kind='memory_consolidate_global'").run()
     // Backoff cleared: claimable immediately, no 6h cooldown for failures.
     expect(store.claimGlobalPhase2Job().type).toBe("claimed")
+  })
+
+  it("failure fallback recovers a stuck unowned running row (codex failed_if_unowned)", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    openDb().prepare("UPDATE memory_jobs SET ownership_token = NULL WHERE kind='memory_consolidate_global'").run()
+    store.markPhase2Failed("stale-token", "boom")
+    const row = openDb()
+      .prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string }
+    expect(row.status).toBe("failed")
+  })
+
+  it("failure fallback does not touch a row owned by another worker", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Failed("stale-token", "boom")
+    const row = openDb()
+      .prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string }
+    expect(row.status).toBe("running")
   })
 
   it("heartbeat refreshes lease and rejects non-owners", () => {

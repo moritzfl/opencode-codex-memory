@@ -86,6 +86,18 @@ describe("git-baseline", () => {
     expect(log.length).toBe(1)
   })
 
+  it("ensureBaseline recovers a corrupt .git by re-initializing (codex reset_git_repository_sync)", async () => {
+    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+    fs.writeFileSync(memFile("a.md"), "one\n")
+    expect(await ensureBaseline()).toBe(true)
+    // Corrupt the repo metadata: without self-heal every phase-2 run would
+    // fail forever (codex re-inits a fresh baseline instead).
+    fs.writeFileSync(path.join(TEST_ROOT, "memories", ".git", "HEAD"), "garbage")
+    expect(await ensureBaseline()).toBe(true)
+    const diff = await captureWorkspaceDiff()
+    expect(diff.changes).toEqual([])
+  })
+
   it("removes the phase2 diff artifact before diffing and committing", async () => {
     const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
     expect(await ensureBaseline()).toBe(true)

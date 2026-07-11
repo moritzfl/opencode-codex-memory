@@ -119,10 +119,11 @@ export class MemoryStore {
 
   claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string, maxClaimed?: number): Stage1Claim[] {
     const workerId = newId()
-    // Cap per-pass claims at codex's max_rollouts_per_startup (max_claimed) when
-    // provided, never exceeding the hard concurrency ceiling. codex also uses
-    // max_claimed as the cross-process running-jobs cap.
-    const claimCap = Math.max(1, Math.min(maxClaimed ?? STAGE1_CONCURRENCY, STAGE1_CONCURRENCY))
+    // Cap per-pass claims at codex's max_rollouts_per_startup (max_claimed,
+    // default 2, clamp 1-128). codex also uses max_claimed as the
+    // cross-process running-jobs cap; execution concurrency is limited
+    // separately (STAGE1_CONCURRENCY, codex buffer_unordered(8)).
+    const claimCap = Math.max(1, maxClaimed ?? 2)
     const claimed: Stage1Claim[] = []
     const claimOne = this.db.transaction((s: ClaimableSession, ownershipToken: string, lease: number): boolean => {
       const activeRow = this.db
@@ -352,7 +353,7 @@ export class MemoryStore {
   }
 
   markPhase2Failed(ownershipToken: string, error: string): void {
-    this.db
+    const res = this.db
       .prepare(
         `UPDATE memory_jobs SET
            status = 'failed',
@@ -364,6 +365,22 @@ export class MemoryStore {
          WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
       )
       .run(error.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec(), ownershipToken)
+    if (res.changes > 0) return
+    // codex mark_global_phase2_job_failed_if_unowned: if the owned update
+    // matched nothing, recover a stuck running row that lost its owner
+    // (ownership_token NULL) so it does not linger until lease expiry.
+    this.db
+      .prepare(
+        `UPDATE memory_jobs SET
+           status = 'failed',
+           retry_remaining = MAX(0, retry_remaining - 1),
+           last_error = ?,
+           retry_at = ?,
+           finished_at = ?,
+           lease_until = NULL
+         WHERE kind='memory_consolidate_global' AND job_key='global' AND status='running' AND ownership_token IS NULL`,
+      )
+      .run(error.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec())
   }
 
   /**

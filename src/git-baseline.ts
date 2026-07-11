@@ -75,8 +75,8 @@ async function commitBaseline(dir: string): Promise<string> {
  * without any commit gets a fresh baseline.
  */
 export async function ensureBaseline(): Promise<boolean> {
+  const dir = memoryRoot()
   try {
-    const dir = memoryRoot()
     removeDiffArtifact(dir)
     await ensureInit(dir)
     if (!(await hasHeadCommit(dir))) {
@@ -84,8 +84,19 @@ export async function ensureBaseline(): Promise<boolean> {
     }
     return true
   } catch (err) {
-    console.error("[opencode-codex-memory] ensureBaseline error:", err)
-    return false
+    // codex ensure_git_baseline_repository: unusable/corrupt git metadata is
+    // recovered by a destructive fresh re-init (reset_git_repository_sync)
+    // instead of failing the job forever.
+    console.error("[opencode-codex-memory] ensureBaseline error, re-initializing baseline:", err)
+    try {
+      fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true })
+      await isogit.init({ fs, dir })
+      await commitBaseline(dir)
+      return true
+    } catch (err2) {
+      console.error("[opencode-codex-memory] baseline re-init failed:", err2)
+      return false
+    }
   }
 }
 
@@ -106,40 +117,38 @@ function readWorkdirText(dir: string, filepath: string): string {
   }
 }
 
+// Throws on failure: codex fails the phase-2 job on workspace-status errors
+// (failed_workspace_status). Swallowing the error here would make an errored
+// diff indistinguishable from "no changes" and falsely mark the job succeeded.
 export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
-  try {
-    const dir = memoryRoot()
-    await ensureInit(dir)
-    removeDiffArtifact(dir)
-    const matrix = await isogit.statusMatrix({ fs, dir })
-    const changedRows = matrix.filter(
-      ([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT,
-    )
-    const changes: WorkspaceChange[] = changedRows.map(([filepath, head, workdir]) => {
-      if (head === 0) return { status: "A", path: filepath }
-      if (workdir === 0) return { status: "D", path: filepath }
-      return { status: "M", path: filepath }
-    })
+  const dir = memoryRoot()
+  await ensureInit(dir)
+  removeDiffArtifact(dir)
+  const matrix = await isogit.statusMatrix({ fs, dir })
+  const changedRows = matrix.filter(
+    ([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT,
+  )
+  const changes: WorkspaceChange[] = changedRows.map(([filepath, head, workdir]) => {
+    if (head === 0) return { status: "A", path: filepath }
+    if (workdir === 0) return { status: "D", path: filepath }
+    return { status: "M", path: filepath }
+  })
 
-    let headOid: string | null = null
-    try {
-      headOid = await isogit.resolveRef({ fs, dir, ref: "HEAD" })
-    } catch {
-      // no commits yet — every file diffs against empty
-    }
-    const patches: string[] = []
-    for (const [filepath, head, workdir] of changedRows) {
-      const oldText = head === 1 && headOid ? await readBaselineText(dir, headOid, filepath) : ""
-      const newText = workdir === 0 ? "" : readWorkdirText(dir, filepath)
-      // No per-file cap: codex renders every file's patch in full and relies
-      // on the global 4 MiB truncation in writeWorkspaceDiff.
-      patches.push(createPatch(filepath, oldText, newText))
-    }
-    return { changes, unifiedDiff: patches.join("\n") }
-  } catch (err) {
-    console.error("[opencode-codex-memory] captureWorkspaceDiff error:", err)
-    return { changes: [], unifiedDiff: "" }
+  let headOid: string | null = null
+  try {
+    headOid = await isogit.resolveRef({ fs, dir, ref: "HEAD" })
+  } catch {
+    // no commits yet — every file diffs against empty
   }
+  const patches: string[] = []
+  for (const [filepath, head, workdir] of changedRows) {
+    const oldText = head === 1 && headOid ? await readBaselineText(dir, headOid, filepath) : ""
+    const newText = workdir === 0 ? "" : readWorkdirText(dir, filepath)
+    // No per-file cap: codex renders every file's patch in full and relies
+    // on the global 4 MiB truncation in writeWorkspaceDiff.
+    patches.push(createPatch(filepath, oldText, newText))
+  }
+  return { changes, unifiedDiff: patches.join("\n") }
 }
 
 /**
