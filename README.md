@@ -20,9 +20,9 @@ commands, your code style, and the quirks of each repo over and over.
 
 opencode-codex-memory closes that loop:
 
-- **It learns in the background.** After a session goes idle, the plugin reviews
-  the transcript and extracts durable facts — preferences, project structure,
-  what worked and what didn't.
+- **It learns in the background.** Once a session has been idle for a while
+  (default 6 h), a later background pass reviews the transcript and extracts
+  durable facts — preferences, project structure, what worked and what didn't.
 - **It consolidates.** Periodically it merges those notes into a compact,
   searchable memory, pruning what's stale.
 - **It remembers at the right time.** A short summary is injected into the system
@@ -49,14 +49,15 @@ anything.
 
 2. That's it. The memory workspace is created on first use. Installing the
    plugin is the opt-in: background learning and summary injection are active
-   immediately (codex ships the same system behind an experimental flag with a
-   consent prompt; a standalone memory plugin *is* the consent).
+   immediately (codex ships the same system behind a default-off feature flag
+   with a consent prompt; a standalone memory plugin *is* the consent).
 
 Requires only opencode (official release). Git is bundled (`isomorphic-git`) —
 no `git` binary or any other external tool needed.
 
 The two restricted sub-agents that do the background learning (`memorize`,
-`memorize-extract`) register themselves automatically. To choose which models
+`memorize-extract`) register themselves automatically while background learning
+is enabled. To choose which models
 they use, set the `extract_model` / `consolidation_model` plugin options (see
 [Configuration](#configuration)) — don't override the agents for that. Defining
 an agent with the same name in your own config is only for advanced tweaks
@@ -64,9 +65,9 @@ an agent with the same name in your own config is only for advanced tweaks
 
 ## Try it
 
-Just use opencode normally. After a session goes idle, the plugin reviews it in
-the background and starts building memory — you don't have to do anything. Come
-back for a later session and ask something like *"what do you know about how I
+Just use opencode normally. Sessions that have been idle for a few hours get
+reviewed in the background and memory starts building up — you don't have to do
+anything. Come back the next day and ask something like *"what do you know about how I
 work?"* or *"what was I doing in this repo?"* and the agent draws on what it
 learned. The more you use it, the more it knows.
 
@@ -89,7 +90,7 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
 
 ```
 ~/.local/share/opencode/
-├── memory.db                       # the plugin's own database (never touches opencode's)
+├── memory.db                       # the plugin's own database (opencode's is only ever read)
 └── memories/
     ├── memory_summary.md           # compact summary injected into the system prompt
     ├── MEMORY.md                   # searchable index of everything learned
@@ -99,16 +100,20 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
 ```
 
 It's all plain files and a local SQLite database. Read them, edit them, delete
-them, or check them into a private repo — it's yours.
+them — it's yours. (The `memories/` folder also holds a few working files and
+an internal `.git/` the plugin uses for change tracking; `memory_reset` wipes
+those too.)
 
 ## Privacy & safety
 
 - **Local only.** Nothing is sent anywhere except through your existing opencode
   provider, using your existing credentials. The plugin holds no keys of its own.
-- **Secrets are redacted** (API keys, tokens, private keys, passwords) before any
-  memory is written or sent to a model.
-- **The learning agents are sandboxed** — they cannot run shell commands or reach
-  the network.
+- **Secrets are redacted** (API keys, tokens, private keys, passwords) from
+  session transcripts and extracted memories before anything is written or sent
+  to a model. Notes you explicitly dictate ("remember that ...") are stored as
+  you said them.
+- **The learning agents are sandboxed** — every tool except reading and editing
+  the memory files is denied, including shell and network access.
 - **Reset is safe.** `memory_reset` refuses to run if the memory folder is a
   symlink, so it can't be tricked into deleting something else.
 - **Web/MCP sessions:** by default, sessions that used web search, fetch, or MCP
@@ -127,8 +132,8 @@ codex's `[memories]` config so the two stay easy to compare:
 | `use_memories` | `true` | Inject the memory summary into the system prompt |
 | `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_list`/`memory_add_note` tools |
 | `disable_on_external_context` | `false` | Exclude sessions that used web/MCP tools from memory |
-| `extract_model` | opencode `small_model`, else current model | Model used for per-session extraction |
-| `consolidation_model` | opencode `model`, else current model | Model used for consolidation |
+| `extract_model` | opencode `small_model`, else see below | Model used for per-session extraction |
+| `consolidation_model` | opencode `model`, else see below | Model used for consolidation |
 | `max_raw_memories_for_consolidation` | `256` | How many raw memories feed each consolidation pass |
 | `max_rollout_age_days` | `10` | Ignore sessions older than this for extraction |
 | `min_rollout_idle_hours` | `6` | How long a session must be idle before it's eligible |
@@ -155,10 +160,11 @@ Model selection mirrors codex's cheap-extraction / capable-consolidation
 split using opencode's own concepts: when `extract_model` is unset, the
 `small_model` from your `opencode.json` is used (codex uses `gpt-5.4-mini`);
 when `consolidation_model` is unset, your main `model` is used (codex uses
-`gpt-5.4`). If neither is configured, both fall back to the session's default
-model. (opencode's *automatic* small-model pick is internal to opencode and
-not exposed to plugins — set `small_model` explicitly to get the cheap
-extraction path.)
+`gpt-5.4`). If neither is configured, the learning sub-agents fall back to
+their own agent-level `model` (if you defined one), else the provider default.
+(opencode's *automatic* small-model pick is internal to opencode and not
+exposed to plugins — set `small_model` explicitly to get the cheap extraction
+path.)
 
 The full precedence per phase: plugin option (`extract_model` /
 `consolidation_model`) → opencode config (`small_model` / `model`) → a `model`
