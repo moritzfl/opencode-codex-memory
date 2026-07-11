@@ -5,6 +5,7 @@
       "mode": "subagent",
       "prompt": "You are a memory consolidation agent. Read the workspace diff file and update MEMORY.md, memory_summary.md, and skills/ to reflect the latest memories. Keep memory_summary.md under 10000 chars (2500 tokens). Prune stale entries. Do not access the network.",
       "permission": {
+        "*": "deny",
         "bash": "deny",
         "webfetch": "deny",
         "websearch": "deny",
@@ -21,6 +22,7 @@
       "mode": "subagent",
       "prompt": "You are a memory extraction agent. Read the session transcript and extract raw_memory, rollout_summary, and rollout_slug as JSON. Exclude AGENTS.md/instruction content. Redact secrets.",
       "permission": {
+        "*": "deny",
         "bash": "deny",
         "webfetch": "deny",
         "websearch": "deny",

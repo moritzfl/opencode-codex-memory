@@ -101,10 +101,11 @@ the prefix cache misses — same as any plugin hook. Accepted.
 ### D2 — Consolidation subagent sandboxing (`opencode.json`)
 
 codex uses Seatbelt to block network access; opencode has no process sandbox.
-**Workaround:** ship `memorize` / `memorize-extract` subagents with explicit
-permission denies (`bash`, `webfetch`, `websearch`, `task` denied;
-`read`/`edit`/`write`/`glob`/`grep` allowed). Optionally path-scope writes to the
-memories dir. Tool-permission-level, not process-level — accepted trade-off.
+**Workaround:** every shipped memory subagent starts with `"*": "deny"` and
+allowlists only the built-in opencode file tools it needs
+(`read`/`edit`/`write`/`glob`/`grep`). This also blocks IDE and MCP tools that
+could otherwise bypass a narrower `bash` deny. Optionally path-scope writes to
+the memories dir. Tool-permission-level, not process-level — accepted trade-off.
 
 ### D3 — LLM calls for extraction/consolidation (`src/llm.ts`)
 

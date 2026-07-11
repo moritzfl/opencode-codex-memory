@@ -51,8 +51,10 @@ bun run typecheck
   platform adaptations — never byte-copy them from upstream. Read the mapping
   `note:` in `codex-map.yaml` first; `tests/prompts.test.ts` guards the
   citation/tool/placeholder contracts.
-- Keep the `memorize` / `memorize-extract` subagents network-denied
-  (`bash`/`webfetch`/`websearch`/`task` denied); that is the sandbox.
+- Every agent shipped in `opencode.json` must start its permissions with
+  `"*": "deny"` and allow only the built-in opencode file tools it needs.
+  Shell, network, task delegation, IDE, and MCP tools must remain denied;
+  `tests/agents.test.ts` enforces this sandbox.
 
 ## Commits
 

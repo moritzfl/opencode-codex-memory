@@ -3,6 +3,8 @@ import fs from "fs"
 import path from "path"
 
 const OPENCODE_JSON = path.join(import.meta.dirname, "..", "opencode.json")
+const SHIPPED_AGENTS = JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8")).agent as Record<string, any>
+const ALLOWED_BUILTIN_TOOLS = new Set(["read", "edit", "write", "glob", "grep"])
 
 describe("agent auto-registration", () => {
   it("injects both sub-agents from the bundled opencode.json when absent", () => {
@@ -12,11 +14,21 @@ describe("agent auto-registration", () => {
     expect(Object.keys(config.agent ?? {}).sort()).toEqual(["memorize", "memorize-extract"])
     expect(config.agent!["memorize"].mode).toBe("subagent")
     expect(config.agent!["memorize-extract"].mode).toBe("subagent")
-    // The sandbox must survive injection: network/task tools stay denied.
-    for (const name of ["memorize", "memorize-extract"]) {
-      const perm = config.agent![name].permission
-      for (const denied of ["bash", "webfetch", "websearch", "task"]) {
-        expect(perm[denied]).toBe("deny")
+    expect(config.agent!["memorize"].permission.edit).toBe("allow")
+    expect(config.agent!["memorize"].permission.write).toBe("allow")
+    expect(config.agent!["memorize-extract"].permission.edit).toBe("deny")
+    expect(config.agent!["memorize-extract"].permission.write).toBe("deny")
+  })
+
+  it("allowlists built-in tools for every shipped agent", () => {
+    for (const [name, definition] of Object.entries(SHIPPED_AGENTS)) {
+      const permission = definition.permission as Record<string, string>
+      expect(Object.keys(permission)[0], `${name}: wildcard deny must be first`).toBe("*")
+      expect(permission["*"], `${name}: unknown and MCP tools must be denied`).toBe("deny")
+      for (const [tool, action] of Object.entries(permission)) {
+        if (action === "allow") {
+          expect(ALLOWED_BUILTIN_TOOLS.has(tool), `${name}: unexpected allowed tool ${tool}`).toBe(true)
+        }
       }
     }
   })
@@ -32,7 +44,6 @@ describe("agent auto-registration", () => {
   })
 
   it("bundled definitions stay in sync with the shipped opencode.json", () => {
-    const shipped = JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8"))
-    expect(Object.keys(shipped.agent ?? {}).sort()).toEqual(["memorize", "memorize-extract"])
+    expect(Object.keys(SHIPPED_AGENTS).sort()).toEqual(["memorize", "memorize-extract"])
   })
 })

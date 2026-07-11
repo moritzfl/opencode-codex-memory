@@ -47,8 +47,10 @@ via the drift script before proposing structural changes.
   placeholder inventory). **Never byte-copy them from codex.** Before syncing a
   template, read its mapping `note:` in `codex-map.yaml` and re-apply the listed
   adaptations; `tests/prompts.test.ts` fails on contract breaks.
-- Keep the `memorize` / `memorize-extract` subagents network-denied
-  (`bash`/`webfetch`/`websearch`/`task`); that is the sandbox (D2).
+- Every agent shipped in `opencode.json` must use an allowlist: `"*": "deny"`
+  first, followed only by the built-in opencode file tools it requires. Never
+  allow shell, network, task delegation, IDE, or MCP tools; that is the sandbox
+  (D2), and `tests/agents.test.ts` enforces it.
 
 ## Packaging & releases
 
