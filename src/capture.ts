@@ -1,6 +1,6 @@
-import { Database } from "bun:sqlite"
-import { opencodeDbPath } from "./paths.js"
-import { MemoryStore, SCAN_LIMIT } from "./store.js"
+import { SCAN_LIMIT } from "./store.js"
+import type { MemoryStore } from "./store.js"
+import { getPluginInput } from "./llm.js"
 
 export interface SessionRow {
   id: string
@@ -8,40 +8,84 @@ export interface SessionRow {
   directory: string | null
 }
 
-let opencodeDb: Database | null = null
+const API_TIMEOUT_MS = 60_000
 
-/** Throws when opencode.db cannot be opened; failures are not cached, so the next call retries. */
-function openOpencodeDb(): Database {
-  if (opencodeDb) return opencodeDb
-  const p = opencodeDbPath()
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    opencodeDb = new Database(p, { readonly: true })
-  } catch (err) {
-    throw new Error(`cannot open opencode.db at ${p}: ${(err as Error).message}`)
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
   }
-  return opencodeDb
+}
+
+interface ApiSession {
+  id: string
+  directory?: string
+  parentID?: string
+  title?: string
+  time?: { updated?: number }
 }
 
 /**
- * Session discovery is fail-safe: on DB/schema errors it logs and returns [],
- * which skips the pass without claiming or finalizing any job. Transcript
- * loading (below) must NOT do this — see loadTranscript.
+ * Global session discovery through the official API: opencode's session.list
+ * is project-scoped, so enumerate projects (project.list) and list each one
+ * with scope=project (routes the request to that project's instance AND
+ * widens the filter from the session directory to the whole project).
+ * Instance contexts created this way are cached by the host for the process
+ * lifetime, and the whole pass is rate-limited (30s min interval).
+ *
+ * Fail-safe at two levels: a failed project.list skips the pass ([]), a
+ * failed per-project session.list skips that project — neither claims or
+ * finalizes any job. Transcript loading must NOT be fail-safe — see
+ * loadTranscript.
  */
-export function listRecentSessions(limit: number = SCAN_LIMIT): SessionRow[] {
+export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<SessionRow[]> {
+  const client = getPluginInput()?.client as any
+  if (!client?.project?.list || !client?.session?.list) return []
+  let projects: { worktree?: string }[]
   try {
-    // Top-level sessions only: task-tool children are summarized into their
-    // parent, and the plugin's own sub-sessions must never be memorized.
-    return openOpencodeDb()
-      .prepare(
-        `SELECT id, time_updated AS updated_at, directory FROM session
-         WHERE parent_id IS NULL AND title NOT LIKE 'codex-memory-%'
-         ORDER BY time_updated DESC LIMIT ?`,
-      )
-      .all(limit) as SessionRow[]
+    const res = await withTimeout<{ error?: unknown; data?: unknown }>(client.project.list(), API_TIMEOUT_MS, "project.list")
+    if (!res || res.error || !Array.isArray(res.data)) throw new Error(`project.list failed: ${JSON.stringify(res?.error ?? {})}`)
+    projects = res.data as { worktree?: string }[]
   } catch (err) {
-    console.warn("[opencode-codex-memory] session discovery failed; skipping pass:", err)
+    console.warn("[opencode-codex-memory] project discovery failed; skipping pass:", err)
     return []
   }
+
+  const all: SessionRow[] = []
+  for (const project of projects) {
+    if (!project?.worktree) continue
+    try {
+      const res = await withTimeout<{ error?: unknown; data?: unknown }>(
+        client.session.list({
+          // scope/roots/limit are in the server's ListQuery since 1.17; the
+          // pinned SDK types lag behind, hence the cast at the call site.
+          query: { directory: project.worktree, scope: "project", roots: true, limit },
+        }),
+        API_TIMEOUT_MS,
+        "session.list",
+      )
+      if (!res || res.error || !Array.isArray(res.data)) throw new Error(JSON.stringify(res?.error ?? {}))
+      for (const s of res.data as ApiSession[]) {
+        // Top-level sessions only: task-tool children are summarized into
+        // their parent, and the plugin's own sub-sessions must never be
+        // memorized (roots=true drops children server-side; keep both belts).
+        if (!s?.id || s.parentID) continue
+        if (s.title && s.title.startsWith("codex-memory-")) continue
+        all.push({ id: s.id, updated_at: s.time?.updated ?? 0, directory: s.directory ?? null })
+      }
+    } catch (err) {
+      console.warn(`[opencode-codex-memory] session.list failed for ${project.worktree}; skipping project:`, err)
+    }
+  }
+  all.sort((a, b) => b.updated_at - a.updated_at)
+  return all.slice(0, limit)
 }
 
 export interface TranscriptMessage {
@@ -50,42 +94,54 @@ export interface TranscriptMessage {
   text?: string
 }
 
+/** Official transcript surface: GET /session/{id}/message via the plugin's authenticated client. */
+async function fetchMessagesViaApi(sessionId: string): Promise<{ info?: { role?: string }; parts?: unknown[] }[]> {
+  const client = getPluginInput()?.client as any
+  if (typeof client?.session?.messages !== "function") {
+    throw new Error("plugin client unavailable; cannot load transcript")
+  }
+  const res = await withTimeout<{ error?: unknown; data?: unknown }>(
+    client.session.messages({ path: { id: sessionId } }),
+    API_TIMEOUT_MS,
+    "session.messages",
+  )
+  if (!res || res.error || !Array.isArray(res.data)) {
+    throw new Error(`session.messages failed: ${JSON.stringify(res?.error ?? {})}`)
+  }
+  return res.data as { info?: { role?: string }; parts?: unknown[] }[]
+}
+
 /**
- * DB open/query errors PROPAGATE. An empty result must mean "session has no
- * extractable content" — a swallowed error here used to surface as a
- * successful no-output extraction, which deletes any previous extraction for
- * the session (codex: load_rollout_items errors fail the job, which retries
- * under its lease/backoff). Row-level JSON damage stays tolerated: one bad
- * part should not discard an otherwise-usable transcript.
+ * Transcript loading uses the official API — the same surface opencode's own
+ * UI renders history from; the session-scoped route resolves the right
+ * instance even for sessions from other projects.
+ *
+ * Errors PROPAGATE. An empty result must mean "session has no extractable
+ * content" — a swallowed error here used to surface as a successful
+ * no-output extraction, which deletes any previous extraction for the
+ * session (codex: load_rollout_items errors fail the job, which retries
+ * under its lease/backoff). A claimed session normally has messages, so a
+ * legitimately empty result is logged for observability.
  */
-export function loadTranscript(sessionId: string): TranscriptMessage[] {
-  const rows = openOpencodeDb()
-    .prepare(
-      `SELECT p.data, m.data AS msg_data
-       FROM part p
-       JOIN message m ON p.message_id = m.id
-       WHERE p.session_id = ?
-       ORDER BY p.time_created ASC`,
-    )
-    .all(sessionId) as { data: string; msg_data: string }[]
-  return rows.map((r) => {
-    let parsed: any = {}
-    try {
-      parsed = JSON.parse(r.data)
-    } catch {
+export async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
+  const rows = await fetchMessagesViaApi(sessionId)
+  if (rows.length === 0) {
+    console.warn(`[opencode-codex-memory] session.messages returned no messages for claimed session ${sessionId}`)
+    return []
+  }
+  // One entry per part — the granularity extraction expects.
+  const out: TranscriptMessage[] = []
+  for (const row of rows) {
+    const role = row?.info?.role
+    for (const part of row?.parts ?? []) {
+      out.push({
+        type: (part as any)?.type ?? "unknown",
+        role,
+        text: extractText(part),
+      })
     }
-    let role: string | undefined
-    try {
-      const msg = JSON.parse(r.msg_data)
-      role = msg.role
-    } catch {
-    }
-    return {
-      type: parsed.type ?? "unknown",
-      role,
-      text: extractText(parsed),
-    }
-  })
+  }
+  return out
 }
 
 function extractText(msg: any): string | undefined {
@@ -126,14 +182,14 @@ export interface EligibilityOptions {
   excludeSession?: string
 }
 
-export function selectEligibleSessions(
+export async function selectEligibleSessions(
   store: MemoryStore,
   opts: EligibilityOptions,
-): SessionRow[] {
+): Promise<SessionRow[]> {
   const now = Date.now()
   const minUpdated = now - opts.maxAgeDays * 24 * 60 * 60 * 1000
   const maxUpdated = now - opts.minIdleHours * 60 * 60 * 1000
-  const sessions = listRecentSessions()
+  const sessions = await listRecentSessions()
   return sessions.filter((s) => {
     if (opts.excludeSession && s.id === opts.excludeSession) return false
     if (s.updated_at < minUpdated) return false

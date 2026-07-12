@@ -41,7 +41,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
     console.warn("[opencode-codex-memory] skipping phase1 due to rate limit:", rl.reason)
     return
   }
-  const eligible = selectEligibleSessions(store, opts)
+  const eligible = await selectEligibleSessions(store, opts)
   if (eligible.length === 0) return
   const claimed = store.claimStage1Jobs(eligible, opts.excludeSession, opts.maxClaimed)
   if (claimed.length === 0) return
@@ -52,7 +52,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
     try {
       const session = sessionById.get(sid)
       const sourceUpdatedAt = session?.updated_at ?? Date.now()
-      const transcript = buildTranscript(sid)
+      const transcript = await buildTranscript(sid)
       if (!transcript.trim()) {
         store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
         return
@@ -82,8 +82,8 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
   })
 }
 
-export function buildTranscript(sessionId: string): string {
-  const msgs = loadTranscript(sessionId)
+export async function buildTranscript(sessionId: string): Promise<string> {
+  const msgs = await loadTranscript(sessionId)
   if (msgs.length === 0) return ""
   const lines: string[] = []
   for (const m of msgs) {

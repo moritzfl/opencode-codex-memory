@@ -157,15 +157,15 @@ mappings:
   - ours: src/capture.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
-      transcript/session loading. In codex this lives inside phase1.rs; in the
-      port it is split out for opencode's read-only opencode.db access.
-  - ours: src/redact.ts
-    theirs: codex-rs/memories/write/src/phase1.rs
-    note: >
-      secret redaction (superset of codex secrets/sanitizer.rs patterns; port
-      uses labeled [REDACTED:*] tokens vs codex's [REDACTED_SECRET]) +
-      isMemoryExcludedFragment (AGENTS.md/<skill> user-fragment exclusion,
-      mirrors is_memory_excluded_contextual_user_fragment).
+      transcript/session loading. In codex this lives inside phase1.rs (reads
+      rollout .jsonl files directly); the port uses opencode's official API
+      exclusively — session.messages for transcripts (session-scoped routing
+      covers cross-project sessions; errors propagate so the job retries
+      instead of finalizing a false no-output) and project.list +
+      per-project session.list(scope=project, roots=true) for global
+      discovery (fail-safe: failures skip, never finalize). opencode.db is
+      never read; the only SQLite is the plugin's own memory.db (D5).
+      See D4 in ARCHITECTURE.md.
   - ours: src/templates/stage_one_system.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_system.md
     note: >
@@ -302,10 +302,11 @@ mappings:
       redacts the transcript lines and the extraction outputs).
       DELIBERATE SUPERSET: codex ships 4 patterns (openai key, AKIA, bearer,
       bare-key assignment); the port adds anthropic/github/slack/private-key
-      patterns and allows quotes around the assignment KEY so JSON/YAML forms
+      patterns, uses labeled [REDACTED:*] tokens vs codex's [REDACTED_SECRET],
+      and allows quotes around the assignment KEY so JSON/YAML forms
       like "password": "..." are caught — codex's SECRET_ASSIGNMENT_REGEX
       misses those. isMemoryExcludedFragment lives here too (upstream:
-      memories/write phase1.rs).
+      memories/write phase1.rs is_memory_excluded_contextual_user_fragment).
   - ours: src/token.ts
     theirs: codex-rs/utils/output-truncation
     note: token-limit truncation for the 2500-token summary cap (chars/4 estimate here).

@@ -20,10 +20,6 @@ export function memoryDbPath(): string {
   return path.join(dataRoot(), MEMORY_DB_NAME)
 }
 
-export function opencodeDbPath(): string {
-  return path.join(dataRoot(), "opencode.db")
-}
-
 export function memorySummaryPath(): string {
   return path.join(memoryRoot(), "memory_summary.md")
 }

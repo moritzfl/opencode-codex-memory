@@ -14,7 +14,7 @@ export function setPluginInput(input: PluginInput): void {
   inputRef = input
 }
 
-function getPluginInput(): PluginInput | null {
+export function getPluginInput(): PluginInput | null {
   return inputRef
 }
 

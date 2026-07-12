@@ -28,11 +28,6 @@ describe("paths", () => {
     expect(p.endsWith("memory.db")).toBe(true)
   })
 
-  it("opencodeDbPath ends with opencode.db", () => {
-    const p = path.join(TEST_ROOT, "opencode.db")
-    expect(p.endsWith("opencode.db")).toBe(true)
-  })
-
   it("memorySummaryPath is inside memoryRoot", () => {
     const { memorySummaryPath, memoryRoot } = require("../src/paths.js")
     expect(memorySummaryPath()).toBe(path.join(memoryRoot(), "memory_summary.md"))
