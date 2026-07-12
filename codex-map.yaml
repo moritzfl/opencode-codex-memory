@@ -244,7 +244,11 @@ mappings:
       servers pollutes_memory=true). (3) the memorize / memorize-extract
       sub-agents self-register through the plugin config hook (user-defined
       agents of the same name win) — pure opencode packaging; codex ships its
-      memory agents inside the binary; the memorize prompt adds a
+      memory agents inside the binary; injection appends an external_directory
+      allow for <memory root>/* to memorize because opencode gates file tools
+      outside the session's project and the global memory workspace is always
+      external (no codex equivalent — Seatbelt sandboxing is process-level);
+      the memorize prompt adds a
       10k-char/2500-token summary-size instruction codex's consolidator does
       not get (both sides also truncate at 2500 tokens on read).
       (4) generate_memories=false turns off the whole write pipeline, agent

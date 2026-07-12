@@ -1,4 +1,5 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
+import { memoryRoot } from "./paths.js"
 import { stripCitations, extractCitedSessionIds } from "./citation.js"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../tools/memory.js"
 import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
@@ -178,6 +179,18 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
   } catch (err) {
     console.warn("[opencode-codex-memory] could not load bundled agent definitions:", err)
     return
+  }
+  // opencode gates file tools outside the session's project behind the
+  // `external_directory` permission, and the memory workspace is global —
+  // outside every project — so the consolidator's reads/writes there always
+  // trigger that ask. The bundled `"*": "deny"` matches it (permission rules
+  // are wildcard-on-name, last match wins), which would block consolidation
+  // entirely. Grant the memory root here rather than in opencode.json: the
+  // path is homedir/env-dependent (src/paths.ts is its single source of
+  // truth). Appended last so it out-ranks the wildcard deny.
+  const memorize = defs["memorize"] as { permission?: Record<string, unknown> } | undefined
+  if (memorize?.permission && !("external_directory" in memorize.permission)) {
+    memorize.permission["external_directory"] = { [path.join(memoryRoot(), "*")]: "allow" }
   }
   config.agent ??= {}
   for (const [name, def] of Object.entries(defs)) {

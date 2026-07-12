@@ -33,6 +33,23 @@ describe("agent auto-registration", () => {
     }
   })
 
+  it("grants memorize external_directory access to the memory root (memories live outside every project)", () => {
+    const { injectAgentDefinitions } = require("../src/index.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const config: { agent?: Record<string, any> } = {}
+    injectAgentDefinitions(config)
+    const permission = config.agent!["memorize"].permission as Record<string, unknown>
+    // Without this grant the wildcard deny matches opencode's
+    // external_directory ask and consolidation cannot touch memory files.
+    expect(permission.external_directory).toEqual({ [path.join(memoryRoot(), "*")]: "allow" })
+    // Last-match-wins in opencode: the grant must come after the wildcard deny.
+    const keys = Object.keys(permission)
+    expect(keys[0]).toBe("*")
+    expect(keys.indexOf("external_directory")).toBeGreaterThan(0)
+    // The extractor works on an inline transcript and needs no filesystem grant.
+    expect(config.agent!["memorize-extract"].permission.external_directory).toBeUndefined()
+  })
+
   it("leaves user-defined agents of the same name untouched", () => {
     const { injectAgentDefinitions } = require("../src/index.js")
     const userDef = { mode: "subagent", model: "my/model", prompt: "custom" }

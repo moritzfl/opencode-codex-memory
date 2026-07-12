@@ -61,7 +61,12 @@ is enabled. To choose which models
 they use, set the `extract_model` / `consolidation_model` plugin options (see
 [Configuration](#configuration)) — don't override the agents for that. Defining
 an agent with the same name in your own config is only for advanced tweaks
-(e.g. permissions); your definition then replaces the shipped one.
+(e.g. permissions); your definition then replaces the shipped one. If you
+override `memorize`, keep an `external_directory` allow for
+`~/.local/share/opencode/memories/*` (e.g.
+`"external_directory": { "$HOME/.local/share/opencode/memories/*": "allow" }`
+after the wildcard deny) — the memory folder lives outside your project, and
+without that grant opencode blocks the consolidator's file access.
 
 ## Try it
 

@@ -107,6 +107,15 @@ allowlists only the built-in opencode file tools it needs
 could otherwise bypass a narrower `bash` deny. Optionally path-scope writes to
 the memories dir. Tool-permission-level, not process-level — accepted trade-off.
 
+One required carve-out: opencode additionally gates file tools outside the
+session's project behind the `external_directory` permission, and the memory
+workspace is global — outside every project — so the wildcard deny would match
+that ask and block consolidation entirely. `injectAgentDefinitions` therefore
+appends `external_directory: { "<memory root>/*": "allow" }` to the `memorize`
+definition at injection time (dynamic because the root is homedir/env-dependent;
+opencode's `*` glob crosses `/`, so one pattern covers nested dirs). The
+extractor gets no grant — it works on an inline transcript.
+
 ### D3 — LLM calls for extraction/consolidation (`src/llm.ts`)
 
 The plugin SDK exposes no "make a model call" API and no provider credentials.
