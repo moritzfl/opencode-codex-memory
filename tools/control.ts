@@ -6,6 +6,7 @@ import { MemoryStore } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
 import { assertMemoryRootSafe } from "../src/path-guard.js"
+import { isPhase2InFlight } from "../src/phase2.js"
 
 function isSymlinkedRoot(): boolean {
   try {
@@ -18,17 +19,18 @@ function isSymlinkedRoot(): boolean {
 
 // Mirrors codex clear_memory_root_contents: deletes EVERY entry including
 // .git, so previously deleted/redacted memory content is not recoverable
-// from git history after a reset.
+// from git history after a reset. Deletion errors PROPAGATE — codex bubbles
+// every remove failure up, and a swallowed error here would report a
+// successful reset while secrets/memories survive on disk. lstat semantics:
+// a symlinked entry is unlinked itself, never followed.
 function wipeMemoriesDir(): void {
   const root = memoryRoot()
   if (!fs.existsSync(root)) return
   for (const entry of fs.readdirSync(root)) {
     const abs = path.join(root, entry)
-    try {
-      const stat = fs.statSync(abs)
-      if (stat.isDirectory()) fs.rmSync(abs, { recursive: true, force: true })
-      else fs.unlinkSync(abs)
-    } catch {}
+    const st = fs.lstatSync(abs)
+    if (st.isDirectory()) fs.rmSync(abs, { recursive: true, force: true })
+    else fs.unlinkSync(abs)
   }
 }
 
@@ -67,6 +69,15 @@ export const memory_reset = tool({
     if (!args.confirm) return { output: "Reset aborted: confirm=false." }
     if (isSymlinkedRoot()) {
       return { output: "Reset refused: memory root is a symlink. Remove it manually to be safe." }
+    }
+    // A consolidation running in THIS process would recreate files right
+    // after the wipe (the sub-agent edits live artifacts and resets the git
+    // baseline). Refuse instead of racing it. Cross-process consolidators
+    // are still ownership-guarded DB-side (the wiped job rows make their
+    // final confirmation a no-op) but may leave stray files; same window
+    // codex has between CLI clear and a running daemon.
+    if (isPhase2InFlight()) {
+      return { output: "Reset refused: memory consolidation is currently running. Try again in a few minutes." }
     }
     try {
       const store = new MemoryStore()

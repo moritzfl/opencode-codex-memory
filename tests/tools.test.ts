@@ -167,6 +167,34 @@ describe("memory_read line windows", () => {
   })
 })
 
+describe("memory_reset", () => {
+  it("reports wipe failures instead of claiming success", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    // Root without write permission: entry deletion must fail and propagate.
+    fs.chmodSync(root, 0o555)
+    try {
+      const { memory_reset } = require("../tools/control.js")
+      const r = await memory_reset.execute({ confirm: true }, CTX)
+      expect(r.output).toContain("memory_reset error:")
+    } finally {
+      fs.chmodSync(root, 0o755)
+    }
+  })
+
+  it("refuses while a consolidation is in flight in this process", async () => {
+    const phase2 = require("../src/phase2.js")
+    const { memory_reset } = require("../tools/control.js")
+    // runPhase2 sets its in-flight flag synchronously before the first await;
+    // the stub store makes it exit right after.
+    const stubStore = { claimGlobalPhase2Job: () => ({ type: "skipped_running" }) }
+    const running = phase2.runPhase2(stubStore)
+    const r = await memory_reset.execute({ confirm: true }, CTX)
+    await running
+    expect(r.output).toContain("Reset refused: memory consolidation is currently running")
+    expect(phase2.isPhase2InFlight()).toBe(false)
+  })
+})
+
 describe("memory_add_note collisions", () => {
   it("never overwrites an existing note (append-only)", async () => {
     const { memory_add_note } = require("../tools/memory.js")

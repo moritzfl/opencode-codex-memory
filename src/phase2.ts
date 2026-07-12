@@ -28,6 +28,11 @@ export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
 
 let phase2InFlight = false
 
+/** True while THIS process runs a consolidation (memory_reset refuses then). */
+export function isPhase2InFlight(): boolean {
+  return phase2InFlight
+}
+
 export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAULT_PHASE2_OPTIONS): Promise<{ status: string }> {
   if (phase2InFlight) return { status: "already_running" }
   phase2InFlight = true
