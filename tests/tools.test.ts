@@ -9,6 +9,8 @@ const CTX = { sessionID: "ses_test" } as any
 beforeEach(() => {
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
+  // Module-singleton DB handle: drop any handle from another test file.
+  require("../src/db.js").closeDb()
   const root = path.join(TEST_ROOT, "memories")
   fs.mkdirSync(path.join(root, "rollout_summaries"), { recursive: true })
   fs.mkdirSync(path.join(root, "extensions", "ad_hoc", "notes"), { recursive: true })

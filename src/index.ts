@@ -71,6 +71,24 @@ export function takeNewCitations(partKey: string, ids: string[]): string[] {
   return fresh
 }
 
+// opencode 1.17 publishes BOTH session.status {type:"idle"} and the
+// deprecated session.idle for the same transition, back to back. Handle
+// whichever arrives first and swallow the twin within a short window.
+const recentIdle = new Map<string, number>()
+const IDLE_DEDUP_MS = 5000
+const MAX_TRACKED_IDLE = 500
+
+export function shouldHandleIdle(sessionId: string, now: number = Date.now()): boolean {
+  const last = recentIdle.get(sessionId)
+  if (last !== undefined && now - last < IDLE_DEDUP_MS) return false
+  recentIdle.set(sessionId, now)
+  if (recentIdle.size > MAX_TRACKED_IDLE) {
+    const oldest = recentIdle.keys().next().value
+    if (oldest !== undefined) recentIdle.delete(oldest)
+  }
+  return true
+}
+
 export function handleSessionDeleted(
   sessionId: string,
   store: Pick<MemoryStore, "deleteSessionMemory"> = getStore(),
@@ -341,19 +359,18 @@ function buildHooks() {
         return
       }
 
+      // session.idle is deprecated in opencode 1.17 in favor of
+      // session.status {type:"idle"}; both are still emitted. Support both so
+      // the pipeline keeps triggering when the legacy event disappears.
+      if (ev.type === "session.status") {
+        const props = ev.properties as { sessionID?: string; status?: { type?: string } }
+        if (props?.status?.type === "idle" && props.sessionID) handleSessionIdle(props.sessionID)
+        return
+      }
+
       if (ev.type === "session.idle") {
         const props = ev.properties as { sessionID?: string }
-        const sid = props?.sessionID
-        if (!sid || isMemorySubSession(sid)) return
-        // codex stamps memory_mode at thread creation from generate_memories:
-        // sessions first seen while generation is off keep that stamp when the
-        // option is re-enabled (manual override: the memory_mode tool).
-        try {
-          getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
-        } catch (e) {
-          console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
-        }
-        void triggerPhase1(sid)
+        if (props?.sessionID) handleSessionIdle(props.sessionID)
         return
       }
     } catch (err) {
@@ -364,6 +381,20 @@ function buildHooks() {
   async dispose(): Promise<void> {
     invalidateCache()
   },
+  }
+
+  function handleSessionIdle(sid: string): void {
+    if (isMemorySubSession(sid)) return
+    if (!shouldHandleIdle(sid)) return
+    // codex stamps memory_mode at thread creation from generate_memories:
+    // sessions first seen while generation is off keep that stamp when the
+    // option is re-enabled (manual override: the memory_mode tool).
+    try {
+      getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
+    } catch (e) {
+      console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
+    }
+    void triggerPhase1(sid)
   }
 
   // Control tools (reset/inspect/mode) are always available. The memory

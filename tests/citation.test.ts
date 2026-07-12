@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
@@ -110,9 +110,15 @@ describe("extractCitedSessionIds", () => {
 
 describe("experimental.text.complete hook", () => {
   const TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-citation-"))
+  beforeEach(() => {
+    fs.mkdirSync(TEST_ROOT, { recursive: true })
+    // Module-singleton DB handle: drop any handle from another test file.
+    require("../src/db.js").closeDb()
+  })
   afterEach(() => {
     delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
+    require("../src/db.js").closeDb()
   })
 
   it("strips citations and records usage before the part is persisted", async () => {
