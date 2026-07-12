@@ -72,6 +72,26 @@ describe("loadTranscript", () => {
   })
 })
 
+describe("buildTranscript", () => {
+  it("excludes developer-role messages (codex sanitize_response_item_for_memories)", () => {
+    const db = new Database(path.join(TEST_ROOT, "opencode.db"))
+    db.prepare("INSERT INTO message VALUES (?, ?)").run("msg_dev", JSON.stringify({ role: "developer" }))
+    db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?)").run(
+      "prt_dev",
+      "msg_dev",
+      "ses_1",
+      4,
+      JSON.stringify({ type: "text", text: "injected developer instructions" }),
+    )
+    db.close()
+    delete require.cache[require.resolve("../src/phase1.js")]
+    const { buildTranscript } = require("../src/phase1.js")
+    const transcript = buildTranscript("ses_1")
+    expect(transcript).toContain("visible answer")
+    expect(transcript).not.toContain("injected developer instructions")
+  })
+})
+
 describe("listRecentSessions", () => {
   it("is fail-safe: returns [] on schema errors so the pass is skipped without claims", () => {
     const db = new Database(path.join(TEST_ROOT, "opencode.db"))

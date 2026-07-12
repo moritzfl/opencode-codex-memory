@@ -82,12 +82,16 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
   })
 }
 
-function buildTranscript(sessionId: string): string {
+export function buildTranscript(sessionId: string): string {
   const msgs = loadTranscript(sessionId)
   if (msgs.length === 0) return ""
   const lines: string[] = []
   for (const m of msgs) {
     if (m.type === "system") continue
+    // codex sanitize_response_item_for_memories drops developer-role messages
+    // entirely (injected instructions, not conversation). opencode 1.17 only
+    // stores user/assistant roles; this guards future role additions.
+    if (m.role === "developer") continue
     const role = m.role ?? m.type
     const text = m.text ?? ""
     if (!text.trim()) continue
