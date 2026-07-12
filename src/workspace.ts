@@ -200,8 +200,12 @@ export function writeWorkspaceDiff(diff: WorkspaceDiff): string {
       rendered += `- ${change.status} ${change.path}\n`
     }
     let body = diff.unifiedDiff
-    if (body.length > WORKSPACE_DIFF_MAX_BYTES) {
-      body = body.slice(0, WORKSPACE_DIFF_MAX_BYTES) + `\n[workspace diff truncated at ${WORKSPACE_DIFF_MAX_BYTES} bytes]\n`
+    // The cap is in BYTES: .length counts UTF-16 code units and undercounts
+    // multibyte content. Cut on the byte buffer and drop a split trailing char.
+    if (Buffer.byteLength(body, "utf8") > WORKSPACE_DIFF_MAX_BYTES) {
+      body =
+        Buffer.from(body, "utf8").subarray(0, WORKSPACE_DIFF_MAX_BYTES).toString("utf8").replace(/\uFFFD+$/, "") +
+        `\n[workspace diff truncated at ${WORKSPACE_DIFF_MAX_BYTES} bytes]\n`
     }
     rendered += "\n## Diff\n\n```diff\n" + body + (body.endsWith("\n") ? "" : "\n") + "```\n"
   }

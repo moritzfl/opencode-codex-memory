@@ -82,6 +82,22 @@ describe("workspace rendering", () => {
     const p = path.join(memoryRoot(), "extensions", "ad_hoc", "instructions.md")
     expect(fs.existsSync(p)).toBe(true)
   })
+
+  it("caps the workspace diff in bytes, not UTF-16 code units", () => {
+    const { ensureLayout, writeWorkspaceDiff } = require("../src/workspace.js")
+    ensureLayout()
+    // 3-byte chars: 2M chars = 6MiB > 4MiB cap, while .length (2M) stays under it.
+    const multibyte = "\u20AC".repeat(2 * 1024 * 1024)
+    const file = writeWorkspaceDiff({
+      changes: [{ status: "M", path: "MEMORY.md" }],
+      unifiedDiff: multibyte,
+    })
+    const written = fs.readFileSync(file, "utf8")
+    expect(written).toContain("[workspace diff truncated at")
+    // No split-character replacement glyphs before the truncation notice.
+    expect(written).not.toContain("\uFFFD")
+    expect(Buffer.byteLength(written, "utf8")).toBeLessThan(5 * 1024 * 1024)
+  })
 })
 
 describe("validateConsolidationArtifacts", () => {
