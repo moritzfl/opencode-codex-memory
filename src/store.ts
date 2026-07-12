@@ -358,6 +358,18 @@ export class MemoryStore {
     }).immediate()
   }
 
+  /** Last recorded phase-2 success info (memory_inspect). Null when phase 2 never succeeded. */
+  phase2LastSuccess(): { finished_at: number | null; last_success_watermark: number | null } | null {
+    const row = this.db
+      .prepare(
+        `SELECT finished_at, last_success_watermark FROM memory_jobs
+         WHERE kind='memory_consolidate_global' AND job_key='global'`,
+      )
+      .get() as { finished_at: number | null; last_success_watermark: number | null } | null
+    if (!row || !row.last_success_watermark) return null
+    return row
+  }
+
   markPhase2Failed(ownershipToken: string, error: string): void {
     const res = this.db
       .prepare(

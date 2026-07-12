@@ -197,6 +197,63 @@ describe("memory_reset", () => {
   })
 })
 
+describe("memory_read paging", () => {
+  it("reaches lines beyond 256KiB via line_offset (byte cap applies to output only)", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    const line = "x".repeat(1024)
+    const lines = Array.from({ length: 400 }, (_, i) => `line-${i + 1}-${line}`)
+    fs.writeFileSync(path.join(root, "big.md"), lines.join("\n")) // ~400 KiB
+    const { memory_read } = require("../tools/memory.js")
+    const r = await memory_read.execute({ path: "big.md", line_offset: 390, max_lines: 2 }, CTX)
+    expect(r.output).toContain("line-390-")
+    expect(r.output).toContain("line-391-")
+    expect(r.output).not.toContain("line-392-")
+  })
+
+  it("caps oversized windows at the byte limit with a paging hint", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "huge.md"), "y".repeat(300 * 1024))
+    const { memory_read } = require("../tools/memory.js")
+    const r = await memory_read.execute({ path: "huge.md" }, CTX)
+    expect(r.output).toContain("[output truncated at")
+    expect(r.metadata.truncated).toBe(true)
+  })
+})
+
+describe("memory_inspect", () => {
+  it("reports the phase-2 success watermark and never walks through symlinked dirs", async () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { memory_inspect } = require("../tools/control.js")
+    const store = new MemoryStore()
+    const ts = Date.UTC(2026, 5, 1)
+    store.upsertStage1Output({
+      session_id: "ses_w",
+      source_updated_at: ts,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: Date.now(),
+    })
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(claim.ownershipToken, [{ session_id: "ses_w", source_updated_at: ts }])
+
+    // Self-referential dir symlink: without lstat the walk would loop forever.
+    const root = path.join(TEST_ROOT, "memories")
+    fs.symlinkSync(root, path.join(root, "loop"))
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain(`phase2_last_success_watermark: ${new Date(ts).toISOString()}`)
+    expect(r.output).toContain("loop@")
+    expect(r.output).not.toContain("loop/MEMORY.md")
+  })
+
+  it("reports 'none' before any phase-2 success", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("phase2_last_success_watermark: none")
+  })
+})
+
 describe("memory_add_note collisions", () => {
   it("never overwrites an existing note (append-only)", async () => {
     const { memory_add_note } = require("../tools/memory.js")

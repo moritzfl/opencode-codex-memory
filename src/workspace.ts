@@ -167,8 +167,9 @@ export function pruneExtensionResources(retentionDays: number): void {
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
   for (const extName of fs.readdirSync(extensionsDir)) {
     const extDir = path.join(extensionsDir, extName)
+    // lstat: never prune through a symlinked extension dir.
     let extStat
-    try { extStat = fs.statSync(extDir) } catch { continue }
+    try { extStat = fs.lstatSync(extDir) } catch { continue }
     if (!extStat.isDirectory()) continue
     if (!fs.existsSync(path.join(extDir, "instructions.md"))) continue
     const resDir = path.join(extDir, "resources")

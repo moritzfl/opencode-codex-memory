@@ -43,9 +43,13 @@ function listMemoriesDir(): string[] {
       if (name === ".git") continue
       const abs = path.join(dir, name)
       const rel = prefix ? `${prefix}/${name}` : name
+      // lstat: report symlinks as entries but never walk THROUGH them —
+      // a link to a big/looping directory must not be followed.
       let stat
-      try { stat = fs.statSync(abs) } catch { continue }
-      if (stat.isDirectory()) {
+      try { stat = fs.lstatSync(abs) } catch { continue }
+      if (stat.isSymbolicLink()) {
+        out.push(`${rel}@`)
+      } else if (stat.isDirectory()) {
         out.push(`${rel}/`)
         walk(abs, rel)
       } else {
@@ -113,8 +117,14 @@ export const memory_inspect = tool({
         summaryTokens = estimateTokens(text)
       }
       const listing = listMemoriesDir()
+      // The tool description promises the last Phase 2 success watermark.
+      const phase2 = store.phase2LastSuccess()
+      const watermark = phase2?.last_success_watermark ? new Date(phase2.last_success_watermark).toISOString() : "none"
+      const finishedAt = phase2?.finished_at ? new Date(phase2.finished_at * 1000).toISOString() : "none"
       const out = [
         `stage1_outputs: ${outputs.length}`,
+        `phase2_last_success_watermark: ${watermark}`,
+        `phase2_last_finished_at: ${finishedAt}`,
         `memory_summary_chars: ${summaryChars}`,
         `memory_summary_tokens_est: ${summaryTokens}`,
         `memories_dir_entries: ${listing.length}`,
@@ -126,6 +136,8 @@ export const memory_inspect = tool({
         output: out,
         metadata: {
           stage1_count: outputs.length,
+          phase2_last_success_watermark: phase2?.last_success_watermark ?? null,
+          phase2_last_finished_at: phase2?.finished_at ?? null,
           summary_chars: summaryChars,
           summary_tokens_est: summaryTokens,
           files: listing,

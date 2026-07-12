@@ -29,18 +29,10 @@ export const memory_read = tool({
           metadata: { kind: "directory", entries },
         }
       }
-      const fd = fs.openSync(fullPath, "r")
-      let text: string
-      let byteTruncated: boolean
-      try {
-        const size = Math.min(stat.size, MAX_READ_BYTES)
-        const buf = Buffer.alloc(size)
-        fs.readSync(fd, buf, 0, size, 0)
-        text = buf.toString("utf8")
-        byteTruncated = stat.size > MAX_READ_BYTES
-      } finally {
-        fs.closeSync(fd)
-      }
+      // Read the whole file and apply the line window FIRST; the byte cap
+      // applies to the WINDOWED output. Capping the raw read used to make
+      // lines beyond the first 256 KiB unreachable regardless of line_offset.
+      const text = fs.readFileSync(fullPath, "utf8")
       // Line windowing mirrors codex memories/read: 1-indexed offset, bounded
       // line count, and the start line reported so file:line citations work.
       const startLine = args.line_offset ?? 1
@@ -55,10 +47,16 @@ export const memory_read = tool({
         lines = lines.slice(0, args.max_lines)
         lineTruncated = true
       }
-      const body = lines.join("\n")
+      let body = lines.join("\n")
+      let byteTruncated = false
+      if (Buffer.byteLength(body, "utf8") > MAX_READ_BYTES) {
+        byteTruncated = true
+        // Byte-accurate cut; drop a possibly split trailing multibyte char.
+        body = Buffer.from(body, "utf8").subarray(0, MAX_READ_BYTES).toString("utf8").replace(/\uFFFD+$/, "")
+      }
       const notes: string[] = []
       if (lineTruncated) notes.push(`[stopped after ${args.max_lines} lines; file has ${totalLines}]`)
-      if (byteTruncated) notes.push(`[truncated: ${stat.size - MAX_READ_BYTES} bytes omitted]`)
+      if (byteTruncated) notes.push(`[output truncated at ${MAX_READ_BYTES} bytes; use line_offset to page]`)
       const header = startLine > 1 ? `[starting at line ${startLine}]\n` : ""
       return {
         output: header + body + (notes.length ? "\n\n" + notes.join("\n") : ""),
