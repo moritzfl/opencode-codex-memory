@@ -71,6 +71,22 @@ export function takeNewCitations(partKey: string, ids: string[]): string[] {
   return fresh
 }
 
+// One stamp+pump per session per process from the chat.message hook; later
+// messages in the same session add nothing (stamp is idempotent, the pump
+// re-fires on idle anyway).
+const seenTurnSessions = new Set<string>()
+const MAX_TRACKED_TURN_SESSIONS = 1000
+
+export function markTurnSeen(sessionId: string): boolean {
+  if (seenTurnSessions.has(sessionId)) return false
+  seenTurnSessions.add(sessionId)
+  if (seenTurnSessions.size > MAX_TRACKED_TURN_SESSIONS) {
+    const oldest = seenTurnSessions.keys().next().value
+    if (oldest !== undefined) seenTurnSessions.delete(oldest)
+  }
+  return true
+}
+
 // opencode 1.17 publishes BOTH session.status {type:"idle"} and the
 // deprecated session.idle for the same transition, back to back. Handle
 // whichever arrives first and swallow the twin within a short window.
@@ -300,6 +316,32 @@ function buildHooks() {
       }
     } catch (err) {
       console.error("[opencode-codex-memory] messages.transform error:", err)
+    }
+  },
+
+  /**
+   * Turn start. codex stamps memory_mode at thread creation (session.rs) and
+   * schedules memory work per startup/turn; the first user message is the
+   * closest plugin-visible moment. Stamping here (instead of waiting for the
+   * first idle) means a session created while generate_memories=false keeps
+   * its 'disabled' stamp even if the option flips mid-session, and the
+   * phase-1 pump no longer depends on idle events at all. The idle path
+   * below stays as a second pump trigger; both are cheap (stamp is INSERT OR
+   * IGNORE, the pump is gated by in-flight/rate/claim guards).
+   */
+  async "chat.message"(input: { sessionID?: string }): Promise<void> {
+    try {
+      const sid = input?.sessionID
+      if (!sid || isMemorySubSession(sid)) return
+      if (!markTurnSeen(sid)) return
+      try {
+        getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
+      } catch (e) {
+        console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
+      }
+      void triggerPhase1(sid)
+    } catch (err) {
+      console.error("[opencode-codex-memory] chat.message error:", err)
     }
   },
 

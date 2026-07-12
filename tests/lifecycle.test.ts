@@ -39,6 +39,19 @@ describe("idle event handling", () => {
     expect(shouldHandleIdle("ses_other", 1006)).toBe(true)
   })
 
+  it("stamps memory mode at turn start via chat.message (codex stamp-at-thread-creation)", async () => {
+    process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
+    const hooks = (await plugin.server({ client: {} } as any, undefined)) as any
+    expect(typeof hooks["chat.message"]).toBe("function")
+    await hooks["chat.message"]({ sessionID: "ses_turn_start" })
+    const { MemoryStore } = require("../src/store.js")
+    expect(new MemoryStore().getMemoryMode("ses_turn_start")).toBe("enabled")
+    // Second message in the same session is a no-op (once per process).
+    const { markTurnSeen } = require("../src/index.js")
+    expect(markTurnSeen("ses_turn_start")).toBe(false)
+    expect(markTurnSeen("ses_turn_other")).toBe(true)
+  })
+
   it("stamps memory mode from session.status idle events (deprecated session.idle successor)", async () => {
     process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
     const hooks = (await plugin.server({ client: {} } as any, undefined)) as any

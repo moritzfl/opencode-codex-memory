@@ -255,8 +255,11 @@ mappings:
       (2) codex ships memories default-off behind Feature::MemoryTool with a
       TUI consent prompt (the feature is Stable now, still default-off); the
       port is on-by-default — installing the plugin is the consent (README
-      states this). memory_mode stamping at first session.idle mirrors codex's
-      stamp-at-thread-creation (session.rs); pollution marking runs in the
+      states this). memory_mode stamping happens at the first chat.message of
+      a session (closest plugin-visible moment to codex's
+      stamp-at-thread-creation, session.rs), with the idle path as fallback;
+      the same hook pumps phase 1 so extraction no longer depends on idle
+      events; pollution marking runs in the
       tool.execute.after plugin hook and matches websearch/webfetch plus every
       configured MCP server via client.mcp.status() (codex marks all MCP
       servers pollutes_memory=true). (3) the memorize / memorize-extract
