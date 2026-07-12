@@ -152,21 +152,21 @@ interface CandidateFile {
 
 // Walks every non-hidden, non-symlink file (codex searches all files, not an
 // extension allowlist), in sorted order for deterministic results.
-function collectSearchFiles(root: string): CandidateFile[] {
+function collectSearchFiles(start: string, prefix: string): CandidateFile[] {
   const files: CandidateFile[] = []
-  const walk = (dir: string, prefix: string) => {
+  const walk = (dir: string, rel: string) => {
     const entries = visibleEntries(dir).sort((a, b) => a.name.localeCompare(b.name))
     for (const { name, isDir } of entries) {
       const abs = path.join(dir, name)
-      const rel = prefix ? `${prefix}/${name}` : name
+      const relPath = rel ? `${rel}/${name}` : name
       if (isDir) {
-        walk(abs, rel)
+        walk(abs, relPath)
       } else {
-        files.push({ rel, abs, ts: fileTimestamp(name) })
+        files.push({ rel: relPath, abs, ts: fileTimestamp(name) })
       }
     }
   }
-  walk(root, "")
+  walk(start, prefix)
   return files
 }
 
@@ -181,19 +181,126 @@ function firstContentLine(content: string): string {
   return "(empty)"
 }
 
+// --- search engine, ported from codex ext/memories/src/local/search.rs ---
+
+const SEARCH_MAX_RESULTS = 200 // codex MAX_SEARCH_RESULTS (= default)
+
+interface SearchMatch {
+  path: string
+  match_line_number: number
+  content_start_line_number: number
+  content: string
+  matched_queries: string[]
+}
+
+// codex SearchComparison::prepare: lowercase when case-insensitive; when
+// normalized, keep ONLY alphanumeric characters (Unicode) so "blue-green",
+// "blue green" and "bluegreen" compare equal.
+function prepareComparable(value: string, caseSensitive: boolean, normalized: boolean): string {
+  let v = caseSensitive ? value : value.toLowerCase()
+  if (normalized) v = v.replace(/[^\p{L}\p{N}]/gu, "")
+  return v
+}
+
+type MatchMode = "any" | "all_on_same_line" | "all_within_lines"
+
+/**
+ * Per-file matching, all three codex modes. Window mode extends from every
+ * line matching at least one query until all queries are covered (bounded by
+ * lineCount), then drops windows that strictly contain another window so only
+ * minimal windows are reported.
+ */
+function searchFileContent(
+  file: CandidateFile,
+  lines: string[],
+  queries: string[],
+  preparedQueries: string[],
+  mode: MatchMode,
+  lineCount: number,
+  contextLines: number,
+  caseSensitive: boolean,
+  normalized: boolean,
+  out: SearchMatch[],
+): void {
+  const lineFlags = lines.map((line) => {
+    const prepared = prepareComparable(line, caseSensitive, normalized)
+    return preparedQueries.map((q) => prepared.includes(q))
+  })
+  const matchedQueries = (flags: boolean[]) => queries.filter((_, i) => flags[i])
+  const push = (start: number, end: number, flags: boolean[]) => {
+    const contentStart = Math.max(0, start - contextLines)
+    const contentEnd = Math.min(lines.length, end + contextLines + 1)
+    out.push({
+      path: file.rel,
+      match_line_number: start + 1,
+      content_start_line_number: contentStart + 1,
+      content: lines.slice(contentStart, contentEnd).join("\n"),
+      matched_queries: matchedQueries(flags),
+    })
+  }
+
+  if (mode === "any" || mode === "all_on_same_line") {
+    for (let i = 0; i < lines.length; i++) {
+      const flags = lineFlags[i]
+      const hit = mode === "any" ? flags.some(Boolean) : flags.every(Boolean)
+      if (hit) push(i, i, flags)
+    }
+    return
+  }
+
+  // all_within_lines
+  const windows: { start: number; end: number; flags: boolean[] }[] = []
+  for (let start = 0; start < lines.length; start++) {
+    if (!lineFlags[start].some(Boolean)) continue
+    const lastAllowed = Math.min(start + lineCount - 1, lines.length - 1)
+    const flags = new Array<boolean>(preparedQueries.length).fill(false)
+    for (let end = start; end <= lastAllowed; end++) {
+      for (let q = 0; q < flags.length; q++) flags[q] = flags[q] || lineFlags[end][q]
+      if (flags.every(Boolean)) {
+        windows.push({ start, end, flags })
+        break
+      }
+    }
+  }
+  for (let i = 0; i < windows.length; i++) {
+    const w = windows[i]
+    const containsAnother = windows.some(
+      (o, j) => i !== j && w.start <= o.start && w.end >= o.end && (w.start !== o.start || w.end !== o.end),
+    )
+    if (containsAnother) continue
+    push(w.start, w.end, w.flags)
+  }
+}
+
+function renderMatch(m: SearchMatch): string {
+  const header = `${m.path}:${m.match_line_number}`
+  if (!m.content.includes("\n") && m.content_start_line_number === m.match_line_number) {
+    return `${header}: ${m.content}`
+  }
+  return `${header} (content from line ${m.content_start_line_number}):\n${m.content}`
+}
+
 export const memory_search = tool({
   description:
-    "Search across the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*). " +
-    "Returns matching lines with file paths. Optional since/until restrict the search to " +
-    "time-anchored files (rollout summaries, ad-hoc notes) from that period — useful to recall " +
-    "what the user was working on around a given time. With since/until and no query, returns a " +
-    "chronological listing of that period's sessions/notes.",
+    "Search the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*) for substring " +
+    "matches. Supports multiple queries with match_mode: 'any' (a line matching any query), " +
+    "'all_on_same_line' (a line containing every query), or 'all_within_lines' (all queries within a " +
+    "window of line_count lines). Optional path scoping, context lines, and cursor pagination. " +
+    "Optional since/until restrict the search to time-anchored files (rollout summaries, ad-hoc " +
+    "notes) from that period — useful to recall what the user was working on around a given time. " +
+    "With since/until and no queries, returns a chronological listing of that period's sessions/notes.",
   args: {
-    query: tool.schema.string().min(1).optional().describe("Search query (substring match). Optional when since/until is set."),
+    queries: tool.schema.array(tool.schema.string()).optional().describe("Search substrings (at least one, non-empty after trim). Optional only when since/until is set."),
+    match_mode: tool.schema.enum(["any", "all_on_same_line", "all_within_lines"]).default("any").describe("How multiple queries combine (default any)."),
+    line_count: tool.schema.number().int().min(1).optional().describe("Window size in lines for all_within_lines (required for that mode)."),
+    path: tool.schema.string().optional().describe("Restrict the search to a file or directory relative to the memory root."),
+    cursor: tool.schema.string().optional().describe("Pagination cursor from a previous response's next_cursor."),
+    context_lines: tool.schema.number().int().min(0).default(0).describe("Extra lines of context around each match."),
     case_sensitive: tool.schema.boolean().default(true).describe("Case-sensitive matching (default true, like codex memories/search)."),
+    normalized: tool.schema.boolean().default(false).describe("Compare only alphanumeric characters, ignoring separators (blue-green == bluegreen); combine with case_sensitive=false to also ignore case."),
     since: tool.schema.string().optional().describe("Only time-anchored files at/after this time (YYYY-MM-DD or ISO datetime)."),
     until: tool.schema.string().optional().describe("Only time-anchored files at/before this time (YYYY-MM-DD or ISO datetime; whole day for date-only)."),
-    limit: tool.schema.number().int().min(1).max(200).default(200).describe("Max matches to return (default/max 200, like codex)."),
+    max_results: tool.schema.number().int().min(1).max(SEARCH_MAX_RESULTS).default(SEARCH_MAX_RESULTS).describe("Max matches per page (default/max 200, like codex)."),
   },
   async execute(args, ctx) {
     try {
@@ -201,15 +308,39 @@ export const memory_search = tool({
       // symlink check must run here explicitly.
       const root = assertMemoryRootSafe()
       if (!fs.existsSync(root)) return { output: "Memory workspace is empty." }
-      if (!args.query && !args.since && !args.until) {
-        return { output: "memory_search error: provide a query and/or since/until." }
+
+      const queries = (args.queries ?? []).map((q) => q.trim())
+      if (args.queries && (queries.length === 0 || queries.some((q) => q.length === 0))) {
+        return { output: "memory_search error: queries must be non-empty strings." }
+      }
+      if (queries.length === 0 && !args.since && !args.until) {
+        return { output: "memory_search error: provide queries and/or since/until." }
+      }
+      const mode = (args.match_mode ?? "any") as MatchMode
+      if (mode === "all_within_lines" && !(typeof args.line_count === "number" && args.line_count >= 1)) {
+        return { output: "memory_search error: all_within_lines requires line_count >= 1." }
       }
       const since = args.since ? parseDateArg(args.since, false) : null
       if (args.since && since === null) return { output: `memory_search error: could not parse since="${args.since}".` }
       const until = args.until ? parseDateArg(args.until, true) : null
       if (args.until && until === null) return { output: `memory_search error: could not parse until="${args.until}".` }
 
-      let files = collectSearchFiles(root)
+      // Path scoping: a file searches just that file, a directory is walked.
+      let files: CandidateFile[]
+      if (args.path) {
+        const start = safeResolveMemoryPath(args.path)
+        let st: fs.Stats
+        try {
+          st = fs.statSync(start)
+        } catch {
+          return { output: `Not found: ${args.path}` }
+        }
+        const rel = args.path.replace(/\/+$/, "")
+        files = st.isFile() ? [{ rel, abs: start, ts: fileTimestamp(path.basename(start)) }] : collectSearchFiles(start, rel)
+      } else {
+        files = collectSearchFiles(root, "")
+      }
+
       const timeFiltered = since !== null || until !== null
       if (timeFiltered) {
         // Time filters only apply to time-anchored files; MEMORY.md etc. carry
@@ -219,8 +350,8 @@ export const memory_search = tool({
       }
       const rangeLabel = timeFiltered ? ` in ${args.since ?? "..."}..${args.until ?? "..."}` : ""
 
-      if (!args.query) {
-        const listing = files.slice(0, args.limit).map((f) => {
+      if (queries.length === 0) {
+        const listing = files.slice(0, args.max_results).map((f) => {
           let content = ""
           try {
             content = fs.readFileSync(f.abs, "utf8")
@@ -236,37 +367,69 @@ export const memory_search = tool({
       }
 
       const caseSensitive = args.case_sensitive ?? true
-      const q = caseSensitive ? args.query : args.query.toLowerCase()
-      const matches: { file: string; line: number; text: string }[] = []
-      // Files are walked in sorted order, so results are ordered by
-      // (path, line) like codex's search response.
+      const normalized = args.normalized ?? false
+      const preparedQueries = queries.map((q) => prepareComparable(q, caseSensitive, normalized))
+      if (preparedQueries.some((q) => q.length === 0)) {
+        return { output: "memory_search error: a query is empty after normalization." }
+      }
+
+      // codex: collect ALL matches, sort by (path, line), then page by cursor.
+      const all: SearchMatch[] = []
       for (const f of files) {
-        if (matches.length >= args.limit) break
         let content: string
         try {
           content = fs.readFileSync(f.abs, "utf8")
         } catch {
           continue
         }
-        for (const [i, line] of content.split(/\r?\n/).entries()) {
-          if (matches.length >= args.limit) break
-          const haystack = caseSensitive ? line : line.toLowerCase()
-          if (haystack.includes(q)) {
-            matches.push({ file: f.rel, line: i + 1, text: line.slice(0, 240) })
-          }
+        if (content.includes("\u0000")) continue // binary, like codex's InvalidData skip
+        searchFileContent(
+          f,
+          content.split(/\r?\n/),
+          queries,
+          preparedQueries,
+          mode,
+          args.line_count ?? 1,
+          args.context_lines ?? 0,
+          caseSensitive,
+          normalized,
+          all,
+        )
+      }
+      all.sort((a, b) => a.path.localeCompare(b.path) || a.match_line_number - b.match_line_number)
+
+      let startIndex = 0
+      if (args.cursor !== undefined) {
+        startIndex = Number.parseInt(args.cursor, 10)
+        if (!Number.isInteger(startIndex) || startIndex < 0 || String(startIndex) !== args.cursor.trim()) {
+          return { output: `memory_search error: invalid cursor "${args.cursor}" (must be a non-negative integer).` }
+        }
+        if (startIndex > all.length) {
+          return { output: `memory_search error: cursor ${startIndex} exceeds result count ${all.length}.` }
         }
       }
-      if (matches.length === 0) return { output: `No matches for "${args.query}"${rangeLabel}.` }
-      const out = matches
-        .map((m) => `${m.file}:${m.line}: ${m.text}`)
-        .join("\n")
-      // codex signals a capped result set (truncated/next_cursor); without an
-      // indicator the model cannot tell "exactly N" from "stopped at N".
-      const capped = matches.length >= args.limit
+      const endIndex = Math.min(startIndex + (args.max_results ?? SEARCH_MAX_RESULTS), all.length)
+      const pageMatches = all.slice(startIndex, endIndex)
+      const nextCursor = endIndex < all.length ? String(endIndex) : null
+      const truncated = nextCursor !== null
+
+      const label = queries.map((q) => `"${q}"`).join(", ")
+      if (all.length === 0) return { output: `No matches for ${label}${rangeLabel}.` }
       return {
         output:
-          `${matches.length} match(es) for "${args.query}"${rangeLabel}${capped ? " (result limit reached; more may exist)" : ""}:\n${out}`,
-        metadata: { count: matches.length, query: args.query, since: args.since, until: args.until, truncated: capped },
+          `${pageMatches.length} of ${all.length} match(es) for ${label}${rangeLabel}` +
+          `${truncated ? ` (more available; pass cursor=${nextCursor})` : ""}:\n` +
+          pageMatches.map(renderMatch).join("\n"),
+        metadata: {
+          queries,
+          match_mode: mode === "all_within_lines" ? { type: mode, line_count: args.line_count } : { type: mode },
+          path: args.path,
+          matches: pageMatches,
+          next_cursor: nextCursor,
+          truncated,
+          since: args.since,
+          until: args.until,
+        },
       }
     } catch (err) {
       return { output: `memory_search error: ${(err as Error).message}` }

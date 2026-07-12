@@ -80,13 +80,17 @@ mappings:
     note: >
       memory_search/memory_read/memory_list/memory_add_note. codex splits these
       across tools/{search,read,list,ad_hoc_note}.rs and local/*.rs.
-      DIVERGENCES (schema-level, semantics match where noted): search is
-      single-query without match_mode/context_lines/cursor/path-scope/normalized
-      (codex: queries[], match modes, pagination) but matches codex's
-      case-sensitive default, 200-result cap, all-non-hidden-files set, and
-      (path,line) ordering; a capped result set is flagged with "result limit
-      reached" + truncated metadata (ports codex's truncated/next_cursor
-      signal); port adds since/until time filtering (no upstream equivalent).
+      search ports local/search.rs fully: queries[], match modes
+      (any / all_on_same_line / all_within_lines with minimal-window pruning),
+      path scoping (file or dir), integer-cursor pagination with
+      next_cursor/truncated, context_lines, normalized (alphanumeric-only)
+      comparison, case-sensitive default, 200-result cap, (path,line)
+      ordering, binary-file skip. DIVERGENCES: match_mode is flattened for
+      the zod schema (enum + separate line_count instead of codex's
+      internally-tagged {type, line_count}); max_results is the arg name for
+      codex's max_results (was `limit` pre-0.2); queries[] is optional
+      because the port adds since/until time filtering with a no-query
+      chronological listing mode (no upstream equivalent).
       read uses line_offset/max_lines like codex plus a 256KiB byte backstop
       (codex: 20k-token budget); read on a directory returns a listing (codex:
       NotFile error). add_note generates the filename plugin-side (codex: model

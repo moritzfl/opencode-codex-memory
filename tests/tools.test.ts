@@ -38,29 +38,29 @@ afterEach(() => {
 
 function search(args: Record<string, unknown>) {
   const { memory_search } = require("../tools/memory.js")
-  return memory_search.execute({ limit: 50, ...args }, CTX)
+  return memory_search.execute({ max_results: 50, ...args }, CTX)
 }
 
 describe("memory_search time filters", () => {
   it("still searches everything without time filters", async () => {
-    const r = await search({ query: "blue-green" })
+    const r = await search({ queries: ["blue-green"] })
     expect(r.output).toContain("MEMORY.md")
     expect(r.output).toContain("2026-06-01T10-00-00-ab12-fix_deploy.md")
   })
 
   it("restricts query matches to time-anchored files in the window", async () => {
-    const r = await search({ query: "blue-green", since: "2026-07-01" })
+    const r = await search({ queries: ["blue-green"], since: "2026-07-01" })
     // MEMORY.md has no timestamp and the June summary is out of range.
     expect(r.output).toContain("No matches")
   })
 
   it("finds period content with query + window", async () => {
-    const r = await search({ query: "metrics", since: "2026-07-01", until: "2026-07-03" })
+    const r = await search({ queries: ["metrics"], since: "2026-07-01", until: "2026-07-03" })
     expect(r.output).toContain("2026-07-02T09-30-00-cd34-add_metrics.md")
     expect(r.output).not.toContain("fix_deploy")
   })
 
-  it("lists the period chronologically when no query is given", async () => {
+  it("lists the period chronologically when no queries are given", async () => {
     const r = await search({ since: "2026-07-01", until: "2026-07-02" })
     const lines = r.output.split("\n")
     expect(lines[0]).toContain("2 memory file(s)")
@@ -76,9 +76,85 @@ describe("memory_search time filters", () => {
     expect(r.output).not.toContain("add_metrics")
   })
 
-  it("rejects unparseable dates and empty argument sets", async () => {
-    expect((await search({ since: "not-a-date", query: "x" })).output).toContain("could not parse")
-    expect((await search({})).output).toContain("provide a query and/or since/until")
+  it("rejects unparseable dates, empty queries, and empty argument sets", async () => {
+    expect((await search({ since: "not-a-date", queries: ["x"] })).output).toContain("could not parse")
+    expect((await search({})).output).toContain("provide queries and/or since/until")
+    expect((await search({ queries: ["  "] })).output).toContain("non-empty")
+  })
+})
+
+describe("memory_search match modes (codex parity)", () => {
+  it("any: a line matching any query counts, with matched_queries reported", async () => {
+    const r = await search({ queries: ["blue-green", "does-not-exist-anywhere"] })
+    expect(r.output).toContain("MEMORY.md")
+    const m = (r.metadata.matches as any[])[0]
+    expect(m.matched_queries).toEqual(["blue-green"])
+  })
+
+  it("all_on_same_line requires every query on one line", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "same.md"), "alpha beta\nalpha\nbeta\n")
+    const r = await search({ queries: ["alpha", "beta"], match_mode: "all_on_same_line" })
+    expect(r.metadata.matches.length).toBe(1)
+    expect(r.metadata.matches[0].match_line_number).toBe(1)
+  })
+
+  it("all_within_lines matches a window and keeps only minimal windows", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "window.md"), "alpha\nfiller\nbeta\nnothing\n")
+    const hit = await search({ queries: ["alpha", "beta"], match_mode: "all_within_lines", line_count: 3 })
+    expect(hit.metadata.matches.length).toBe(1)
+    expect(hit.metadata.matches[0].match_line_number).toBe(1)
+    expect(hit.metadata.matches[0].content).toContain("alpha")
+    expect(hit.metadata.matches[0].content).toContain("beta")
+    const miss = await search({ queries: ["alpha", "beta"], match_mode: "all_within_lines", line_count: 2 })
+    expect(miss.output).toContain("No matches")
+    const invalid = await search({ queries: ["alpha"], match_mode: "all_within_lines" })
+    expect(invalid.output).toContain("requires line_count")
+  })
+
+  it("normalized comparison ignores separators (case handled separately, like codex)", async () => {
+    const r = await search({ queries: ["bluegreen"], normalized: true })
+    expect(r.output).toContain("MEMORY.md")
+    // normalized does NOT imply case-insensitive…
+    const miss = await search({ queries: ["BlueGreen"], normalized: true })
+    expect(miss.output).toContain("No matches")
+    // …but combines with case_sensitive: false.
+    const combo = await search({ queries: ["BlueGreen"], normalized: true, case_sensitive: false })
+    expect(combo.output).toContain("MEMORY.md")
+  })
+
+  it("context_lines widens the reported content", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "ctx.md"), "before\nneedle-xyz\nafter\n")
+    const r = await search({ queries: ["needle-xyz"], context_lines: 1 })
+    const m = (r.metadata.matches as any[]).find((x) => x.path === "ctx.md")
+    expect(m.content_start_line_number).toBe(1)
+    expect(m.content).toBe("before\nneedle-xyz\nafter")
+  })
+
+  it("paginates with an integer cursor over the (path, line)-sorted result set", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "aaa.md"), "pagetok one\npagetok two\npagetok three\n")
+    const page1 = await search({ queries: ["pagetok"], max_results: 2 })
+    expect(page1.metadata.matches.length).toBe(2)
+    expect(page1.metadata.truncated).toBe(true)
+    expect(page1.metadata.next_cursor).toBe("2")
+    const page2 = await search({ queries: ["pagetok"], max_results: 2, cursor: page1.metadata.next_cursor })
+    expect(page2.metadata.matches.length).toBe(1)
+    expect(page2.metadata.truncated).toBe(false)
+    expect(page2.metadata.next_cursor).toBe(null)
+    expect((await search({ queries: ["pagetok"], cursor: "notanint" })).output).toContain("invalid cursor")
+    expect((await search({ queries: ["pagetok"], cursor: "999" })).output).toContain("exceeds result count")
+  })
+
+  it("path scoping searches a subtree or a single file", async () => {
+    const scoped = await search({ queries: ["blue-green"], path: "rollout_summaries" })
+    expect(scoped.output).toContain("fix_deploy")
+    expect(scoped.output).not.toContain("MEMORY.md")
+    const single = await search({ queries: ["blue-green"], path: "MEMORY.md" })
+    expect(single.output).toContain("MEMORY.md:")
+    expect((await search({ queries: ["x"], path: "missing-dir" })).output).toContain("Not found")
   })
 })
 
@@ -108,7 +184,7 @@ describe("path guard hardening", () => {
     fs.mkdirSync(outsideDir, { recursive: true })
     fs.writeFileSync(path.join(outsideDir, "leak.md"), "blue-green rollout leak\n")
     fs.symlinkSync(outsideDir, path.join(root, "linked"))
-    const r = await search({ query: "blue-green" })
+    const r = await search({ queries: ["blue-green"] })
     expect(r.output).not.toContain("leak")
     expect(r.output).toContain("MEMORY.md")
   })
@@ -116,16 +192,16 @@ describe("path guard hardening", () => {
 
 describe("memory_search semantics", () => {
   it("is case-sensitive by default like codex", async () => {
-    const r = await search({ query: "BLUE-GREEN" })
+    const r = await search({ queries: ["BLUE-GREEN"] })
     expect(r.output).toContain("No matches")
-    const r2 = await search({ query: "BLUE-GREEN", case_sensitive: false })
+    const r2 = await search({ queries: ["BLUE-GREEN"], case_sensitive: false })
     expect(r2.output).toContain("MEMORY.md")
   })
 
   it("searches files regardless of extension", async () => {
     const root = path.join(TEST_ROOT, "memories")
     fs.writeFileSync(path.join(root, "notes.rst"), "blue-green in rst\n")
-    const r = await search({ query: "blue-green in rst" })
+    const r = await search({ queries: ["blue-green in rst"] })
     expect(r.output).toContain("notes.rst")
   })
 })
