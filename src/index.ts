@@ -49,9 +49,10 @@ function getStore(): MemoryStore {
   return new MemoryStore()
 }
 
-// Citation blocks arrive via message.part.updated once per streaming delta,
-// so the same completed block is seen many times. Track which session ids
-// were already recorded per part to count each citation once.
+// Citation blocks are seen by both the text.complete hook (once, at
+// completion) and message.part.updated (once per streaming delta), so the
+// same block surfaces many times. Track which session ids were already
+// recorded per part to count each citation exactly once across both paths.
 const recordedCitations = new Map<string, Set<string>>()
 const MAX_TRACKED_PARTS = 500
 
@@ -228,6 +229,40 @@ function buildHooks() {
     }
   },
 
+  /**
+   * Fires at text-end, before opencode persists the final part text
+   * (session/processor.ts): the returned text replaces the stored one.
+   * Primary citation seam — records usage and strips the block so neither
+   * the UI nor history ever shows citation markup (matches codex, which
+   * strips from the displayed/persisted message). The event and
+   * messages.transform paths below stay as fallbacks for older opencode
+   * hosts and for history persisted before this hook existed.
+   */
+  async "experimental.text.complete"(
+    input: { sessionID: string; messageID: string; partID: string },
+    output: { text: string },
+  ): Promise<void> {
+    try {
+      if (isMemorySubSession(input.sessionID)) return
+      if (!output.text.includes("<memory-citation>")) return
+      try {
+        const ids = extractCitedSessionIds(output.text)
+        // Same part key as the event path: whichever hook sees the ids first
+        // records them; the other becomes a no-op.
+        const fresh = takeNewCitations(`${input.sessionID}:${input.partID}`, ids)
+        if (fresh.length > 0) getStore().recordUsage(fresh)
+      } catch (e) {
+        console.error("[opencode-codex-memory] citation recording failed:", e)
+      }
+      output.text = stripCitations(output.text)
+    } catch (err) {
+      console.error("[opencode-codex-memory] text.complete error:", err)
+    }
+  },
+
+  // Fallback strip for history that still carries citation blocks (messages
+  // persisted by plugin versions before the text.complete seam, or hosts
+  // without it). Keeps citation markup out of the model-facing transcript.
   async "experimental.chat.messages.transform"(
     _input: unknown,
     output: { messages: { info: { role?: string }; parts: { type: string; text?: string }[] }[] },

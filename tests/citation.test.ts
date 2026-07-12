@@ -1,4 +1,7 @@
-import { describe, it, expect } from "bun:test"
+import { describe, it, expect, afterEach } from "bun:test"
+import fs from "fs"
+import os from "os"
+import path from "path"
 import { parseCitations, extractCitedSessionIds, stripCitations } from "../src/citation.js"
 import { takeNewCitations } from "../src/index.js"
 
@@ -102,6 +105,59 @@ describe("extractCitedSessionIds", () => {
     const text = `<memory-citation><citation_entries>a,b</citation_entries></memory-citation>` +
       `<memory-citation><citation_entries>b,c</citation_entries></memory-citation>`
     expect(extractCitedSessionIds(text).sort()).toEqual(["a", "b", "c"])
+  })
+})
+
+describe("experimental.text.complete hook", () => {
+  const TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-citation-"))
+  afterEach(() => {
+    delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true })
+  })
+
+  it("strips citations and records usage before the part is persisted", async () => {
+    process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
+    const plugin = require("../src/index.js").default
+    const { MemoryStore } = require("../src/store.js")
+    const hooks = await plugin.server({ client: {} } as any, undefined)
+    expect(typeof hooks["experimental.text.complete"]).toBe("function")
+
+    const store = new MemoryStore()
+    store.upsertStage1Output({
+      session_id: "ses_cited_tc",
+      source_updated_at: 111,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: Date.now(),
+    })
+
+    const output = { text: `answer\n\n<memory-citation>\n<citation_entries>ses_cited_tc</citation_entries>\n</memory-citation>` }
+    await hooks["experimental.text.complete"](
+      { sessionID: "ses_main_tc", messageID: "msg_1", partID: "prt_tc_1" },
+      output,
+    )
+    expect(output.text).toBe("answer")
+    const row = store.stage1Outputs().find((o: any) => o.session_id === "ses_cited_tc")
+    expect(row.usage_count).toBe(1)
+
+    // Second sight of the same part (e.g. the event fallback) records nothing.
+    const again = { text: `answer\n\n<memory-citation>\n<citation_entries>ses_cited_tc</citation_entries>\n</memory-citation>` }
+    await hooks["experimental.text.complete"](
+      { sessionID: "ses_main_tc", messageID: "msg_1", partID: "prt_tc_1" },
+      again,
+    )
+    const row2 = store.stage1Outputs().find((o: any) => o.session_id === "ses_cited_tc")
+    expect(row2.usage_count).toBe(1)
+  })
+
+  it("leaves citation-free text untouched", async () => {
+    process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
+    const plugin = require("../src/index.js").default
+    const hooks = await plugin.server({ client: {} } as any, undefined)
+    const output = { text: "plain answer" }
+    await hooks["experimental.text.complete"]({ sessionID: "s", messageID: "m", partID: "p" }, output)
+    expect(output.text).toBe("plain answer")
   })
 })
 

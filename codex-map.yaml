@@ -100,10 +100,13 @@ mappings:
     note: >
       strip/parse <memory-citation><citation_entries>/<session_ids>. Also cross-check
       codex-rs/protocol/src/memory_citation.rs for the wire schema.
-      DIVERGENCES: strip target is inverted by platform necessity — codex strips
-      citations from the displayed/persisted message and keeps them in raw
-      history; the port strips from model-facing history (messages.transform)
-      and cannot touch opencode's UI rendering. Port requires a closing tag
+      Primary strip/record seam is opencode's experimental.text.complete hook
+      (fires before final part persistence), which matches codex's behavior of
+      stripping from the displayed/persisted message; the
+      messages.transform + message.part.updated paths remain as fallbacks for
+      older hosts and pre-existing history (codex keeps citations in raw
+      history — the port's persisted history is stripped instead, a remaining
+      divergence). Port requires a closing tag
       (codex's stream parser auto-closes at EOF); port drops codex's legacy
       <thread_ids> alias and instead accepts its own legacy comma-separated id
       list.
