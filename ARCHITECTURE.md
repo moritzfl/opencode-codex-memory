@@ -53,15 +53,20 @@ READ PATH
     → appends a byte-identical string to system[] every turn (cache-stable)
     → re-reads the file only after Phase 2 rewrites it
   tools: memory_read, memory_search, memory_list, memory_add_note
-  event hook: parse <memory-citation> from assistant output
-    → record usage_count / last_usage; citations are stripped from
-      model-facing history (messages.transform) — opencode owns the display,
-      so the strip target is inverted vs codex (see codex-map.yaml)
+    (+ control tools: memory_reset, memory_inspect, memory_mode)
+  experimental.text.complete hook: parse <memory-citation> at text end,
+    BEFORE the part is persisted → record usage_count / last_usage → strip
+    the block, so neither the UI nor stored history shows citation markup
+    (matches codex; messages.transform + message.part.updated remain as
+    fallbacks for older hosts and pre-existing history)
 
 WRITE PATH
-  Phase 1 — per-session extraction (on session.idle)
-    read transcript (read-only opencode.db) → filter instructions → redact
-    → memorize-extract subagent → store raw_memory + rollout_summary in memory.db
+  Phase 1 — per-session extraction
+    pumped at first chat.message of a session and on idle
+    (session.status {type:"idle"} + deprecated session.idle, deduped)
+    load transcript via session.messages API → filter instructions → redact
+    → memorize-extract subagent (no tools, transcript inline)
+    → store raw_memory + rollout_summary in memory.db
   Phase 2 — global consolidation (singleton, 6h cooldown, lease)
     git baseline diff of memories/ → memorize subagent updates MEMORY.md,
     memory_summary.md, skills/ → reset baseline → invalidate read-path cache
@@ -70,7 +75,8 @@ STORAGE
   ~/.local/share/opencode/memory.db        plugin SQLite (stage1 outputs + jobs + session meta)
   ~/.local/share/opencode/memories/        MEMORY.md, memory_summary.md, raw_memories.md,
                                            rollout_summaries/, extensions/, skills/, .git/
-  ~/.local/share/opencode/opencode.db      read-only (session transcripts for extraction)
+  opencode session data                    never read from disk — transcripts and
+                                           discovery go through the plugin API (D4)
 ```
 
 Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
@@ -154,9 +160,10 @@ equivalent.
 
 ### D5 — Separate plugin DB (`src/db.ts`)
 
-The plugin owns `memory.db` (its own schema + migrations) rather than writing to
-`opencode.db`, avoiding migration conflicts and any risk to opencode's data. Same
-isolation codex uses with its dedicated memories SQLite.
+The plugin owns `memory.db` (its own schema + migrations); opencode's own
+database is never opened — not even read-only (see D4). No migration
+conflicts, no risk to opencode's data. Same isolation codex uses with its
+dedicated memories SQLite.
 
 ---
 

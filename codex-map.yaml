@@ -251,11 +251,13 @@ mappings:
   - ours: src/index.ts
     theirs: codex-rs/core/src/stream_events_utils.rs
     note: >
-      citation extraction from streamed assistant text + session.idle triggering.
+      citation extraction from streamed assistant text + turn-start/idle
+      pipeline triggering.
       Loosest mapping; the plugin hook wiring is opencode-specific.
       DELIBERATE DIVERGENCES vs codex lifecycle: (1) codex kicks the write
       pipeline at turn start (app-server turn_processor.rs -> start.rs); the
-      port triggers on session.idle — same opportunistic-background semantics.
+      port pumps at the first chat.message of a session (same turn-start
+      semantics) AND on idle events — an extra trigger codex does not have.
       (2) codex ships memories default-off behind Feature::MemoryTool with a
       TUI consent prompt (the feature is Stable now, still default-off); the
       port is on-by-default — installing the plugin is the consent (README

@@ -95,7 +95,7 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
 
 ```
 ~/.local/share/opencode/
-├── memory.db                       # the plugin's own database (opencode's is only ever read)
+├── memory.db                       # the plugin's own database (opencode's data is only accessed via its API)
 └── memories/
     ├── memory_summary.md           # compact summary injected into the system prompt
     ├── MEMORY.md                   # searchable index of everything learned
@@ -117,8 +117,10 @@ those too.)
   session transcripts and extracted memories before anything is written or sent
   to a model. Notes you explicitly dictate ("remember that ...") are stored as
   you said them.
-- **The learning agents are sandboxed** — every tool except reading and editing
-  the memory files is denied, including shell and network access.
+- **The learning agents are sandboxed** — the extraction agent has no tools at
+  all (the transcript is handed to it inline), and the consolidation agent gets
+  only file tools plus access to the memory folder. Shell, network, IDE, and
+  MCP tools are denied for both.
 - **Reset is safe.** `memory_reset` refuses to run if the memory folder is a
   symlink, so it can't be tricked into deleting something else.
 - **Web/MCP sessions:** by default, sessions that used web search, fetch, or MCP
