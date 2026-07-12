@@ -36,9 +36,16 @@ afterEach(() => {
   } catch {}
 })
 
+// The module caches its DB handle; a fresh copy is needed to exercise
+// open/query failures against this test's own opencode.db.
+function freshCapture() {
+  delete require.cache[require.resolve("../src/capture.js")]
+  return require("../src/capture.js")
+}
+
 describe("loadTranscript", () => {
   it("excludes reasoning parts like codex's rollout policy (Reasoning => false)", () => {
-    const { loadTranscript } = require("../src/capture.js")
+    const { loadTranscript } = freshCapture()
     const msgs = loadTranscript("ses_1")
     expect(msgs.length).toBe(3)
     const reasoning = msgs.find((m: any) => m.type === "reasoning")
@@ -46,5 +53,31 @@ describe("loadTranscript", () => {
     expect(reasoning.text).toBeUndefined()
     expect(msgs.find((m: any) => m.type === "text").text).toBe("visible answer")
     expect(msgs.find((m: any) => m.type === "tool").text).toContain("[tool: bash]")
+  })
+
+  // A swallowed DB error used to surface as an empty transcript, which phase 1
+  // records as a successful no-output extraction — silently erasing memory.
+  it("throws on schema errors instead of returning an empty transcript", () => {
+    const db = new Database(path.join(TEST_ROOT, "opencode.db"))
+    db.exec("DROP TABLE part")
+    db.close()
+    const { loadTranscript } = freshCapture()
+    expect(() => loadTranscript("ses_1")).toThrow()
+  })
+
+  it("throws when opencode.db cannot be opened", () => {
+    fs.rmSync(path.join(TEST_ROOT, "opencode.db"))
+    const { loadTranscript } = freshCapture()
+    expect(() => loadTranscript("ses_1")).toThrow(/cannot open opencode.db/)
+  })
+})
+
+describe("listRecentSessions", () => {
+  it("is fail-safe: returns [] on schema errors so the pass is skipped without claims", () => {
+    const db = new Database(path.join(TEST_ROOT, "opencode.db"))
+    db.exec("DROP TABLE session")
+    db.close()
+    const { listRecentSessions } = freshCapture()
+    expect(listRecentSessions()).toEqual([])
   })
 })

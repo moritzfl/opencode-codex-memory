@@ -10,31 +10,36 @@ export interface SessionRow {
 
 let opencodeDb: Database | null = null
 
-function openOpencodeDb(): Database | null {
+/** Throws when opencode.db cannot be opened; failures are not cached, so the next call retries. */
+function openOpencodeDb(): Database {
   if (opencodeDb) return opencodeDb
   const p = opencodeDbPath()
   try {
     opencodeDb = new Database(p, { readonly: true })
-  } catch {
-    opencodeDb = null
+  } catch (err) {
+    throw new Error(`cannot open opencode.db at ${p}: ${(err as Error).message}`)
   }
   return opencodeDb
 }
 
+/**
+ * Session discovery is fail-safe: on DB/schema errors it logs and returns [],
+ * which skips the pass without claiming or finalizing any job. Transcript
+ * loading (below) must NOT do this — see loadTranscript.
+ */
 export function listRecentSessions(limit: number = SCAN_LIMIT): SessionRow[] {
-  const db = openOpencodeDb()
-  if (!db) return []
   try {
     // Top-level sessions only: task-tool children are summarized into their
     // parent, and the plugin's own sub-sessions must never be memorized.
-    return db
+    return openOpencodeDb()
       .prepare(
         `SELECT id, time_updated AS updated_at, directory FROM session
          WHERE parent_id IS NULL AND title NOT LIKE 'codex-memory-%'
          ORDER BY time_updated DESC LIMIT ?`,
       )
       .all(limit) as SessionRow[]
-  } catch {
+  } catch (err) {
+    console.warn("[opencode-codex-memory] session discovery failed; skipping pass:", err)
     return []
   }
 }
@@ -45,40 +50,42 @@ export interface TranscriptMessage {
   text?: string
 }
 
+/**
+ * DB open/query errors PROPAGATE. An empty result must mean "session has no
+ * extractable content" — a swallowed error here used to surface as a
+ * successful no-output extraction, which deletes any previous extraction for
+ * the session (codex: load_rollout_items errors fail the job, which retries
+ * under its lease/backoff). Row-level JSON damage stays tolerated: one bad
+ * part should not discard an otherwise-usable transcript.
+ */
 export function loadTranscript(sessionId: string): TranscriptMessage[] {
-  const db = openOpencodeDb()
-  if (!db) return []
-  try {
-    const rows = db
-      .prepare(
-        `SELECT p.data, m.data AS msg_data
-         FROM part p
-         JOIN message m ON p.message_id = m.id
-         WHERE p.session_id = ?
-         ORDER BY p.time_created ASC`,
-      )
-      .all(sessionId) as { data: string; msg_data: string }[]
-    return rows.map((r) => {
-      let parsed: any = {}
-      try {
-        parsed = JSON.parse(r.data)
-      } catch {
-      }
-      let role: string | undefined
-      try {
-        const msg = JSON.parse(r.msg_data)
-        role = msg.role
-      } catch {
-      }
-      return {
-        type: parsed.type ?? "unknown",
-        role,
-        text: extractText(parsed),
-      }
-    })
-  } catch {
-    return []
-  }
+  const rows = openOpencodeDb()
+    .prepare(
+      `SELECT p.data, m.data AS msg_data
+       FROM part p
+       JOIN message m ON p.message_id = m.id
+       WHERE p.session_id = ?
+       ORDER BY p.time_created ASC`,
+    )
+    .all(sessionId) as { data: string; msg_data: string }[]
+  return rows.map((r) => {
+    let parsed: any = {}
+    try {
+      parsed = JSON.parse(r.data)
+    } catch {
+    }
+    let role: string | undefined
+    try {
+      const msg = JSON.parse(r.msg_data)
+      role = msg.role
+    } catch {
+    }
+    return {
+      type: parsed.type ?? "unknown",
+      role,
+      text: extractText(parsed),
+    }
+  })
 }
 
 function extractText(msg: any): string | undefined {
