@@ -1,7 +1,6 @@
 import fs from "fs"
 import path from "path"
-import { safeResolveMemoryPath } from "../src/path-guard.js"
-import { memoryRoot } from "../src/paths.js"
+import { safeResolveMemoryPath, assertMemoryRootSafe } from "../src/path-guard.js"
 import { tool } from "@opencode-ai/plugin"
 
 const MAX_READ_BYTES = 256 * 1024
@@ -200,7 +199,9 @@ export const memory_search = tool({
   },
   async execute(args, ctx) {
     try {
-      const root = memoryRoot()
+      // Walks from the root directly (no per-path resolution), so the root
+      // symlink check must run here explicitly.
+      const root = assertMemoryRootSafe()
       if (!fs.existsSync(root)) return { output: "Memory workspace is empty." }
       if (!args.query && !args.since && !args.until) {
         return { output: "memory_search error: provide a query and/or since/until." }
@@ -287,7 +288,8 @@ export const memory_add_note = tool({
   },
   async execute(args, ctx) {
     try {
-      const root = memoryRoot()
+      // Writes under the root without per-path resolution; check the root.
+      const root = assertMemoryRootSafe()
       const notesDir = path.join(root, NOTES_DIR)
       fs.mkdirSync(notesDir, { recursive: true })
       const ts = new Date().toISOString()

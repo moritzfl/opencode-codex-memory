@@ -5,13 +5,14 @@ import { memoryRoot, memorySummaryPath } from "../src/paths.js"
 import { MemoryStore } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
+import { assertMemoryRootSafe } from "../src/path-guard.js"
 
 function isSymlinkedRoot(): boolean {
-  const root = memoryRoot()
   try {
-    return fs.lstatSync(root).isSymbolicLink()
-  } catch {
+    assertMemoryRootSafe()
     return false
+  } catch {
+    return true
   }
 }
 
@@ -88,6 +89,8 @@ export const memory_inspect = tool({
   args: {},
   async execute() {
     try {
+      // Refuse to walk/report through a symlinked root (same rule as reset).
+      assertMemoryRootSafe()
       const store = new MemoryStore()
       const outputs = store.stage1Outputs()
       const summaryPath = memorySummaryPath()

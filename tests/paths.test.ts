@@ -38,3 +38,24 @@ describe("paths", () => {
     expect(memorySummaryPath()).toBe(path.join(memoryRoot(), "memory_summary.md"))
   })
 })
+
+describe("assertMemoryRootSafe", () => {
+  it("accepts a real directory and a missing root", () => {
+    const { assertMemoryRootSafe, safeResolveMemoryPath } = require("../src/path-guard.js")
+    // Missing root: allowed (created later as a real dir).
+    expect(assertMemoryRootSafe()).toBe(path.join(TEST_ROOT, "memories"))
+    fs.mkdirSync(path.join(TEST_ROOT, "memories"), { recursive: true })
+    expect(assertMemoryRootSafe()).toBe(path.join(TEST_ROOT, "memories"))
+    expect(safeResolveMemoryPath("MEMORY.md")).toBe(path.join(TEST_ROOT, "memories", "MEMORY.md"))
+  })
+
+  it("rejects a symlinked memory root for guarded resolution", () => {
+    const { assertMemoryRootSafe, safeResolveMemoryPath } = require("../src/path-guard.js")
+    const target = path.join(TEST_ROOT, "elsewhere")
+    fs.mkdirSync(target, { recursive: true })
+    fs.symlinkSync(target, path.join(TEST_ROOT, "memories"))
+    expect(() => assertMemoryRootSafe()).toThrow(/symlink/)
+    // The guard used to check only descendants; the root itself must fail too.
+    expect(() => safeResolveMemoryPath("MEMORY.md")).toThrow(/symlink/)
+  })
+})

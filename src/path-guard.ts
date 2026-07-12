@@ -11,8 +11,30 @@ import { memoryRoot } from "./paths.js"
  * - every existing component is lstat-checked: symlinks are rejected, so a
  *   link placed inside the workspace cannot lead reads outside it
  */
-export function safeResolveMemoryPath(rel: string): string {
+/**
+ * The memory root itself must not be a symlink: every scoped resolution and
+ * every workspace walk starts there, so a symlinked root would redirect ALL
+ * memory reads/writes elsewhere on disk. codex rejects a symlinked root when
+ * clearing (control.rs clear_memory_root_contents); the model-facing tools
+ * here extend that check to every memory operation. Returns the root path.
+ * A missing root is fine — callers create it as a real directory.
+ */
+export function assertMemoryRootSafe(): string {
   const root = memoryRoot()
+  let st: fs.Stats | null = null
+  try {
+    st = fs.lstatSync(root)
+  } catch {
+    return root
+  }
+  if (st.isSymbolicLink()) {
+    throw new Error(`memory root is a symlink; refusing memory operations: ${root}`)
+  }
+  return root
+}
+
+export function safeResolveMemoryPath(rel: string): string {
+  const root = assertMemoryRootSafe()
   if (path.isAbsolute(rel)) {
     throw new Error(`path escapes memory root: ${rel}`)
   }
