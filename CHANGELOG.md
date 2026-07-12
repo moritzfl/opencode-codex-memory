@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-12
+
+### Fixed
+
+- **Consolidation works again on opencode 1.17+**: opencode gates file tools
+  outside the session's project behind the `external_directory` permission,
+  and the global memory workspace is always outside the project — the
+  consolidator's wildcard deny blocked every memory read/write. The injected
+  `memorize` agent now carries an `external_directory` allow scoped to the
+  memory root. Verified end-to-end against opencode 1.17.18.
+- Transcript/DB errors no longer masquerade as an empty transcript (which
+  finalized as a successful no-output extraction and deleted the previous
+  extraction); they fail the job, which retries under its lease.
+- `memory_reset` propagates deletion failures instead of reporting a
+  successful reset while files survive, and refuses to run while a
+  consolidation is in flight in the same process.
+- A symlinked memory root is rejected by every memory tool (previously only
+  descendants were checked, and search/note-writing bypassed the guard).
+- Phase-2 completion updates the job row and the selected-input retention
+  flags in one transaction (codex parity); a crash between them could let
+  pruning delete inputs backing the consolidated artifacts.
+- Secret redaction catches quoted keys in JSON/YAML tool payloads
+  (`"password": "..."`); the aws pattern no longer emits a literal `$1`.
+- `memory_read` can page past 256 KiB via `line_offset` (the byte cap now
+  applies to the windowed output); the workspace diff cap counts UTF-8 bytes
+  instead of UTF-16 code units; `memory_inspect` reports the promised phase-2
+  success watermark; internal workspace walks no longer follow symlinked
+  directories (a self-link looped forever).
+- Developer-role messages are excluded from extraction transcripts (codex
+  `sanitize_response_item_for_memories`).
+
+### Changed
+
+- **opencode data is read exclusively through the official API** — transcripts
+  via `session.messages`, cross-project session discovery via `project.list` +
+  per-project `session.list(scope=project, roots=true)`. `opencode.db` is
+  never opened; the only SQLite left is the plugin's own `memory.db`.
+- **The extraction agent has no tools** (codex parity: stage-1 is a raw
+  prompt with an inline transcript). Previously it could read/glob/grep the
+  host project — a poisoned transcript could induce unrelated file reads.
+- `memory_search` ports codex's full search schema: `queries[]`, `match_mode`
+  (`any` / `all_on_same_line` / `all_within_lines` with minimal-window
+  pruning), `path` scoping, integer-cursor pagination (`next_cursor` /
+  `truncated`), `context_lines`, and `normalized` comparison. Arg renames:
+  `query` → `queries`, `limit` → `max_results`. The `since`/`until` time
+  filter and no-query listing mode are unchanged.
+- Citations are recorded and stripped in the new `experimental.text.complete`
+  hook, before the final text is persisted — neither the UI nor stored
+  history shows citation markup anymore (matching codex). Older hooks remain
+  as fallbacks for pre-existing history.
+- Memory mode is stamped and phase 1 pumped at the first `chat.message` of a
+  session (codex stamps at thread creation); `session.status {type: idle}` is
+  handled alongside the deprecated `session.idle` event.
+- The manual write-pipeline test runs fully sandboxed (XDG overrides) and
+  drives triggers through a persistent `opencode serve` — `opencode run`
+  exits before the async extraction pass claims anything.
+
 ## [0.1.9] - 2026-07-11
 
 ### Fixed
@@ -268,7 +325,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.9...v0.2.0
 [0.1.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.6...v0.1.7
