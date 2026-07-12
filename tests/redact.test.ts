@@ -32,6 +32,21 @@ describe("redact", () => {
     expect(redact('password: "supersecret123"')).toMatch(/password=\[REDACTED\]/)
   })
 
+  it("redacts quoted keys in JSON tool payloads", () => {
+    expect(redact('{"password":"hunter2secret"}')).not.toContain("hunter2secret")
+    expect(redact('{"api_key": "abcd1234efgh"}')).not.toContain("abcd1234efgh")
+    expect(redact("'token': 'abcd1234efgh'")).not.toContain("abcd1234efgh")
+    expect(redact('"access-token"="abcd1234efgh"')).not.toContain("abcd1234efgh")
+  })
+
+  it("redacts aws credential assignments with the key name preserved", () => {
+    const out = redact('aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG"')
+    expect(out).not.toContain("wJalrXUtnFEMI")
+    expect(out).toContain("aws_secret_access_key=[REDACTED]")
+    const json = redact('"aws_access_key_id": "AKIAIOSFODNN7EXAMPLE"')
+    expect(json).not.toContain("AKIAIOSFODNN7EXAMPLE")
+  })
+
   it("leaves non-secret text intact", () => {
     expect(redact("hello world")).toBe("hello world")
   })

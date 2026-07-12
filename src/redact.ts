@@ -10,8 +10,11 @@ const REDACTIONS: { re: RegExp; replacement: string }[] = [
     re: /-----BEGIN [A-Z]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z]+ PRIVATE KEY-----/g,
     replacement: "[REDACTED:private-key]",
   },
-  { re: /(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\s*[:=]\s*["']?[^\s"']{4,}["']?/gi, replacement: "$1=[REDACTED]" },
-  { re: /(?:aws_secret_access_key|aws_access_key_id)\s*[:=]\s*["']?[^\s"']{4,}["']?/gi, replacement: "$1=[REDACTED]" },
+  // Optional quotes around the KEY cover JSON/YAML forms like
+  // "password": "value" — codex's SECRET_ASSIGNMENT_REGEX misses those (it
+  // allows a quote only before the value); this is a deliberate superset.
+  { re: /["']?(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)["']?\s*[:=]\s*["']?[^\s"']{4,}["']?/gi, replacement: "$1=[REDACTED]" },
+  { re: /["']?(aws_secret_access_key|aws_access_key_id)["']?\s*[:=]\s*["']?[^\s"']{4,}["']?/gi, replacement: "$1=[REDACTED]" },
 ]
 
 export function redact(text: string): string {
