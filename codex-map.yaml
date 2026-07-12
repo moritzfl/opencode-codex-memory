@@ -41,6 +41,13 @@ watch_paths:
   - codex-rs/core/src/tools/registry.rs
   - codex-rs/app-server/src/request_processors/turn_processor.rs
   - codex-rs/codex-api/src/endpoint/memories.rs
+  # Added after the 2026-07-12 review audit — previously unwatched inputs the
+  # port depends on (redaction patterns, rollout persistence policy, feature
+  # stage, MCP pollution metadata):
+  - codex-rs/secrets/src/sanitizer.rs
+  - codex-rs/rollout/src/policy.rs
+  - codex-rs/features/src/lib.rs
+  - codex-rs/codex-mcp/src/server.rs
 
 # ours: path in this repo. theirs: path in the codex checkout.
 # Every `theirs` is existence-checked by the drift script (catches renames like
@@ -88,11 +95,15 @@ mappings:
       title/created/session header (codex: verbatim unlimited note body).
       list has no cursor (max_results cap only) and errors on file paths
       (codex: returns the single entry).
+  - ours: src/path-guard.ts
     theirs: codex-rs/ext/memories/src/local/path.rs
     note: >
       safe path resolution that cannot escape the memory root: lexical
       containment + per-component symlink rejection + dot-components hidden,
-      mirroring local.rs resolve_scoped_path.
+      mirroring local.rs resolve_scoped_path. DELIBERATE EXTENSION: the root
+      itself is also rejected when symlinked (assertMemoryRootSafe, applied by
+      every memory tool); codex only enforces that rule when clearing
+      (control.rs clear_memory_root_contents) and trusts the root elsewhere.
 
   # --- Citations ---
   - ours: src/citation.ts
@@ -173,7 +184,11 @@ mappings:
       consolidation orchestration + heartbeat/lease. Ports codex #32193
       validate_consolidation_artifacts gating: early no-diff succeed only when
       MEMORY.md exists and memory_summary.md starts with `v1`; post-agent
-      invalid artifacts fail the job without baseline reset.
+      invalid artifacts fail the job without baseline reset. Like codex, the
+      consolidator edits the LIVE artifacts (no staging/promote step): a
+      failed or timed-out run can leave a partial summary until the retry
+      repairs it — reviewed 2026-07-12 and kept as-is for parity; do not add
+      staging unless codex does.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
     note: >
@@ -279,6 +294,18 @@ mappings:
       final ownership confirm in phase2.ts blocks it from finalizing.
 
   # --- Utilities ---
+  - ours: src/redact.ts
+    theirs: codex-rs/secrets/src/sanitizer.rs
+    note: >
+      secret redaction for stage-1 outputs (codex calls redact_secrets on
+      raw_memory/rollout_summary/slug and on the serialized rollout; the port
+      redacts the transcript lines and the extraction outputs).
+      DELIBERATE SUPERSET: codex ships 4 patterns (openai key, AKIA, bearer,
+      bare-key assignment); the port adds anthropic/github/slack/private-key
+      patterns and allows quotes around the assignment KEY so JSON/YAML forms
+      like "password": "..." are caught — codex's SECRET_ASSIGNMENT_REGEX
+      misses those. isMemoryExcludedFragment lives here too (upstream:
+      memories/write phase1.rs).
   - ours: src/token.ts
     theirs: codex-rs/utils/output-truncation
     note: token-limit truncation for the 2500-token summary cap (chars/4 estimate here).

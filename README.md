@@ -181,12 +181,17 @@ explicitly, so they win over an agent-level `model`.
 > This is the one intentional default difference — the tools are a core part of a
 > standalone memory plugin. Everything else matches codex's defaults.
 >
-> Turning `dedicated_tools` off doesn't break anything: background learning,
-> summary injection, and citation tracking all keep working. The injected
-> guidance switches to codex's file-based mode — the agent reads the memory
-> files with its normal file tools and writes "remember this" notes directly
-> into `extensions/ad_hoc/notes/`. The maintenance tools (`memory_reset`,
-> `memory_inspect`, `memory_mode`) stay available either way.
+> Turning `dedicated_tools` off keeps background learning, summary injection,
+> and citation tracking working. The injected guidance switches to codex's
+> file-based mode — the agent reads the memory files with its normal file
+> tools and writes "remember this" notes directly into
+> `extensions/ad_hoc/notes/`. Caveat: the memory folder lives outside your
+> project, so opencode raises an `external_directory` permission prompt the
+> first time an agent touches it (allow-always covers later access); agents
+> whose permissions deny that ask cannot use file-based mode. The dedicated
+> tools have no such friction — that's why they are the default. The
+> maintenance tools (`memory_reset`, `memory_inspect`, `memory_mode`) stay
+> available either way.
 
 ## Under the hood
 

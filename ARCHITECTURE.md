@@ -154,6 +154,7 @@ isolation codex uses with its dedicated memories SQLite.
 | Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
 | Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
 | Rate-limit awareness | Provider rate-limit info | Time-based heuristic stub | See `src/ratelimit.ts`; wire when opencode exposes it |
+| Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
 
 ---
 
