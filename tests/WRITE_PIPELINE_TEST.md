@@ -10,6 +10,36 @@ It is intentionally **not** a `bun test` because it requires real user-like sess
 - This plugin configured in `~/.config/opencode/opencode.json` (path or package
   name). The `memorize`/`memorize-extract` sub-agents register themselves — no
   `agent` block is needed.
+- **Recommended: run the whole test in a sandbox** instead of your real
+  opencode home. opencode resolves its dirs via XDG env vars, and the plugin's
+  data root has its own override, so full isolation (real memories, sessions,
+  and config untouched) is:
+
+  ```bash
+  SANDBOX=/tmp/memex-live-test
+  mkdir -p $SANDBOX/data/opencode/memories $SANDBOX/config/opencode $SANDBOX/cache $SANDBOX/state $SANDBOX/project
+  cp ~/.local/share/opencode/auth.json $SANDBOX/data/opencode/auth.json  # provider credentials
+  # config: model of your choice + this plugin from the local checkout
+  cat > $SANDBOX/config/opencode/opencode.json <<'EOF'
+  {
+    "model": "<provider/model>",
+    "small_model": "<provider/small-model>",
+    "plugin": [["file:///absolute/path/to/opencode-memex", { "min_rollout_idle_hours": 1, "max_rollouts_per_startup": 8 }]]
+  }
+  EOF
+  # prefix EVERY opencode/sqlite3 command in this doc with:
+  #   env -u OPENCODE -u OPENCODE_PID -u OPENCODE_SERVER_PASSWORD -u OPENCODE_PRINT_LOGS \
+  #     XDG_DATA_HOME=$SANDBOX/data XDG_CONFIG_HOME=$SANDBOX/config \
+  #     XDG_CACHE_HOME=$SANDBOX/cache XDG_STATE_HOME=$SANDBOX/state \
+  #     OPENCODE_CODEX_MEMORY_TEST_ROOT=$SANDBOX/data/opencode
+  # and replace ~/.local/share/opencode with $SANDBOX/data/opencode in paths.
+  # Delete $SANDBOX afterwards (it contains a copy of auth.json).
+  ```
+
+  Sandbox mode makes Step 0's backup and Step 10's restore unnecessary and
+  works while other opencode instances are running (they use the real dirs).
+  When testing the local checkout via `file://`, run `bun run build` first —
+  the plugin entry is `dist/`.
 - **Test-friendly plugin options.** The production defaults make the pipeline
   too patient for a same-day test: sessions only become eligible for
   extraction after 6 h idle, and at most 2 are extracted per pass. Configure:
@@ -110,19 +140,34 @@ After each session, wait ~10–20 seconds so `updated_at` is distinct.
 
 Two separate conditions must hold, and the doc-follower must arrange both:
 
-1. **A `session.idle` event fires.** opencode emits it whenever a session
-   finishes processing a message, so any trivial run triggers a pass:
+1. **An idle event fires in a process that stays alive.** opencode emits it
+   whenever a session finishes processing a message — but `opencode run`
+   exits immediately after printing the reply, which kills the extraction
+   pass mid-flight (verified on 1.17.18: no jobs are even claimed). The
+   trigger instance must outlive the pass. Start a persistent server and
+   drive the trigger through its API:
 
    ```bash
-   opencode run "ok"
+   OPENCODE_SERVER_PASSWORD=memex-test opencode serve --port 14096 &
+   # basic auth username is "opencode"
+   SID=$(curl -s -u "opencode:memex-test" -X POST \
+     "http://127.0.0.1:14096/session?directory=$PWD" \
+     -H 'Content-Type: application/json' -d '{"title":"trigger session"}' \
+     | sed -E 's/.*"id":"(ses_[^"]+)".*/\1/')
+   curl -s -u "opencode:memex-test" -X POST \
+     "http://127.0.0.1:14096/session/$SID/message" \
+     -H 'Content-Type: application/json' \
+     -d '{"parts":[{"type":"text","text":"Reply with just: ok"}]}' > /dev/null
    ```
 
-   (The triggering session itself is excluded from that pass.)
+   Leave the server running until phase 2 finishes (Step 5), then kill it.
+   (An interactive TUI session going idle works too; the triggering session
+   itself is excluded from the pass either way.)
 
 2. **The work sessions are eligible.** A session is only claimed when it has
    been idle for `min_rollout_idle_hours` (≥1 h even in test config). Either
    wait an hour after Step 2, or backdate the sessions — with **all opencode
-   instances stopped**:
+   instances stopped** (do this before starting the server above):
 
    ```bash
    sqlite3 ~/.local/share/opencode/opencode.db "
@@ -131,7 +176,8 @@ Two separate conditions must hold, and the doc-follower must arrange both:
    "
    ```
 
-   Then start opencode again and send the trivial run above.
+   (Discovery reads sessions through the server API, which serves them from
+   this same database — backdating is visible immediately on next start.)
 
 Successful extraction is **silent** — `[opencode-codex-memory]` log lines
 appear only on errors or rate-limit skips, and they go to the server log
@@ -169,9 +215,14 @@ sqlite3 ~/.local/share/opencode/memory.db "
 ```
 
 **Expected:**
-- At least 3 rows with non-empty `raw_memory` (with the default
-  `max_rollouts_per_startup` of 2 this takes multiple passes — the test config
-  from the prerequisites raises it to 8 so one pass covers all sessions)
+- Rows with non-empty `raw_memory` for the substantive work sessions (with
+  the default `max_rollouts_per_startup` of 2 this takes multiple passes —
+  the test config from the prerequisites raises it to 8 so one pass covers
+  all sessions)
+- The extractor legitimately returns no output for thin sessions ("ok"
+  triggers, single Q&A turns) — their jobs land on `done` with no row. That
+  is correct selectivity, not a failure; if you need more rows, make the
+  Step 2 sessions more substantive (multiple concrete edits per session).
 - The polluted session (weather) should **not** appear
 - `usage_count` starts at 0
 
@@ -286,7 +337,8 @@ mv ~/.local/share/opencode/memories.bak ~/.local/share/opencode/memories
 
 The test passes if:
 
-1. Phase 1 produces ≥3 meaningful `raw_memory` rows
+1. Phase 1 claims all eligible sessions and produces meaningful `raw_memory`
+   rows for the substantive ones (thin sessions correctly finish as no-output)
 2. Polluted sessions are excluded
 3. Phase 2 updates `MEMORY.md` and `memory_summary.md`
 4. New sessions see the consolidated memory (closed loop)
@@ -297,6 +349,7 @@ The test passes if:
 
 | Flaky point | Why it happens | Mitigation in this document |
 |-------------|----------------|-----------------------------|
+| Trigger process exits too early | `opencode run` terminates right after the reply; the async extraction pass dies before claiming anything. | Step 3 uses a persistent `opencode serve` driven via curl as the trigger vehicle. |
 | Session eligibility window | Sessions must be idle ≥ `min_rollout_idle_hours` (floor 1 h) before extraction claims them. | Test config sets it to 1 h; Step 3 shows how to backdate `time_updated` instead of waiting. |
 | Per-pass extraction cap | At most `max_rollouts_per_startup` sessions per pass, plus a 30 s in-process rate gate between passes. | Test config raises the cap to 8; otherwise trigger multiple spaced passes. |
 | 6h Phase 2 cooldown | The singleton global job has a hard 6-hour success cooldown (a 1 h retry backoff after failures, and a 5 min in-process gate). | Provide the exact `DELETE` statement to clear the job row so the next idle event will run Phase 2. |
