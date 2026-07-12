@@ -20,6 +20,13 @@ describe("agent auto-registration", () => {
     expect(config.agent!["memorize-extract"].permission.write).toBe("deny")
   })
 
+  it("denies every tool for the extraction agent (codex extraction is a raw prompt with no tools)", () => {
+    const permission = SHIPPED_AGENTS["memorize-extract"].permission as Record<string, string>
+    for (const [tool, action] of Object.entries(permission)) {
+      expect(action, `memorize-extract: ${tool} must be denied`).toBe("deny")
+    }
+  })
+
   it("allowlists built-in tools for every shipped agent", () => {
     for (const [name, definition] of Object.entries(SHIPPED_AGENTS)) {
       const permission = definition.permission as Record<string, string>

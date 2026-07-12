@@ -20,7 +20,7 @@
     },
     "memorize-extract": {
       "mode": "subagent",
-      "prompt": "You are a memory extraction agent. Read the session transcript and extract raw_memory, rollout_summary, and rollout_slug as JSON. Exclude AGENTS.md/instruction content. Redact secrets.",
+      "prompt": "You are a memory extraction agent. The session transcript is provided inline in the prompt. Extract raw_memory, rollout_summary, and rollout_slug as JSON. Exclude AGENTS.md/instruction content. Redact secrets.",
       "permission": {
         "*": "deny",
         "bash": "deny",
@@ -28,11 +28,11 @@
         "websearch": "deny",
         "task": "deny",
         "todowrite": "deny",
-        "read": "allow",
+        "read": "deny",
         "write": "deny",
         "edit": "deny",
-        "glob": "allow",
-        "grep": "allow"
+        "glob": "deny",
+        "grep": "deny"
       }
     }
   }

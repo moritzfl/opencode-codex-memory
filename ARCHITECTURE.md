@@ -102,10 +102,13 @@ the prefix cache misses — same as any plugin hook. Accepted.
 
 codex uses Seatbelt to block network access; opencode has no process sandbox.
 **Workaround:** every shipped memory subagent starts with `"*": "deny"` and
-allowlists only the built-in opencode file tools it needs
-(`read`/`edit`/`write`/`glob`/`grep`). This also blocks IDE and MCP tools that
-could otherwise bypass a narrower `bash` deny. Optionally path-scope writes to
-the memories dir. Tool-permission-level, not process-level — accepted trade-off.
+allowlists only the built-in opencode file tools it needs. The consolidator
+(`memorize`) gets `read`/`edit`/`write`/`glob`/`grep`; the extractor
+(`memorize-extract`) gets nothing — codex extraction is a raw prompt with no
+tools, and the transcript arrives inline, so a poisoned transcript cannot
+induce file reads. This also blocks IDE and MCP tools that could otherwise
+bypass a narrower `bash` deny. Tool-permission-level, not process-level —
+accepted trade-off.
 
 One required carve-out: opencode additionally gates file tools outside the
 session's project behind the `external_directory` permission, and the memory
