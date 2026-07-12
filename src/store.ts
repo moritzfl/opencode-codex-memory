@@ -335,21 +335,27 @@ export class MemoryStore {
     // codex stores the completion watermark = max source_updated_at consumed;
     // the 6h cooldown is keyed on finished_at, not on this value.
     const watermark = selected.reduce((max, s) => Math.max(max, s.source_updated_at), 0)
-    const res = this.db
-      .prepare(
-        `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL, retry_remaining=?,
-           last_success_watermark=MAX(COALESCE(last_success_watermark, 0), ?), retry_at=NULL
-         WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
+    // One transaction for the job row + the selected-input flags (codex
+    // mark_global_phase2_job_succeeded does the same): a crash between them
+    // must not leave a done job whose retention flags still describe the
+    // previous run — pruning could then delete inputs backing the artifacts.
+    this.db.transaction(() => {
+      const res = this.db
+        .prepare(
+          `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL, retry_remaining=?,
+             last_success_watermark=MAX(COALESCE(last_success_watermark, 0), ?), retry_at=NULL
+           WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
+        )
+        .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
+      if (res.changes === 0) return
+      this.db.exec("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
+      const mark = this.db.prepare(
+        `UPDATE memory_stage1_outputs
+         SET selected_for_phase2 = 1, selected_for_phase2_source_updated_at = ?
+         WHERE session_id = ? AND source_updated_at = ?`,
       )
-      .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
-    if (res.changes === 0) return
-    this.db.exec("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
-    const mark = this.db.prepare(
-      `UPDATE memory_stage1_outputs
-       SET selected_for_phase2 = 1, selected_for_phase2_source_updated_at = ?
-       WHERE session_id = ? AND source_updated_at = ?`,
-    )
-    for (const s of selected) mark.run(s.source_updated_at, s.session_id, s.source_updated_at)
+      for (const s of selected) mark.run(s.source_updated_at, s.session_id, s.source_updated_at)
+    }).immediate()
   }
 
   markPhase2Failed(ownershipToken: string, error: string): void {

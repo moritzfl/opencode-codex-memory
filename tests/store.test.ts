@@ -428,6 +428,24 @@ describe("MemoryStore phase2 input selection", () => {
     expect(store.stage1Outputs().map((o: any) => o.session_id)).toEqual(["kept"])
   })
 
+  it("markPhase2Succeeded without ownership leaves the selected-input flags untouched", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const old = Date.now() - DAY
+    seed(store, "kept", old)
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(claim.ownershipToken, [{ session_id: "kept", source_updated_at: old }])
+    // A worker that lost ownership must not clear the flags of the run that
+    // superseded it (job update and flag rewrite are one transaction).
+    store.markPhase2Succeeded("stale-token", [])
+    const row = openDb()
+      .prepare("SELECT selected_for_phase2 FROM memory_stage1_outputs WHERE session_id='kept'")
+      .get() as { selected_for_phase2: number }
+    expect(row.selected_for_phase2).toBe(1)
+  })
+
   it("deleting a selected output enqueues phase 2 to forget it", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")
