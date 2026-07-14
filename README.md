@@ -198,6 +198,17 @@ explicitly, so they win over an agent-level `model`.
 ## Under the hood
 
 opencode-codex-memory is a faithful port of the memory system from OpenAI's codex.
+
+One design choice is worth calling out, because it shapes everything else: **memory
+is global.** There's a single store for all your work, not one per project. That's
+not an accident of the port — it's codex's own hard-won shape. codex *started* with
+per-project memory (a separate bucket per directory, plus a user scope) and
+**deliberately removed it** in early 2026, collapsing everything into one global
+root for simplicity: one store, one lock, one consolidation pass. Project awareness
+didn't disappear — it moved out of storage and into the prompt, as soft "this looks
+like it belongs to that project" hints rather than hard partitions. This port
+mirrors that exactly.
+
 If you want to understand the design, the trade-offs, or contribute, see
 [`ARCHITECTURE.md`](./ARCHITECTURE.md). Contributor guidance lives in
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md) —
