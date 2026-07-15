@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-15
+
+### Changed
+
+- More reliable memory extraction — the background learning agent now returns
+  its results in a structured format instead of having its reply parsed as
+  text, so an occasional malformed response no longer causes a session's memory
+  to be skipped.
+
 ## [0.2.1] - 2026-07-15
 
 ### Changed
@@ -331,7 +340,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.9...v0.2.0
 [0.1.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.8...v0.1.9
