@@ -45,6 +45,10 @@ interface PromptOptions {
   timeoutMs?: number
   system?: string
   model?: string
+  // json_schema structured-output request. opencode's PromptInput accepts a
+  // `format` field (schema v1/session.ts) but the generated SDK body type omits
+  // it, so it is passed through an `as any` cast at the call site.
+  format?: Record<string, unknown>
 }
 
 /**
@@ -79,19 +83,23 @@ function parseModelRef(ref: string): { providerID: string; modelID: string } | n
   return { providerID: ref.slice(0, slash), modelID: ref.slice(slash + 1) }
 }
 
-async function promptSession(sessionId: string, prompt: string, agent: string, opts: PromptOptions = {}): Promise<string> {
+/** Runs a sub-agent prompt and returns the raw response data (`{ info, parts }`). */
+async function runPrompt(sessionId: string, prompt: string, agent: string, opts: PromptOptions = {}): Promise<any> {
   const timeoutMs = opts.timeoutMs ?? 300_000
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
   const model = opts.model ? parseModelRef(opts.model) : null
   const promptPromise = input.client.session.prompt({
     path: { id: sessionId },
+    // `format` lives in the server's PromptInput but not the generated SDK body
+    // type yet (same OpenAPI lag as session.list scope/roots), hence the cast.
     body: {
       agent,
       ...(opts.system ? { system: opts.system } : {}),
       ...(model ? { model } : {}),
+      ...(opts.format ? { format: opts.format } : {}),
       parts: [{ type: "text", text: prompt } as any],
-    },
+    } as any,
   })
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -102,10 +110,14 @@ async function promptSession(sessionId: string, prompt: string, agent: string, o
       }),
     ])
     if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
-    return extractAssistantText(res.data)
+    return res.data
   } finally {
     clearTimeout(timer)
   }
+}
+
+async function promptSession(sessionId: string, prompt: string, agent: string, opts: PromptOptions = {}): Promise<string> {
+  return extractAssistantText(await runPrompt(sessionId, prompt, agent, opts))
 }
 
 function extractAssistantText(body: any): string {
@@ -130,6 +142,20 @@ export interface ExtractOptions {
   model?: string
 }
 
+// JSON Schema for structured stage-1 output. Mirrors the deliverables in
+// stage_one_system.md (three required string fields; all-empty = no-op) and is
+// opencode's equivalent of codex's output_schema + output_schema_strict.
+const EXTRACTION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    raw_memory: { type: "string" },
+    rollout_summary: { type: "string" },
+    rollout_slug: { type: "string" },
+  },
+  required: ["raw_memory", "rollout_summary", "rollout_slug"],
+} as const
+
 /** Returns null when the extractor reported a no-op (nothing worth remembering). */
 export async function extractViaSubagent(sessionId: string, transcript: string, opts: ExtractOptions = {}): Promise<ExtractionResult | null> {
   const agent = "memorize-extract"
@@ -138,15 +164,27 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
     const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript)
     // extract_model option > opencode small_model > session default.
     const model = opts.model ?? (await getConfigModels()).smallModel
-    const raw = await promptSession(subId, prompt, agent, {
+    const data = await runPrompt(subId, prompt, agent, {
       // Mirrors the stage-1 job lease (1h): codex has no per-request timeout,
       // and a near-600k-char transcript on a slow model can easily exceed a
       // short one — repeated timeouts would exhaust the job's retries.
       timeoutMs: 3600_000,
       system: readTemplate("stage_one_system.md"),
       model,
+      // opencode enforces json_schema output via a forced StructuredOutput tool
+      // call (toolChoice: required) — which is why memorize-extract must allow
+      // that one otherwise-denied tool.
+      format: { type: "json_schema", schema: EXTRACTION_SCHEMA },
     })
-    return parseExtraction(raw)
+    // The captured JSON lands on AssistantMessage.structured (schema
+    // v1/session.ts; absent from the generated SDK type, so read it untyped).
+    // Fall back to text parsing when structured output is unavailable (a host
+    // without the feature, or a model that emitted JSON as plain text).
+    const structured = (data as any)?.info?.structured
+    if (structured && typeof structured === "object") {
+      return validateExtraction(structured as Partial<ExtractionResult>)
+    }
+    return parseExtraction(extractAssistantText(data))
   } finally {
     void deleteSession(subId).catch(() => {})
   }
@@ -274,16 +312,12 @@ function readTemplate(name: string): string {
   return fs.readFileSync(path.join(import.meta.dirname, "templates", name), "utf8")
 }
 
-/** Parses the stage-1 JSON output. Returns null for the all-empty no-op response. */
-export function parseExtraction(raw: string): ExtractionResult | null {
-  const cleaned = raw.replace(/^```(?:json)?/gim, "").replace(/```$/gim, "").trim()
-  const start = cleaned.indexOf("{")
-  const end = cleaned.lastIndexOf("}")
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("extraction response contained no JSON object")
-  }
-  const json = cleaned.slice(start, end + 1)
-  const obj = JSON.parse(json) as Partial<ExtractionResult>
+/**
+ * Validates a parsed stage-1 object into an ExtractionResult, or null for the
+ * all-empty no-op. Shared by the structured-output path (AssistantMessage.
+ * structured) and the text parser below.
+ */
+export function validateExtraction(obj: Partial<ExtractionResult>): ExtractionResult | null {
   if (typeof obj.raw_memory !== "string" || typeof obj.rollout_summary !== "string") {
     throw new Error("extraction response missing required fields")
   }
@@ -305,4 +339,18 @@ export function parseExtraction(raw: string): ExtractionResult | null {
     rollout_summary: obj.rollout_summary,
     rollout_slug: typeof obj.rollout_slug === "string" && obj.rollout_slug.trim() ? obj.rollout_slug : null,
   }
+}
+
+/**
+ * Parses stage-1 JSON from assistant text. Fallback for when structured output
+ * is unavailable; the primary path reads AssistantMessage.structured directly.
+ */
+export function parseExtraction(raw: string): ExtractionResult | null {
+  const cleaned = raw.replace(/^```(?:json)?/gim, "").replace(/```$/gim, "").trim()
+  const start = cleaned.indexOf("{")
+  const end = cleaned.lastIndexOf("}")
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("extraction response contained no JSON object")
+  }
+  return validateExtraction(JSON.parse(cleaned.slice(start, end + 1)) as Partial<ExtractionResult>)
 }

@@ -32,7 +32,8 @@
         "write": "deny",
         "edit": "deny",
         "glob": "deny",
-        "grep": "deny"
+        "grep": "deny",
+        "StructuredOutput": "allow"
       }
     }
   }

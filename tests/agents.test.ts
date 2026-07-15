@@ -5,6 +5,11 @@ import path from "path"
 const OPENCODE_JSON = path.join(import.meta.dirname, "..", "opencode.json")
 const SHIPPED_AGENTS = JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8")).agent as Record<string, any>
 const ALLOWED_BUILTIN_TOOLS = new Set(["read", "edit", "write", "glob", "grep"])
+// opencode delivers json_schema output via a forced StructuredOutput tool call
+// (toolChoice: required). It has no filesystem/shell/network capability, so
+// allowing just this one keeps the extraction sandbox effectively tool-less
+// while enabling structured output. See src/llm.ts EXTRACTION_SCHEMA.
+const ALLOWED_SYNTHETIC_TOOLS = new Set(["StructuredOutput"])
 
 describe("agent auto-registration", () => {
   it("injects both sub-agents from the bundled opencode.json when absent", () => {
@@ -20,9 +25,13 @@ describe("agent auto-registration", () => {
     expect(config.agent!["memorize-extract"].permission.write).toBe("deny")
   })
 
-  it("denies every tool for the extraction agent (codex extraction is a raw prompt with no tools)", () => {
+  it("denies every tool for the extraction agent except the side-effect-free StructuredOutput capture", () => {
     const permission = SHIPPED_AGENTS["memorize-extract"].permission as Record<string, string>
     for (const [tool, action] of Object.entries(permission)) {
+      if (ALLOWED_SYNTHETIC_TOOLS.has(tool)) {
+        expect(action, `memorize-extract: ${tool} must be allowed for structured output`).toBe("allow")
+        continue
+      }
       expect(action, `memorize-extract: ${tool} must be denied`).toBe("deny")
     }
   })
@@ -34,7 +43,8 @@ describe("agent auto-registration", () => {
       expect(permission["*"], `${name}: unknown and MCP tools must be denied`).toBe("deny")
       for (const [tool, action] of Object.entries(permission)) {
         if (action === "allow") {
-          expect(ALLOWED_BUILTIN_TOOLS.has(tool), `${name}: unexpected allowed tool ${tool}`).toBe(true)
+          const permitted = ALLOWED_BUILTIN_TOOLS.has(tool) || ALLOWED_SYNTHETIC_TOOLS.has(tool)
+          expect(permitted, `${name}: unexpected allowed tool ${tool}`).toBe(true)
         }
       }
     }

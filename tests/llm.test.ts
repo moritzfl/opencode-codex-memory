@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test"
-import { parseExtraction, fillTemplate } from "../src/llm.js"
+import { afterEach, describe, it, expect } from "bun:test"
+import { parseExtraction, validateExtraction, extractViaSubagent, setPluginInput, fillTemplate } from "../src/llm.js"
 
 describe("fillTemplate", () => {
   it("substitutes placeholders", () => {
@@ -74,5 +74,90 @@ describe("parseExtraction", () => {
       rollout_slug: "slug",
     })
     expect(() => parseExtraction(raw)).toThrow()
+  })
+})
+
+// The primary extraction path reads AssistantMessage.structured (a pre-parsed
+// object) and feeds it straight to validateExtraction — no text scraping.
+describe("validateExtraction", () => {
+  it("accepts a well-formed structured object", () => {
+    const r = validateExtraction({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "slug-1" })!
+    expect(r.raw_memory).toBe("rm")
+    expect(r.rollout_summary).toBe("rs")
+    expect(r.rollout_slug).toBe("slug-1")
+  })
+
+  it("returns null for the all-empty no-op object", () => {
+    expect(validateExtraction({ raw_memory: "", rollout_summary: "", rollout_slug: "" })).toBeNull()
+  })
+
+  it("returns null when either required field is blank", () => {
+    expect(validateExtraction({ raw_memory: "rm", rollout_summary: "  ", rollout_slug: "x" })).toBeNull()
+    expect(validateExtraction({ raw_memory: " ", rollout_summary: "rs", rollout_slug: "x" })).toBeNull()
+  })
+
+  it("normalizes a blank slug to null", () => {
+    expect(validateExtraction({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" })!.rollout_slug).toBeNull()
+  })
+
+  it("throws when required fields are missing or mistyped", () => {
+    expect(() => validateExtraction({ rollout_summary: "rs" })).toThrow()
+    expect(() => validateExtraction({ raw_memory: 5 as unknown as string, rollout_summary: "rs" })).toThrow()
+  })
+
+  it("throws when raw_memory echoes the template skeleton", () => {
+    expect(() =>
+      validateExtraction({ raw_memory: "task: <primary task signature>", rollout_summary: "rs", rollout_slug: "s" }),
+    ).toThrow()
+  })
+})
+
+describe("extractViaSubagent (structured output)", () => {
+  // Stub the plugin client; capture the prompt body so we can assert the
+  // json_schema format request, and control what session.prompt returns.
+  function stubClient(promptResult: (body: any) => any): () => any {
+    let capturedBody: any
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "sub-1" } }),
+        prompt: async (req: any) => {
+          capturedBody = req.body
+          return promptResult(req.body)
+        },
+        delete: async () => ({ data: {} }),
+      },
+      config: { get: async () => ({ data: {} }) },
+    }
+    setPluginInput({ client } as any)
+    return () => capturedBody
+  }
+  afterEach(() => setPluginInput({ client: undefined } as any))
+
+  it("requests json_schema format and reads the result from AssistantMessage.structured", async () => {
+    const getBody = stubClient(() => ({
+      data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "slug" } } },
+    }))
+    const r = await extractViaSubagent("ses_1", "transcript", { cwd: "/x" })
+    expect(r).toEqual({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "slug" })
+    const body = getBody()
+    expect(body.format?.type).toBe("json_schema")
+    expect(body.format?.schema?.required).toContain("raw_memory")
+  })
+
+  it("falls back to parsing assistant text when structured output is absent", async () => {
+    stubClient(() => ({
+      data: {
+        info: {},
+        parts: [{ type: "text", text: JSON.stringify({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" }) }],
+      },
+    }))
+    const r = await extractViaSubagent("ses_2", "transcript")
+    expect(r?.raw_memory).toBe("rm")
+    expect(r?.rollout_slug).toBeNull()
+  })
+
+  it("treats an all-empty structured object as a no-op", async () => {
+    stubClient(() => ({ data: { info: { structured: { raw_memory: "", rollout_summary: "", rollout_slug: "" } } } }))
+    expect(await extractViaSubagent("ses_3", "transcript")).toBeNull()
   })
 })
