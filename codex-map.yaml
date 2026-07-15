@@ -299,10 +299,16 @@ mappings:
       lib.rs prompt_blocks extension blocks (rendered only when
       <memory_root>/extensions exists). The rest of llm.ts (sub-agent session
       plumbing) is opencode-specific — see D3 in ARCHITECTURE.md.
-      D3-adjacent DIVERGENCES: stage-1 has no strict output schema (codex:
-      output_schema_strict + deny_unknown_fields; opencode's prompt API has no
-      response-format knob) — parseExtraction scrapes the first JSON object,
-      tolerates unknown fields, and rejects prompt-skeleton echoes; per-request
+      D3-adjacent DIVERGENCES: stage-1 requests opencode's json_schema output
+      format (EXTRACTION_SCHEMA in src/llm.ts) — the platform equivalent of
+      codex's output_schema + output_schema_strict — and reads the result from
+      AssistantMessage.structured; validateExtraction rejects prompt-skeleton
+      echoes and treats empty fields as no-op. opencode enforces json_schema via
+      a forced StructuredOutput tool call (toolChoice: required), so the
+      otherwise tool-less memorize-extract agent allows that one
+      side-effect-free tool (opencode.json; tests/agents.test.ts enforces the
+      exception). parseExtraction (brace-scrape, unknown-field tolerant) stays
+      as a fallback for hosts/models that don't populate structured. per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
       reasoning effort is not pinned (codex: Low for extraction, Medium for
       consolidation; no session.prompt equivalent); a consolidator that loses

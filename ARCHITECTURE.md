@@ -65,7 +65,7 @@ WRITE PATH
     pumped at first chat.message of a session and on idle
     (session.status {type:"idle"} + deprecated session.idle, deduped)
     load transcript via session.messages API → filter instructions → redact
-    → memorize-extract subagent (no tools, transcript inline)
+    → memorize-extract subagent (json_schema output; only StructuredOutput tool, transcript inline)
     → store raw_memory + rollout_summary in memory.db
   Phase 2 — global consolidation (singleton, 6h cooldown, lease)
     git baseline diff of memories/ → memorize subagent updates MEMORY.md,
@@ -110,11 +110,13 @@ codex uses Seatbelt to block network access; opencode has no process sandbox.
 **Workaround:** every shipped memory subagent starts with `"*": "deny"` and
 allowlists only the built-in opencode file tools it needs. The consolidator
 (`memorize`) gets `read`/`edit`/`write`/`glob`/`grep`; the extractor
-(`memorize-extract`) gets nothing — codex extraction is a raw prompt with no
-tools, and the transcript arrives inline, so a poisoned transcript cannot
-induce file reads. This also blocks IDE and MCP tools that could otherwise
-bypass a narrower `bash` deny. Tool-permission-level, not process-level —
-accepted trade-off.
+(`memorize-extract`) gets only `StructuredOutput` — opencode delivers
+json_schema output through a forced call to that synthetic capture tool
+(`toolChoice: required`), and it has no filesystem/shell/network capability, so
+the extractor stays effectively tool-less: the transcript arrives inline and a
+poisoned transcript still cannot induce file reads or any side effect. This also
+blocks IDE and MCP tools that could otherwise bypass a narrower `bash` deny.
+Tool-permission-level, not process-level — accepted trade-off.
 
 One required carve-out: opencode additionally gates file tools outside the
 session's project behind the `external_directory` permission, and the memory

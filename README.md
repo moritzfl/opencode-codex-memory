@@ -117,10 +117,10 @@ those too.)
   session transcripts and extracted memories before anything is written or sent
   to a model. Notes you explicitly dictate ("remember that ...") are stored as
   you said them.
-- **The learning agents are sandboxed** — the extraction agent has no tools at
-  all (the transcript is handed to it inline), and the consolidation agent gets
-  only file tools plus access to the memory folder. Shell, network, IDE, and
-  MCP tools are denied for both.
+- **The learning agents are sandboxed** — the extraction agent can't touch your
+  filesystem (the transcript is handed to it inline; it only emits its structured
+  result), and the consolidation agent gets only file tools plus access to the
+  memory folder. Shell, network, IDE, and MCP tools are denied for both.
 - **Reset is safe.** `memory_reset` refuses to run if the memory folder is a
   symlink, so it can't be tricked into deleting something else.
 - **Web/MCP sessions:** by default, sessions that used web search, fetch, or MCP
