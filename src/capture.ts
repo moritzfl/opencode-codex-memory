@@ -64,8 +64,10 @@ export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<Se
     try {
       const res = await withTimeout<{ error?: unknown; data?: unknown }>(
         client.session.list({
-          // scope/roots/limit are in the server's ListQuery since 1.17; the
-          // pinned SDK types lag behind, hence the cast at the call site.
+          // scope/roots/limit are in the server's ListQuery (accepted since
+          // opencode 1.14.30, well under our 1.18 floor); the pinned SDK types
+          // still omit them (SessionListData.query is just { directory } as of
+          // 1.18.1), hence the cast at the call site.
           query: { directory: project.worktree, scope: "project", roots: true, limit },
         }),
         API_TIMEOUT_MS,

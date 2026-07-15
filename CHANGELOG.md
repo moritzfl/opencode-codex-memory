@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Now requires opencode 1.18 or newer.
+
 ## [0.2.0] - 2026-07-12
 
 ### Fixed

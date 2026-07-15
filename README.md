@@ -52,8 +52,8 @@ anything.
    immediately (codex ships the same system behind a default-off feature flag
    with a consent prompt; a standalone memory plugin *is* the consent).
 
-Requires only opencode (official release). Git is bundled (`isomorphic-git`) —
-no `git` binary or any other external tool needed.
+Requires opencode 1.18 or newer (official release). Git is bundled
+(`isomorphic-git`) — no `git` binary or any other external tool needed.
 
 The two restricted sub-agents that do the background learning (`memorize`,
 `memorize-extract`) register themselves automatically while background learning
