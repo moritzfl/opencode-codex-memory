@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 5c19155cbd93bfa099016e7487259f61669823ff
-codex_ref_date: 2026-07-11
+codex_ref: 1bbdb32789e1f79932df44941236ea3658f6e965
+codex_ref_date: 2026-07-15
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -193,6 +193,14 @@ mappings:
       failed or timed-out run can leave a partial summary until the retry
       repairs it — reviewed 2026-07-12 and kept as-is for parity; do not add
       staging unless codex does.
+      DIVERGENCE (codex_ref 1bbdb32, 2026-07-15 audit): codex now threads a
+      parent_permission_profile into phase2::run/agent::get_config so the
+      consolidation agent inherits the parent session's OS sandbox choice
+      (Disabled->Disabled, External->External, Managed->the old
+      WorkspaceWrite(memory root, no network)). The port has no equivalent:
+      the consolidator's sandbox is the opencode `memorize` agent allowlist
+      (D2), not a codex SandboxPolicy, and opencode plugins get no parent
+      permission profile. No behavior to port; consolidateViaSubagent stays.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
     note: >
