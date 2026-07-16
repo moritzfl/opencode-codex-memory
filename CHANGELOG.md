@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-16
+
+### Fixed
+
+- Memory is now stored under opencode's own data directory on every platform.
+  If you set `XDG_DATA_HOME`, memory now lives at `$XDG_DATA_HOME/opencode`
+  instead of always under `~/.local/share/opencode`.
+
 ## [0.3.0] - 2026-07-15
 
 ### Changed
@@ -340,7 +348,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.1.9...v0.2.0
