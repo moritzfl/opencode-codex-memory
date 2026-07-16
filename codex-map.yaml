@@ -99,6 +99,19 @@ mappings:
       title/created/session header (codex: verbatim unlimited note body).
       list has no cursor (max_results cap only) and errors on file paths
       (codex: returns the single entry).
+  - ours: src/paths.ts
+    theirs: codex-rs/utils/home-dir/src/lib.rs + codex-rs/ext/memories/src/local.rs
+    note: >
+      memory root = <data root>/memories, mirroring local.rs from_codex_home
+      (codex_home.join("memories")). DELIBERATE ADAPTATION: codex's data root is
+      find_codex_home (CODEX_HOME env, else ~/.codex); the opencode analog is
+      opencode's own data dir, path.join(xdgData, "opencode") computed with the
+      SAME xdg-basedir lib opencode uses (packages/core/src/global.ts), so the
+      root tracks opencode across platforms and XDG_DATA_HOME. opencode does not
+      expose this dir through the plugin API (/path returns
+      home/config/state/worktree/directory, not data), hence the recompute.
+      OPENCODE_CODEX_MEMORY_TEST_ROOT is the CODEX_HOME analog: an outright
+      override used by tests and the write-pipeline sandbox.
   - ours: src/path-guard.ts
     theirs: codex-rs/ext/memories/src/local/path.rs
     note: >

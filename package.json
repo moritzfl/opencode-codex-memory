@@ -47,7 +47,8 @@
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.0",
     "diff": "^9.0.0",
-    "isomorphic-git": "^1.38.6"
+    "isomorphic-git": "^1.38.6",
+    "xdg-basedir": "^5.1.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

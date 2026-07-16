@@ -104,6 +104,10 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
     └── extensions/ad_hoc/notes/    # things you explicitly asked it to remember
 ```
 
+The location follows opencode's own data directory — `$XDG_DATA_HOME/opencode`
+when that's set, otherwise `~/.local/share/opencode` (same resolution on macOS,
+Linux, and Windows).
+
 It's all plain files and a local SQLite database. Read them, edit them, delete
 them — it's yours. (The `memories/` folder also holds a few working files and
 an internal `.git/` the plugin uses for change tracking; `memory_reset` wipes
