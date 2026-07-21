@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 1bbdb32789e1f79932df44941236ea3658f6e965
-codex_ref_date: 2026-07-15
+codex_ref: 6c00dc087e4c01312017389483573500001e9fe9
+codex_ref_date: 2026-07-21
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -32,6 +32,7 @@ watch_paths:
   - codex-rs/core/src/stream_events_utils.rs
   - codex-rs/git-utils/src/baseline.rs
   - codex-rs/utils/output-truncation
+  - codex-rs/utils/home-dir/src/lib.rs
   # Added after the 2026-07-04 parity audit — these are where past blind spots
   # lived (config options, lifecycle triggers, pollution channels, dormant
   # remote backend):
@@ -48,6 +49,20 @@ watch_paths:
   - codex-rs/rollout/src/policy.rs
   - codex-rs/features/src/lib.rs
   - codex-rs/codex-mcp/src/server.rs
+  # Added after the 2026-07-21 audit — paginated-thread memory eligibility,
+  # captured MCP pollution metadata, and the optional external-memory importer
+  # also have inputs outside the core memory directories:
+  - codex-rs/rollout/src/metadata.rs
+  - codex-rs/rollout/src/state_db.rs
+  - codex-rs/thread-store/src/thread_metadata_sync.rs
+  - codex-rs/thread-store/src/local/update_thread_metadata.rs
+  - codex-rs/codex-mcp/src/binding.rs
+  - codex-rs/external-agent-migration/src/detect/memory.rs
+  - codex-rs/external-agent-migration/src/memory.rs
+  - codex-rs/external-agent-migration/src/memory_import.rs
+  - codex-rs/app-server/src/external_agent_migration/processor.rs
+  - codex-rs/app-server/src/external_agent_migration/protocol.rs
+  - codex-rs/app-server-protocol/src/protocol/v2/config.rs
 
 # ours: path in this repo. theirs: path in the codex checkout.
 # Every `theirs` is existence-checked by the drift script (catches renames like
@@ -100,7 +115,11 @@ mappings:
       list has no cursor (max_results cap only) and errors on file paths
       (codex: returns the single entry).
   - ours: src/paths.ts
-    theirs: codex-rs/utils/home-dir/src/lib.rs + codex-rs/ext/memories/src/local.rs
+    theirs: codex-rs/utils/home-dir/src/lib.rs
+    note: >
+      Upstream data-root discovery used by the local memory-root mapping below.
+  - ours: src/paths.ts
+    theirs: codex-rs/ext/memories/src/local.rs
     note: >
       memory root = <data root>/memories, mirroring local.rs from_codex_home
       (codex_home.join("memories")). DELIBERATE ADAPTATION: codex's data root is
@@ -182,6 +201,9 @@ mappings:
       per-project session.list(scope=project, roots=true) for global
       discovery (fail-safe: failures skip, never finalize). opencode.db is
       never read; the only SQLite is the plugin's own memory.db (D5).
+      Codex now extracts from legacy and paginated threads alike; the port was
+      already history-mode agnostic because these APIs expose the session
+      transcript independently of Codex's rollout storage mode.
       See D4 in ARCHITECTURE.md.
   - ours: src/templates/stage_one_system.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_system.md
@@ -225,6 +247,12 @@ mappings:
       rollout_path/git_branch (metadata the port does not have); ensureLayout
       pre-seeds placeholder MEMORY.md + empty memory_summary.md (codex: the
       consolidator INITs them; outcome-equivalent, first diff shows M not A).
+      DELIBERATE DIVERGENCE: codex also has a default-off, under-development
+      external-agent migration flow that explicitly synchronizes selected
+      Claude project memories into extensions/external_agent_import and queues
+      consolidation. The port consumes generic extension instructions/resources
+      but has no equivalent host migration-selection surface, so it does not
+      discover, copy, synchronize, or delete external-agent memory files.
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >
