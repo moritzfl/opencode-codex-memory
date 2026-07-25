@@ -328,6 +328,48 @@ describe("memory_inspect", () => {
     const r = await memory_inspect.execute({}, CTX)
     expect(r.output).toContain("phase2_last_success_watermark: none")
   })
+
+  it("echoes the effective options as the config-verification surface", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("Effective options:")
+    expect(r.output).toContain("generate_memories: true")
+    expect(r.output).toContain("codex_interop: off")
+    expect(r.output).toContain("config_warnings: none")
+    expect(r.metadata.effective_options.dedicated_tools).toBe(true)
+  })
+
+  it("surfaces unknown/malformed option warnings recorded at apply time", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const { resetConfigWarningsForTest, pluginOptions } = require("../src/options.js")
+    resetConfigWarningsForTest()
+    try {
+      applyPluginOptions({ generate_memoriez: true, codex_interop: "yes please" })
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain("config_warnings (2):")
+      expect(r.output).toContain("unknown/unsupported option 'generate_memoriez' ignored")
+      expect(r.output).toContain("codex_interop must be an object")
+      expect(r.metadata.config_warnings).toHaveLength(2)
+    } finally {
+      resetConfigWarningsForTest()
+      pluginOptions.codex_interop = { import: false, export: false }
+    }
+  })
+
+  it("reports the resolved codex memories root when interop is enabled", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { pluginOptions } = require("../src/options.js")
+    pluginOptions.codex_interop = { import: true, export: false, codex_home: path.join(TEST_ROOT, "codex-home") }
+    try {
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain("codex_interop: import=true export=false")
+      expect(r.output).toContain(path.join(TEST_ROOT, "codex-home", "memories"))
+      expect(r.output).toContain("not found yet")
+    } finally {
+      pluginOptions.codex_interop = { import: false, export: false }
+    }
+  })
 })
 
 describe("memory_add_note collisions", () => {

@@ -173,6 +173,13 @@ Numeric options are clamped to codex's valid ranges; unknown option keys are
 ignored with a warning. Setting `use_memories: false` also hides the memory
 tools, matching codex's extension gating.
 
+**Verifying your configuration:** the plugin never hard-fails on bad options.
+To check what actually took effect, ask the agent to run `memory_inspect` — it
+echoes the effective options (after parsing and clamping), lists warnings for
+unknown or malformed keys (typos included), and shows the resolved Codex
+interop state. A mistyped option shows up there twice: as a warning, and as
+the default value appearing where you expected your setting.
+
 Model selection mirrors codex's cheap-extraction / capable-consolidation
 split using opencode's own concepts: when `extract_model` is unset, the
 `small_model` from your `opencode.json` is used (codex uses `gpt-5.4-mini`);
