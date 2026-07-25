@@ -1,17 +1,20 @@
-# opencode-codex-memory
+# OpenCode Codex Memory
 
-Persistent memory for [opencode](https://opencode.ai). Your agent remembers what
+Persistent memory for [opencode](https://opencode.ai): your agent remembers what
 it learned in past sessions — your conventions, your projects, the decisions you
 made — and brings that context into new conversations automatically.
 
-It's a single plugin. No core changes, no MCP server, no separate process, no
-cloud service. Everything stays on your machine under
-`~/.local/share/opencode/`.
-
 Despite the name: **no codex subscription or OpenAI account is needed.** This
-project ports the memory *design* from OpenAI's codex to opencode. It works out
+project is a faithful port of the memory system in OpenAI's codex. It works out
 of the box with zero extra configuration and uses whatever models you already
 have set up in opencode.
+
+**Local-first by design.** Memory is plain markdown files plus a small SQLite
+database on your own machine — no memory service to sign up for, no MCP server,
+no separate process, no sync. Installing it is one line in your `opencode.json`;
+from there everything lives under `~/.local/share/opencode/`, so you can read it,
+grep it, edit it, or delete it like anything else you own. Nothing leaves your
+machine beyond the model calls opencode already makes.
 
 If you *do* also use the Codex CLI: the plugin can share memory with Codex in
 both directions — what one assistant learns on your machine, the other picks
@@ -23,21 +26,14 @@ up. Off by default, one config flag per direction; see
 By default every opencode session starts from zero. You re-explain your build
 commands, your code style, and the quirks of each repo over and over.
 
-opencode-codex-memory closes that loop:
+This plugin closes that loop. It reviews finished sessions in the
+background, keeps what's durable — your preferences, how a repo is built, what
+worked and what didn't — and puts that context back in front of the agent in
+later conversations. You don't manage any of it; opencode just gets more useful
+the more you use it.
 
-- **It learns in the background.** Once a session has been idle for a while
-  (default 6 h), a later background pass reviews the transcript and extracts
-  durable facts — preferences, project structure, what worked and what didn't.
-- **It consolidates.** Periodically it merges those notes into a compact,
-  searchable memory, pruning what's stale.
-- **It remembers at the right time.** A short summary is injected into the system
-  prompt, and the agent can search the full memory on demand when a task looks
-  related to past work.
-- **It self-corrects.** When the agent actually uses a memory it cites the source,
-  so useful memories rank higher over time and unused ones fade.
-
-The result: opencode gets more useful the more you use it, without you managing
-anything.
+If you want the mental model before the details, jump to
+[How it works](#how-it-works).
 
 ## Install
 
@@ -45,9 +41,17 @@ anything.
 
    ```json
    {
-     "plugin": ["opencode-codex-memory"]
+     "plugin": ["opencode-codex-memory@0.4.0"]
    }
    ```
+
+   **Pin the version** (here and for any opencode plugin). opencode installs a
+   plugin spec once into its package cache and never re-resolves it, so a bare
+   `"opencode-codex-memory"` is not "always latest" — it freezes at whatever
+   was latest the first time opencode started. With a version tag you decide
+   which release runs, and bumping the tag installs the new one. Check
+   [npm](https://www.npmjs.com/package/opencode-codex-memory) for the current
+   version.
 
    (While developing locally, point it at an absolute path to your checkout
    instead of the package name.)
@@ -96,6 +100,52 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
   > ~/.local/share/opencode/memories/memory_summary.md
 ```
 
+## How it works
+
+You don't need to know any of this to use the plugin, but it's a small system
+and the shape is easy to hold in your head. It's codex's design, ported as-is.
+
+Think of it as three jobs: two background writers and one reader. **Nothing here
+runs while you're waiting for a reply** — an assistant that stops to take notes
+mid-answer would be slower and more expensive, so the learning happens after the
+fact, on transcripts of conversations that are already over.
+
+**Phase 1 — read one finished session, write notes about it.** Once a
+conversation has been idle long enough that it's clearly done (default 6 h), the
+plugin fetches that transcript, strips secrets out of it, and hands it to a
+cheap model with one question: *what from this is worth keeping?* The answer
+comes back as structured data — a detailed note plus a short recap of the
+session — and lands in a local SQLite database. One session in, one record out.
+Sessions are independent, so this part is easy to parallelize and to retry when
+it fails.
+
+**Phase 2 — merge all those notes into one memory.** Every few hours at most
+(and only one run at a time across all your opencode windows), a second pass
+takes the most relevant per-session notes and rewrites the actual memory files:
+`MEMORY.md` as the full index, `memory_summary.md` as the short version, and
+`skills/` for procedures worth repeating. This is where the interesting work
+happens — ten similar observations collapse into one rule, contradictions get
+resolved, and notes nothing ever used age out. Forgetting is a feature: memory
+that only grows is memory that stops being useful.
+
+The split exists because the two halves have opposite needs. Phase 1 is
+per-session and can run many at once; phase 2 touches the single shared memory,
+so it has to be serialized. Keeping them apart means one slow or failing session
+extraction can't corrupt or block the shared store.
+
+**The read path — actually remembering.** Every turn, the short summary is
+appended to the system prompt (capped at ~2500 tokens, so the cost is small and
+predictable). That's the always-on layer. When a task looks related to past
+work, the agent goes further and searches the full memory itself with the
+`memory_*` tools — the equivalent of "I've seen this before, let me look it up"
+rather than carrying everything around all the time.
+
+**The feedback loop.** When the agent uses a memory, it cites it. The citation
+is recorded and then stripped before it reaches your screen, and those usage
+counts feed back into phase 2's ranking. Memories that keep proving useful get
+kept and sharpened; memories nothing has touched in a month drop out. The system
+finds out which of its own notes were worth writing.
+
 ## Where your data lives
 
 ```
@@ -120,8 +170,12 @@ those too.)
 
 ## Privacy & safety
 
-- **Local only.** Nothing is sent anywhere except through your existing opencode
-  provider, using your existing credentials. The plugin holds no keys of its own.
+- **Local only.** There is no remote storage option to enable, by accident or
+  otherwise: codex keeps memory storage behind a backend interface whose only
+  implementation today is the local filesystem, and this port implements that
+  path and nothing else. Nothing is sent anywhere except through your existing
+  opencode provider, using your existing credentials; the plugin holds no keys
+  of its own.
 - **Secrets are redacted** (API keys, tokens, private keys, passwords) from
   session transcripts and extracted memories before anything is written or sent
   to a model. Notes you explicitly dictate ("remember that ...") are stored as
@@ -162,7 +216,7 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory@0.4.0", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
@@ -221,7 +275,7 @@ directions:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory", { "codex_interop": { "import": true, "export": true } }]
+    ["opencode-codex-memory@0.4.0", { "codex_interop": { "import": true, "export": true } }]
   ]
 }
 ```
@@ -245,25 +299,43 @@ Both sides mark imported content with a provenance tag (`[from codex]` /
 don't ping-pong between the two systems. This follows the same extension
 mechanism Codex itself uses to import Claude memories.
 
-## Under the hood
+## Why one global memory?
 
-opencode-codex-memory is a faithful port of the memory system from OpenAI's codex.
+There's a single store for everything you do, not one per project — and that's
+the design choice most likely to surprise you, so it's worth explaining where it
+came from.
 
-One design choice is worth calling out, because it shapes everything else: **memory
-is global.** There's a single store for all your work, not one per project. That's
-not an accident of the port — it's codex's own hard-won shape. codex *started* with
-per-project memory (a separate bucket per directory, plus a user scope) and
-**deliberately removed it** in early 2026, collapsing everything into one global
-root for simplicity: one store, one lock, one consolidation pass. Project awareness
-didn't disappear — it moved out of storage and into the prompt, as soft "this looks
-like it belongs to that project" hints rather than hard partitions. This port
-mirrors that exactly.
+codex *started* with per-project memory: a separate bucket per directory, plus a
+user-level scope on top. It **deliberately removed that** in early 2026 and
+collapsed everything into one global root — one store, one lock, one
+consolidation pass — for simplicity.
 
-If you want to understand the design, the trade-offs, or contribute, see
-[`ARCHITECTURE.md`](./ARCHITECTURE.md). Contributor guidance lives in
-[`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md) —
-in short: this repo exists to port codex's memory system to opencode, and
-PRs that break that parity will be rejected.
+Simplicity is easy to underrate here — until you try to draw the boundaries
+yourself. Scoping forces a question that often has no good answer: which project does
+"prefers table-driven tests" belong to? Monorepos, worktrees, and sibling repos
+of the same stack all blur the line, and the most valuable lessons — the ones
+about how *you* work — belong to no project at all. Per-scope stores also each
+consolidate over a thinner slice of evidence than the whole.
+
+Project awareness didn't disappear; it moved out of storage and into the prompt.
+Memories carry the project they came from, and the consolidator is told to keep
+per-project detail separable — soft "this looks like it belongs to that project"
+hints rather than hard partitions. You get the cross-project transfer (your
+conventions follow you into a new repo on day one) while project-specific facts
+stay recognizable as such.
+
+The cost is real: with one store, an unrelated project's details can surface in
+the summary. codex judged that cheaper than the alternative, and this port
+mirrors that decision rather than layering scoping back on top.
+
+## Contributing
+
+The port follows codex closely: same two-phase pipeline, same on-disk artifacts,
+same prompts (adapted only where opencode differs). If you want the full design
+and the trade-offs, see [`ARCHITECTURE.md`](./ARCHITECTURE.md); contributor
+guidance lives in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and
+[`AGENTS.md`](./AGENTS.md) — in short: this repo exists to port codex's memory
+system to opencode, and PRs that break that parity will be rejected.
 
 ## License
 
