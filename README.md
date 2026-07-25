@@ -13,6 +13,11 @@ project ports the memory *design* from OpenAI's codex to opencode. It works out
 of the box with zero extra configuration and uses whatever models you already
 have set up in opencode.
 
+If you *do* also use the Codex CLI: the plugin can share memory with Codex in
+both directions — what one assistant learns on your machine, the other picks
+up. Off by default, one config flag per direction; see
+[Sharing memory with the Codex CLI](#sharing-memory-with-the-codex-cli).
+
 ## Why
 
 By default every opencode session starts from zero. You re-explain your build
@@ -150,6 +155,7 @@ codex's `[memories]` config so the two stay easy to compare:
 | `min_rollout_idle_hours` | `6` | How long a session must be idle before it's eligible |
 | `max_rollouts_per_startup` | `2` | Max sessions extracted per pass |
 | `max_unused_days` | `30` | Prune memories unused for this long |
+| `codex_interop` | `{ "import": false, "export": false }` | Two-way memory exchange with a local Codex CLI (see below) |
 
 To set options, turn the plugin entry into a `[name, options]` pair:
 
@@ -198,6 +204,39 @@ explicitly, so they win over an agent-level `model`.
 > tools have no such friction — that's why they are the default. The
 > maintenance tools (`memory_reset`, `memory_inspect`, `memory_mode`) stay
 > available either way.
+
+### Sharing memory with the Codex CLI
+
+If you switch between OpenCode and OpenAI's Codex CLI on the same machine, the
+plugin can exchange consolidated memories with Codex — in either or both
+directions:
+
+```json
+{
+  "plugin": [
+    ["opencode-codex-memory", { "codex_interop": { "import": true, "export": true } }]
+  ]
+}
+```
+
+- `import` copies Codex's consolidated `MEMORY.md` / `memory_summary.md` into a
+  memory extension (`extensions/codex_import/`) before each consolidation pass.
+  The consolidator merges what's new, tagging it `[from codex]`.
+- `export` copies this plugin's consolidated memory into Codex's memory
+  workspace as an extension (`extensions/opencode_import/`) after each
+  successful consolidation, together with instructions for Codex's own
+  consolidator. Codex picks it up on its next consolidation — no Codex
+  configuration needed. Nothing is exported until Codex's memory feature has
+  created `$CODEX_HOME/memories`, and Codex's own files are never modified.
+  (After a `memory_reset` here, the last export stays in Codex until your
+  next successful consolidation replaces it.)
+- `codex_home` overrides where Codex lives (default: `$CODEX_HOME`, else
+  `~/.codex`).
+
+Both sides mark imported content with a provenance tag (`[from codex]` /
+`[from opencode]`) and skip content carrying the other side's tag, so memories
+don't ping-pong between the two systems. This follows the same extension
+mechanism Codex itself uses to import Claude memories.
 
 ## Under the hood
 
