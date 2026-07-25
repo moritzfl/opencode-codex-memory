@@ -138,12 +138,55 @@ function canonical(p: string): string {
   } catch {
     resolved = path.resolve(p)
   }
-  // macOS and Windows filesystems are case-insensitive by default; a
-  // case-folded comparison catches aliased roots there.
+  // Best-effort fallback for paths that do not exist yet (the inode check
+  // below cannot see them): macOS and Windows are case-insensitive by
+  // DEFAULT, so fold case there. This is a per-platform guess — actual
+  // sensitivity is per volume/directory (case-sensitive APFS, Windows
+  // per-dir flags, casefold ext4) and Unicode normalization aliasing exists
+  // besides case. Existing paths are compared by dev/inode instead, which is
+  // immune to all of that.
   return process.platform === "darwin" || process.platform === "win32" ? resolved.toLowerCase() : resolved
 }
 
+/** `dev:ino` identity of an existing path, or null when unavailable. */
+function statKey(p: string): string | null {
+  try {
+    const st = fs.statSync(p, { bigint: true })
+    // Some Windows filesystems report 0 inodes; 0 would falsely equate paths.
+    if (st.ino === 0n) return null
+    return `${st.dev}:${st.ino}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * True when `ancestor` is the same directory as `p` or one of its ancestors,
+ * decided by dev/inode identity. Nonexistent tail components of `p` are
+ * walked over so `<memory_root>/nested/memories` is caught before it exists.
+ */
+function isSelfOrAncestorByInode(ancestor: string, p: string): boolean {
+  const target = statKey(ancestor)
+  if (!target) return false
+  let cur = path.resolve(p)
+  for (;;) {
+    if (statKey(cur) === target) return true
+    const parent = path.dirname(cur)
+    if (parent === cur) return false
+    cur = parent
+  }
+}
+
 function overlaps(a: string, b: string): boolean {
+  // Inode identity first: filesystem ground truth, catches case aliasing,
+  // Unicode-normalization aliasing, symlinks, and bind mounts regardless of
+  // platform defaults.
+  if (isSelfOrAncestorByInode(a, b) || isSelfOrAncestorByInode(b, a)) return true
+  // Both roots exist and the inode walk found no relation: trust it over any
+  // lexical guess (a case-variant path on case-sensitive APFS really is a
+  // different directory — folding it would fail closed spuriously).
+  if (statKey(a) !== null && statKey(b) !== null) return false
+  // Lexical fallback only for roots that do not exist yet.
   const ca = canonical(a)
   const cb = canonical(b)
   return ca === cb || ca.startsWith(cb + path.sep) || cb.startsWith(ca + path.sep)
