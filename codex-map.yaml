@@ -277,8 +277,14 @@ mappings:
       extensions contract (additive only; codex's workspace is never
       bootstrapped and its state DB never touched). Instructions constants
       adapt codex's EXTENSION_INSTRUCTIONS with cross-system provenance tags
-      ([from codex]/[from opencode]) as an echo guard. Default-off via the
-      opencode-specific codex_interop plugin option (codex's importer is
+      ([from codex]/[from opencode]) as an echo guard — needed because this
+      exchange is two-way while codex's Claude import is one-way and cannot
+      echo. The guard is deliberately instruction-level, matching codex's
+      own all-instruction content rules: a code-level line filter at the
+      sync boundary was tried and rejected (it strips the tag-carrying line
+      but leaves the rest of multi-line entries as unattributable,
+      uninterpretable fragments — see ARCHITECTURE.md D6). Default-off via
+      the opencode-specific codex_interop plugin option (codex's importer is
       likewise default-off: Feature::ExternalAgentMemoryImport).
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
