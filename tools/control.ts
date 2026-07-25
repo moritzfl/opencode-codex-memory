@@ -7,6 +7,8 @@ import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
 import { assertMemoryRootSafe } from "../src/path-guard.js"
 import { isPhase2InFlight } from "../src/phase2.js"
+import { pluginOptions, getConfigWarnings } from "../src/options.js"
+import { resolveCodexInterop } from "../src/codex-interop.js"
 
 function isSymlinkedRoot(): boolean {
   try {
@@ -32,6 +34,55 @@ function wipeMemoriesDir(): void {
     if (st.isDirectory()) fs.rmSync(abs, { recursive: true, force: true })
     else fs.unlinkSync(abs)
   }
+}
+
+/**
+ * Renders the effective (post-parse, post-clamp) plugin options plus any
+ * problems recorded while applying them. The plugin never hard-fails on bad
+ * configuration and plugin console output is invisible in the TUI, so this
+ * block inside memory_inspect is THE place to verify the configuration took
+ * effect: typos show up under "config_warnings", wrong values show up as the
+ * default appearing instead of the expected one.
+ */
+function renderEffectiveConfig(): string[] {
+  const o = pluginOptions
+  const lines = [
+    "Effective options:",
+    `  generate_memories: ${o.generate_memories}`,
+    `  use_memories: ${o.use_memories}`,
+    `  dedicated_tools: ${o.dedicated_tools}`,
+    `  disable_on_external_context: ${o.disable_on_external_context}`,
+    `  extract_model: ${o.extract_model ?? "(unset — opencode small_model, else agent/provider default)"}`,
+    `  consolidation_model: ${o.consolidation_model ?? "(unset — opencode model, else agent/provider default)"}`,
+    `  max_raw_memories_for_consolidation: ${o.max_raw_memories_for_consolidation}`,
+    `  max_unused_days: ${o.max_unused_days}`,
+    `  max_rollout_age_days: ${o.max_rollout_age_days}`,
+    `  max_rollouts_per_startup: ${o.max_rollouts_per_startup}`,
+    `  min_rollout_idle_hours: ${o.min_rollout_idle_hours}`,
+  ]
+  const ci = o.codex_interop
+  if (!ci.import && !ci.export) {
+    lines.push("  codex_interop: off")
+  } else {
+    const resolved = resolveCodexInterop(ci)
+    if (!resolved) {
+      lines.push(
+        `  codex_interop: MISCONFIGURED — the Codex memory root overlaps the plugin memory root (${memoryRoot()}); interop is disabled`,
+      )
+    } else {
+      const reachable = fs.existsSync(resolved.codexMemoryRoot)
+      lines.push(
+        `  codex_interop: import=${ci.import} export=${ci.export}`,
+        `    codex memories: ${resolved.codexMemoryRoot}${reachable ? "" : " (not found yet — nothing is imported/exported until Codex's memory feature creates it)"}`,
+      )
+    }
+  }
+  const warnings = getConfigWarnings()
+  lines.push(
+    warnings.length > 0 ? `config_warnings (${warnings.length}):` : "config_warnings: none",
+    ...warnings.map((w) => `  - ${w}`),
+  )
+  return lines
 }
 
 function listMemoriesDir(): string[] {
@@ -100,7 +151,9 @@ export const memory_reset = tool({
 export const memory_inspect = tool({
   description:
     "Inspect the current memory state. Returns: stage1_outputs count, last Phase 2 success watermark, " +
-    "memory_summary token estimate, and a listing of the memories directory. Read-only.",
+    "memory_summary token estimate, a listing of the memories directory, the effective plugin options, " +
+    "and any configuration warnings (unknown/malformed options). Use it to verify the plugin " +
+    "configuration took effect. Read-only.",
   args: {},
   async execute() {
     try {
@@ -129,6 +182,8 @@ export const memory_inspect = tool({
         `memory_summary_tokens_est: ${summaryTokens}`,
         `memories_dir_entries: ${listing.length}`,
         "",
+        ...renderEffectiveConfig(),
+        "",
         "Files:",
         listing.length > 0 ? listing.join("\n") : "(empty)",
       ].join("\n")
@@ -141,6 +196,8 @@ export const memory_inspect = tool({
           summary_chars: summaryChars,
           summary_tokens_est: summaryTokens,
           files: listing,
+          effective_options: { ...pluginOptions, codex_interop: { ...pluginOptions.codex_interop } },
+          config_warnings: [...getConfigWarnings()],
         },
       }
     } catch (err) {

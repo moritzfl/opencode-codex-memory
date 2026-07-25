@@ -7,6 +7,7 @@ import { MemoryStore } from "./store.js"
 import { runPhase1 } from "./phase1.js"
 import { runPhase2 } from "./phase2.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession } from "./llm.js"
+import { pluginOptions, recordConfigWarning } from "./options.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import fs from "fs"
 import path from "path"
@@ -15,39 +16,6 @@ let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
 // Configured MCP server names, fetched lazily; null until first successful fetch.
 let mcpServerNames: Set<string> | null = null
-
-// Option names and defaults mirror codex's MemoriesToml/MemoriesConfig
-// (codex-rs/config/src/types.rs). Keep them 1:1 so the drift script and manual
-// syncing stay trivial; do not rename for taste.
-let pluginOptions: {
-  generate_memories: boolean
-  use_memories: boolean
-  dedicated_tools: boolean
-  disable_on_external_context: boolean
-  extract_model?: string
-  consolidation_model?: string
-  max_raw_memories_for_consolidation: number
-  max_unused_days: number
-  max_rollout_age_days: number
-  max_rollouts_per_startup: number
-  min_rollout_idle_hours: number
-  // opencode-specific (no codex MemoriesToml equivalent): two-way memory
-  // exchange with a local Codex CLI via the extensions mechanism. Modeled on
-  // codex's external_agent_memory_import feature, which is likewise
-  // default-off.
-  codex_interop: { import: boolean; export: boolean; codex_home?: string }
-} = {
-  generate_memories: true,
-  use_memories: true,
-  dedicated_tools: true,
-  disable_on_external_context: false,
-  max_raw_memories_for_consolidation: 256,
-  max_unused_days: 30,
-  max_rollout_age_days: 10,
-  max_rollouts_per_startup: 2,
-  min_rollout_idle_hours: 6,
-  codex_interop: { import: false, export: false },
-}
 
 // Deliberately uncached: openDb() is already a singleton, and caching a store
 // here would hold a stale handle across closeDb() (e.g. after memory_reset).
@@ -157,12 +125,13 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, Math.floor(value)))
 }
 
-function applyPluginOptions(opts: PluginOptions): void {
+export function applyPluginOptions(opts: PluginOptions): void {
   for (const key of Object.keys(opts)) {
     if (!KNOWN_OPTION_KEYS.has(key)) {
-      // codex uses deny_unknown_fields; a plugin can only warn. Covers typos
-      // and the deliberately unimplemented min_rate_limit_remaining_percent.
-      console.warn(`[opencode-codex-memory] unknown/unsupported option '${key}' ignored`)
+      // codex uses deny_unknown_fields; a plugin can only warn (recorded for
+      // memory_inspect). Covers typos and the deliberately unimplemented
+      // min_rate_limit_remaining_percent.
+      recordConfigWarning(`unknown/unsupported option '${key}' ignored`)
     }
   }
   if (typeof opts.generate_memories === "boolean") pluginOptions.generate_memories = opts.generate_memories
@@ -187,7 +156,7 @@ function applyPluginOptions(opts: PluginOptions): void {
         ...(typeof o.codex_home === "string" && o.codex_home.length > 0 ? { codex_home: o.codex_home } : {}),
       }
     } else {
-      console.warn("[opencode-codex-memory] codex_interop must be an object like { import, export, codex_home }; ignored")
+      recordConfigWarning("codex_interop must be an object like { import, export, codex_home }; ignored")
     }
   }
 }
