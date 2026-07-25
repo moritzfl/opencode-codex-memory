@@ -194,7 +194,16 @@ codex-rs/external-agent-migration).
 - **Echo guard**: both instructions files require a provenance tag
   (`[from codex]` / `[from opencode]`) and forbid re-importing content
   carrying the other side's tag; foreign metadata (thread UUIDs vs `ses_*`
-  ids, citation formats) must never be reinterpreted.
+  ids, citation formats) must never be reinterpreted. This is deliberately
+  instruction-level, like every content rule in both memory systems. A
+  code-level line filter at the sync boundary was tried and rejected: line
+  granularity strips the very line that carries the provenance marker while
+  leaving the rest of a multi-line entry behind as unattributable fragments —
+  worst for entries whose origin memory has since been deleted, which become
+  uninterpretable remnants. Only the consolidator can delimit semantic units,
+  so it must see the tags, not their absence. Untagged leakage degrades to
+  duplication, never to unsafe behavior (the consolidator's tool allowlist is
+  the safety boundary, D2).
 - Resource files are nested and untimestamped, so extension-resource pruning
   never touches them. Overlapping memory roots fail closed.
 
