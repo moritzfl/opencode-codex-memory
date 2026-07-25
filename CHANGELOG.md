@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-25
+
+### Added
+
+- **Share memory with the Codex CLI** (off by default). If you use both
+  OpenCode and Codex on the same machine, the plugin can now exchange
+  consolidated memories with Codex — in either or both directions, via
+  `codex_interop: { "import": true, "export": true }`. What one assistant
+  learns, the other picks up with its next consolidation. Codex needs no
+  configuration for this: its own files are never modified, and nothing is
+  written until Codex's memory feature is actually in use. Imported content
+  is tagged with its origin so memories don't ping-pong between the two
+  systems. (#1)
+- Easier configuration checking: `memory_inspect` now shows the options that
+  are actually in effect, flags unknown or malformed configuration keys, and
+  reports the state of the Codex exchange — just ask the agent to run it.
+
 ## [0.3.1] - 2026-07-16
 
 ### Fixed
