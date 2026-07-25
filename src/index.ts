@@ -31,6 +31,11 @@ let pluginOptions: {
   max_rollout_age_days: number
   max_rollouts_per_startup: number
   min_rollout_idle_hours: number
+  // opencode-specific (no codex MemoriesToml equivalent): two-way memory
+  // exchange with a local Codex CLI via the extensions mechanism. Modeled on
+  // codex's external_agent_memory_import feature, which is likewise
+  // default-off.
+  codex_interop: { import: boolean; export: boolean; codex_home?: string }
 } = {
   generate_memories: true,
   use_memories: true,
@@ -41,6 +46,7 @@ let pluginOptions: {
   max_rollout_age_days: 10,
   max_rollouts_per_startup: 2,
   min_rollout_idle_hours: 6,
+  codex_interop: { import: false, export: false },
 }
 
 // Deliberately uncached: openDb() is already a singleton, and caching a store
@@ -140,6 +146,7 @@ const KNOWN_OPTION_KEYS = new Set([
   "max_rollout_age_days",
   "max_rollouts_per_startup",
   "min_rollout_idle_hours",
+  "codex_interop",
 ])
 
 // codex clamps numeric knobs in From<MemoriesToml> for MemoriesConfig
@@ -170,6 +177,19 @@ function applyPluginOptions(opts: PluginOptions): void {
   if ("max_rollout_age_days" in opts) pluginOptions.max_rollout_age_days = clampInt(opts.max_rollout_age_days, 0, 90, 10)
   if ("max_rollouts_per_startup" in opts) pluginOptions.max_rollouts_per_startup = clampInt(opts.max_rollouts_per_startup, 1, 128, 2)
   if ("min_rollout_idle_hours" in opts) pluginOptions.min_rollout_idle_hours = clampInt(opts.min_rollout_idle_hours, 1, 48, 6)
+  if ("codex_interop" in opts) {
+    const raw = opts.codex_interop
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const o = raw as Record<string, unknown>
+      pluginOptions.codex_interop = {
+        import: o.import === true,
+        export: o.export === true,
+        ...(typeof o.codex_home === "string" && o.codex_home.length > 0 ? { codex_home: o.codex_home } : {}),
+      }
+    } else {
+      console.warn("[opencode-codex-memory] codex_interop must be an object like { import, export, codex_home }; ignored")
+    }
+  }
 }
 
 /**
@@ -491,6 +511,7 @@ async function triggerPhase2(): Promise<void> {
       maxUnusedDays: pluginOptions.max_unused_days,
       extensionRetentionDays: 7,
       consolidationModel: pluginOptions.consolidation_model,
+      codexInterop: pluginOptions.codex_interop,
     })
   } catch (err) {
     console.error("[opencode-codex-memory] phase2 error:", err)

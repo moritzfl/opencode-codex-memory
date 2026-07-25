@@ -12,18 +12,31 @@ import { consolidateViaSubagent } from "./llm.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
 import { checkRateLimit } from "./ratelimit.js"
+import { resolveCodexInterop, syncCodexImport, exportToCodexMemory, type CodexInteropOptions } from "./codex-interop.js"
 
 export interface Phase2Options {
   maxRaw: number
   maxUnusedDays: number
   extensionRetentionDays: number
   consolidationModel?: string
+  codexInterop?: CodexInteropOptions
 }
 
 export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
   maxRaw: 256,
   maxUnusedDays: 30,
   extensionRetentionDays: 7,
+}
+
+// Export runs only after a successful phase 2 (fresh, validated artifacts) and
+// must never fail the run — Codex's workspace is best-effort foreign territory.
+function maybeExportToCodex(interop: ReturnType<typeof resolveCodexInterop>): void {
+  if (!interop?.exportEnabled) return
+  try {
+    exportToCodexMemory(interop.codexMemoryRoot)
+  } catch (err) {
+    console.warn("[opencode-codex-memory] codex export failed:", err)
+  }
 }
 
 let phase2InFlight = false
@@ -43,6 +56,10 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") return { status: claim.type }
 
+    // Resolved once per claimed job (not per attempt): resolution warns on
+    // misconfiguration, and warning on every skipped attempt would be noise.
+    const interop = opts.codexInterop ? resolveCodexInterop(opts.codexInterop) : null
+
     try {
       ensureLayout()
 
@@ -61,6 +78,22 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)
 
+      // Codex-interop import: inside the claimed job (workspace mutations are
+      // lease-protected — pre-claim writes could race a running consolidator),
+      // after the baseline (copies must show up as diff, not be swallowed by a
+      // first-run baseline init; codex memory_import.rs orders prepare-then-
+      // copy the same way), before the diff capture so imported changes are
+      // consolidated in this very run. No explicit enqueue needed: the claim
+      // is time-gated, and the copies stay in the workspace diff until a
+      // consolidation succeeds. Never fails the run.
+      if (interop?.importEnabled) {
+        try {
+          syncCodexImport(interop.codexMemoryRoot)
+        } catch (err) {
+          console.warn("[opencode-codex-memory] codex import sync failed:", err)
+        }
+      }
+
       const diff = await captureWorkspaceDiff()
       // codex: early succeed only when there are no changes AND artifacts are
       // already valid. Invalid/empty summary (e.g. ensureLayout's empty file)
@@ -69,6 +102,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         const valid = validateConsolidationArtifacts()
         if (valid.ok) {
           store.markPhase2Succeeded(claim.ownershipToken, outputs)
+          maybeExportToCodex(interop)
           return { status: "no_workspace_changes" }
         }
         console.warn("[opencode-codex-memory] no workspace changes but artifacts invalid; running consolidator:", valid.reason)
@@ -129,6 +163,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
 
       store.markPhase2Succeeded(claim.ownershipToken, outputs)
       invalidateCache()
+      maybeExportToCodex(interop)
       return { status: "succeeded" }
     } catch (err) {
       store.markPhase2Failed(claim.ownershipToken, (err as Error).message)

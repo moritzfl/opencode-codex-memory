@@ -250,9 +250,36 @@ mappings:
       DELIBERATE DIVERGENCE: codex also has a default-off, under-development
       external-agent migration flow that explicitly synchronizes selected
       Claude project memories into extensions/external_agent_import and queues
-      consolidation. The port consumes generic extension instructions/resources
-      but has no equivalent host migration-selection surface, so it does not
-      discover, copy, synchronize, or delete external-agent memory files.
+      consolidation. The port has no host migration-selection surface for
+      Claude memories; its adaptation of that import pattern for Codex itself
+      lives in src/codex-interop.ts (see that mapping).
+  - ours: src/codex-interop.ts
+    theirs: codex-rs/external-agent-migration/src/memory_import.rs
+    note: >
+      DELIBERATE ADAPTATION, not a 1:1 port: reuses codex's external-agent
+      memory-import pattern (extensions/<name>/instructions.md + resources/,
+      byte-equality change detection, instructions refreshed on constant
+      change, source-gone removes resources) but with per-file in-place
+      replace instead of codex's whole-dir delete+rewrite (fixed 2-artifact
+      set; non-regular files at target paths are replaced, never written
+      through), and the source is Codex's own GLOBAL consolidated memory
+      (MEMORY.md + memory_summary.md), not per-project Claude memories — so
+      no scope.json, no project selection surface, no state-DB gating.
+      An unreachable codex home is NOT a deletion signal (only an existing
+      memories root with missing artifacts is), diverging from codex's
+      fatal-on-missing-home because the plugin must degrade quietly. Codex syncs out-of-band and enqueues
+      consolidation; the port syncs inside the claimed phase-2 job (after
+      baseline, before diff capture) because its claim is time-gated and
+      pre-claim workspace writes could race a running consolidator's lease.
+      Also adds an export direction with no codex equivalent: our consolidated
+      artifacts are written into $CODEX_HOME/memories/extensions/
+      opencode_import/ for codex's consolidator to merge via its generic
+      extensions contract (additive only; codex's workspace is never
+      bootstrapped and its state DB never touched). Instructions constants
+      adapt codex's EXTENSION_INSTRUCTIONS with cross-system provenance tags
+      ([from codex]/[from opencode]) as an echo guard. Default-off via the
+      opencode-specific codex_interop plugin option (codex's importer is
+      likewise default-off: Feature::ExternalAgentMemoryImport).
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >

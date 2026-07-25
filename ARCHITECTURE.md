@@ -167,6 +167,42 @@ database is never opened — not even read-only (see D4). No migration
 conflicts, no risk to opencode's data. Same isolation codex uses with its
 dedicated memories SQLite.
 
+### D6 — Codex interop via extensions (`src/codex-interop.ts`)
+
+Default-off two-way memory exchange with a local Codex CLI, built on the
+generic extensions contract instead of a second memory root. Both memory
+systems already render extension prompt blocks into their consolidation prompt
+whenever `extensions/` exists and instruct the consolidator to read every
+extension's `instructions.md` — so sharing is pure content, no read-path or
+schema change on either side. This is the same mechanism codex itself uses to
+import Claude memories (`external_agent_import` in
+codex-rs/external-agent-migration).
+
+- **Import** (`codex_interop.import`): inside each claimed phase-2 job —
+  after the baseline, before the diff capture — Codex's consolidated
+  `MEMORY.md`/`memory_summary.md` are byte-compared and copied into
+  `extensions/codex_import/resources/codex/`, so imported changes are
+  consolidated in the same run (codex `memory_import.rs` orders
+  prepare-workspace-then-copy the same way). Source-gone deletes the copies
+  so the workspace diff carries the forgetting signal.
+- **Export** (`codex_interop.export`): after a successful phase 2, our
+  validated artifacts are copied into
+  `$CODEX_HOME/memories/extensions/opencode_import/resources/opencode/` with
+  an instructions.md written for Codex's consolidator. Strictly additive:
+  never bootstraps Codex's workspace, never touches Codex's state DB — Codex
+  discovers the files through its own workspace diff.
+- **Echo guard**: both instructions files require a provenance tag
+  (`[from codex]` / `[from opencode]`) and forbid re-importing content
+  carrying the other side's tag; foreign metadata (thread UUIDs vs `ses_*`
+  ids, citation formats) must never be reinterpreted.
+- Resource files are nested and untimestamped, so extension-resource pruning
+  never touches them. Overlapping memory roots fail closed.
+
+The alternative — mounting Codex's workspace as a second, read-only memory
+root — was rejected: it would need source-aware tools, a split summary
+budget, and read-path changes, and it would strain the "memory is global, one
+root" invariant. The extension approach is pure content.
+
 ---
 
 ## Known gaps vs codex (accepted trade-offs)
