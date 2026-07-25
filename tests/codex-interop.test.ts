@@ -66,6 +66,32 @@ describe("resolveCodexInterop", () => {
       resolveCodexInterop({ import: true, export: true, codex_home: path.join(pluginMemoryRoot(), "nested") }),
     ).toBeNull()
   })
+
+  it("detects overlap through a symlinked codex home (inode identity)", () => {
+    const { resolveCodexInterop } = interop()
+    fs.mkdirSync(pluginMemoryRoot(), { recursive: true })
+    const link = path.join(TEST_ROOT, "aliased-home")
+    fs.symlinkSync(path.join(TEST_ROOT, "plugin"), link)
+    expect(resolveCodexInterop({ import: true, export: true, codex_home: link })).toBeNull()
+  })
+
+  it("decides case-aliased roots by filesystem behavior, not platform guess", () => {
+    const { resolveCodexInterop } = interop()
+    fs.mkdirSync(pluginMemoryRoot(), { recursive: true })
+    // Case-variant of the plugin data root ("plugin" → "PLUGIN").
+    const variantHome = path.join(TEST_ROOT, "PLUGIN")
+    const aliased = fs.existsSync(variantHome) // does this fs fold case?
+    const resolved = resolveCodexInterop({ import: true, export: true, codex_home: variantHome })
+    if (aliased) {
+      // case-insensitive volume: same directory → must fail closed
+      expect(resolved).toBeNull()
+    } else {
+      // case-sensitive volume: genuinely different directory → stays enabled
+      // (inode ground truth beats the lexical case-folding guess)
+      fs.mkdirSync(path.join(variantHome, "memories"), { recursive: true })
+      expect(resolveCodexInterop({ import: true, export: true, codex_home: variantHome })).not.toBeNull()
+    }
+  })
 })
 
 describe("syncCodexImport", () => {
