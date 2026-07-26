@@ -449,9 +449,8 @@ export const memory_add_note = tool({
   },
   async execute(args, ctx) {
     try {
-      // Writes under the root without per-path resolution; check the root.
       const root = assertMemoryRootSafe()
-      const notesDir = path.join(root, NOTES_DIR)
+      const notesDir = safeResolveMemoryPath(NOTES_DIR)
       fs.mkdirSync(notesDir, { recursive: true })
       const ts = new Date().toISOString()
       const slug = (args.title ?? `note-${ts}`)
@@ -464,14 +463,14 @@ export const memory_add_note = tool({
       const header = `# ${args.title ?? "Ad-hoc note"}\n\n- created: ${ts}\n- session: ${ctx.sessionID}\n\n`
       // Notes are append-only (codex create_new semantics): never overwrite an
       // existing note; disambiguate on collision instead.
-      let file = path.join(notesDir, `${stem}.md`)
+      let file = safeResolveMemoryPath(path.join(NOTES_DIR, `${stem}.md`))
       for (let i = 2; ; i++) {
         try {
           fs.writeFileSync(file, header + args.note + "\n", { flag: "wx" })
           break
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "EEXIST" || i > 20) throw err
-          file = path.join(notesDir, `${stem}-${i}.md`)
+          file = safeResolveMemoryPath(path.join(NOTES_DIR, `${stem}-${i}.md`))
         }
       }
       return {

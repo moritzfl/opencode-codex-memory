@@ -188,6 +188,20 @@ describe("path guard hardening", () => {
     expect(r.output).not.toContain("leak")
     expect(r.output).toContain("MEMORY.md")
   })
+
+  it("refuses to write an ad-hoc note through a symlinked notes directory", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    const notes = path.join(root, "extensions", "ad_hoc", "notes")
+    const outside = path.join(TEST_ROOT, "outside-notes")
+    fs.rmSync(notes, { recursive: true, force: true })
+    fs.mkdirSync(outside)
+    fs.symlinkSync(outside, notes)
+
+    const { memory_add_note } = require("../tools/memory.js")
+    const r = await memory_add_note.execute({ note: "must stay inside memory" }, CTX)
+    expect(r.output).toContain("symlinks are not allowed")
+    expect(fs.readdirSync(outside)).toEqual([])
+  })
 })
 
 describe("memory_search semantics", () => {

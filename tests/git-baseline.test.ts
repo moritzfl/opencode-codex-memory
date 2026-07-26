@@ -98,6 +98,18 @@ describe("git-baseline", () => {
     expect(diff.changes).toEqual([])
   })
 
+  it("replaces symlinked git metadata without writing through it", async () => {
+    const { ensureBaseline } = require("../src/git-baseline.js")
+    const outside = path.join(TEST_ROOT, "outside-git")
+    fs.mkdirSync(outside)
+    fs.writeFileSync(path.join(outside, "sentinel"), "untouched")
+    fs.symlinkSync(outside, memFile(".git"))
+
+    expect(await ensureBaseline()).toBe(true)
+    expect(fs.readFileSync(path.join(outside, "sentinel"), "utf8")).toBe("untouched")
+    expect(fs.lstatSync(memFile(".git")).isSymbolicLink()).toBe(false)
+  })
+
   it("removes the phase2 diff artifact before diffing and committing", async () => {
     const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
     expect(await ensureBaseline()).toBe(true)

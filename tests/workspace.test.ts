@@ -69,6 +69,32 @@ describe("workspace rendering", () => {
     expect(body).toContain("cwd: /Users/x/proj")
   })
 
+  it("refuses to write rollout summaries through a symlinked directory", () => {
+    const { writeRolloutSummaries } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    const outside = path.join(TEST_ROOT, "outside-rollouts")
+    fs.mkdirSync(root, { recursive: true })
+    fs.mkdirSync(outside)
+    fs.symlinkSync(outside, path.join(root, "rollout_summaries"))
+
+    expect(() => writeRolloutSummaries([OUTPUT])).toThrow("symlinks are not allowed")
+    expect(fs.readdirSync(outside)).toEqual([])
+  })
+
+  it("refuses to overwrite a symlinked generated artifact", () => {
+    const { rebuildRawMemories } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    const outside = path.join(TEST_ROOT, "outside.md")
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(outside, "outside")
+    fs.symlinkSync(outside, path.join(root, "raw_memories.md"))
+
+    expect(() => rebuildRawMemories([OUTPUT])).toThrow("symlinks are not allowed")
+    expect(fs.readFileSync(outside, "utf8")).toBe("outside")
+  })
+
   it("writes the empty-input placeholder when no outputs are selected", () => {
     const { ensureLayout, rebuildRawMemories } = require("../src/workspace.js")
     ensureLayout()
@@ -131,6 +157,30 @@ describe("validateConsolidationArtifacts", () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toMatch(/not a file/)
   })
+
+  it("rejects consolidated artifacts that are symlinks", () => {
+    const { ensureLayout, validateConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    ensureLayout()
+    const outsideMemory = path.join(TEST_ROOT, "outside-memory.md")
+    const outsideSummary = path.join(TEST_ROOT, "outside-summary.md")
+    fs.writeFileSync(outsideMemory, "# valid-looking memory\n")
+    fs.writeFileSync(outsideSummary, "v1\n\nvalid-looking summary\n")
+
+    fs.rmSync(path.join(memoryRoot(), "MEMORY.md"))
+    fs.symlinkSync(outsideMemory, path.join(memoryRoot(), "MEMORY.md"))
+    let result = validateConsolidationArtifacts()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/not a file/)
+
+    fs.rmSync(path.join(memoryRoot(), "MEMORY.md"))
+    fs.writeFileSync(path.join(memoryRoot(), "MEMORY.md"), "# MEMORY.md\n")
+    fs.rmSync(path.join(memoryRoot(), "memory_summary.md"))
+    fs.symlinkSync(outsideSummary, path.join(memoryRoot(), "memory_summary.md"))
+    result = validateConsolidationArtifacts()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/not a file/)
+  })
 })
 
 describe("pruneExtensionResources", () => {
@@ -150,5 +200,21 @@ describe("pruneExtensionResources", () => {
     expect(fs.readdirSync(notes).sort()).toEqual(["2020-01-01T00-00-00-old-note.md"])
     expect(fs.readdirSync(resources).sort()).toEqual(["2999-01-01T00-00-00_future-res.md", "untimestamped.md"])
     expect(fs.existsSync(path.join(memoryRoot(), "extensions", "ad_hoc", "instructions.md"))).toBe(true)
+  })
+
+  it("does not prune through a symlinked resources directory", () => {
+    const { ensureLayout, pruneExtensionResources } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    ensureLayout()
+    const extDir = path.join(memoryRoot(), "extensions", "unsafe")
+    const outside = path.join(TEST_ROOT, "outside-resources")
+    fs.mkdirSync(extDir)
+    fs.writeFileSync(path.join(extDir, "instructions.md"), "instructions")
+    fs.mkdirSync(outside)
+    fs.writeFileSync(path.join(outside, "2020-01-01T00-00-00-old.md"), "keep")
+    fs.symlinkSync(outside, path.join(extDir, "resources"))
+
+    pruneExtensionResources(7)
+    expect(fs.readFileSync(path.join(outside, "2020-01-01T00-00-00-old.md"), "utf8")).toBe("keep")
   })
 })

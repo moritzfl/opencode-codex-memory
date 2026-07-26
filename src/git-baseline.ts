@@ -30,9 +30,26 @@ function removeDiffArtifact(dir: string): void {
 
 async function ensureInit(dir: string): Promise<void> {
   const gitDir = path.join(dir, ".git")
+  let recreate = false
+  try {
+    recreate = containsSymlink(gitDir) || !fs.lstatSync(gitDir).isDirectory()
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
+  }
+  if (recreate) fs.rmSync(gitDir, { recursive: true, force: true })
   if (!fs.existsSync(gitDir)) {
     await isogit.init({ fs, dir })
   }
+}
+
+function containsSymlink(root: string): boolean {
+  const st = fs.lstatSync(root)
+  if (st.isSymbolicLink()) return true
+  if (!st.isDirectory()) return false
+  for (const name of fs.readdirSync(root)) {
+    if (containsSymlink(path.join(root, name))) return true
+  }
+  return false
 }
 
 // statusMatrix rows are [filepath, head, workdir, stage]; head !== workdir

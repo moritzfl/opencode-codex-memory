@@ -35,8 +35,24 @@ export function assertMemoryRootSafe(): string {
 
 export function safeResolveMemoryPath(rel: string): string {
   const root = assertMemoryRootSafe()
+  return safeResolveUnderRoot(root, rel)
+}
+
+/** Resolve a relative path under an arbitrary trusted root without following symlinks. */
+export function safeResolveUnderRoot(root: string, rel: string): string {
   if (path.isAbsolute(rel)) {
     throw new Error(`path escapes memory root: ${rel}`)
+  }
+  try {
+    const rootStat = fs.lstatSync(root)
+    if (rootStat.isSymbolicLink()) {
+      throw new Error(`root is a symlink; refusing write: ${root}`)
+    }
+    if (!rootStat.isDirectory()) {
+      throw new Error(`root is not a directory: ${root}`)
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
   }
   const parts = rel.split(/[\\/]+/).filter((p) => p.length > 0 && p !== ".")
   let current = root

@@ -167,6 +167,19 @@ describe("syncCodexImport", () => {
     expect(fs.readFileSync(path.join(resDir, "MEMORY.md"), "utf8")).toContain("codex fact")
   })
 
+  it("refuses to import through a symlinked extension directory", () => {
+    const { syncCodexImport } = interop()
+    seedCodexMemory()
+    const outside = path.join(TEST_ROOT, "outside-import")
+    const extensions = path.join(pluginMemoryRoot(), "extensions")
+    fs.mkdirSync(extensions, { recursive: true })
+    fs.mkdirSync(outside)
+    fs.symlinkSync(outside, path.join(extensions, "codex_import"))
+
+    expect(() => syncCodexImport(CODEX_MEM)).toThrow(/symlinks are not allowed/)
+    expect(fs.readdirSync(outside)).toEqual([])
+  })
+
   it("first-run ordering: baseline before sync surfaces copies as additions in the diff", async () => {
     const { syncCodexImport } = interop()
     const { ensureLayout } = require("../src/workspace.js")
@@ -233,5 +246,17 @@ describe("exportToCodexMemory", () => {
     expect(fs.readFileSync(path.join(extDir, "resources", "opencode", "MEMORY.md"), "utf8")).toContain("opencode fact")
     expect(fs.readFileSync(path.join(extDir, "resources", "opencode", "memory_summary.md"), "utf8")).toStartWith("v1")
     expect(exportToCodexMemory(CODEX_MEM)).toBe(false)
+  })
+
+  it("refuses to export through a symlinked extension directory", () => {
+    const { exportToCodexMemory } = interop()
+    seedPluginMemory()
+    fs.mkdirSync(path.join(CODEX_MEM, "extensions"), { recursive: true })
+    const outside = path.join(TEST_ROOT, "outside-export")
+    fs.mkdirSync(outside)
+    fs.symlinkSync(outside, path.join(CODEX_MEM, "extensions", "opencode_import"))
+
+    expect(() => exportToCodexMemory(CODEX_MEM)).toThrow(/symlinks are not allowed/)
+    expect(fs.readdirSync(outside)).toEqual([])
   })
 })

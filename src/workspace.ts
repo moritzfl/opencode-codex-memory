@@ -2,6 +2,7 @@ import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
+import { assertMemoryRootSafe, safeResolveMemoryPath } from "./path-guard.js"
 import type { Stage1Output } from "./store.js"
 import { DIFF_ARTIFACT, type WorkspaceDiff } from "./git-baseline.js"
 
@@ -34,21 +35,16 @@ Include the tag "[ad-hoc note]" after any information derived from this in your 
 `
 
 export function ensureLayout(): void {
-  const root = memoryRoot()
-  for (const dir of [
-    root,
-    path.join(root, ROLLOUT_DIR),
-    path.join(root, SKILLS_DIR),
-    path.join(root, EXTENSIONS_DIR),
-    path.join(root, ADHOC_NOTES_DIR),
-  ]) {
-    fs.mkdirSync(dir, { recursive: true })
+  const root = assertMemoryRootSafe()
+  fs.mkdirSync(root, { recursive: true })
+  for (const dir of [ROLLOUT_DIR, SKILLS_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]) {
+    fs.mkdirSync(safeResolveMemoryPath(dir), { recursive: true })
   }
-  const memoryMd = path.join(root, "MEMORY.md")
+  const memoryMd = safeResolveMemoryPath("MEMORY.md")
   if (!fs.existsSync(memoryMd)) fs.writeFileSync(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n", { flag: "w" })
-  const summary = path.join(root, "memory_summary.md")
+  const summary = safeResolveMemoryPath("memory_summary.md")
   if (!fs.existsSync(summary)) fs.writeFileSync(summary, "", { flag: "w" })
-  const adhocInstructions = path.join(root, EXTENSIONS_DIR, "ad_hoc", "instructions.md")
+  const adhocInstructions = safeResolveMemoryPath(path.join(EXTENSIONS_DIR, "ad_hoc", "instructions.md"))
   if (!fs.existsSync(adhocInstructions)) fs.writeFileSync(adhocInstructions, ADHOC_INSTRUCTIONS, { flag: "w" })
 }
 
@@ -61,7 +57,7 @@ export function ensureLayout(): void {
 export function validateConsolidationArtifacts(root: string = memoryRoot()): { ok: true } | { ok: false; reason: string } {
   const memoryPath = path.join(root, "MEMORY.md")
   try {
-    const st = fs.statSync(memoryPath)
+    const st = fs.lstatSync(memoryPath)
     if (!st.isFile()) return { ok: false, reason: `consolidated memory artifact is not a file: ${memoryPath}` }
   } catch {
     return { ok: false, reason: `missing consolidated memory artifact: ${memoryPath}` }
@@ -70,6 +66,9 @@ export function validateConsolidationArtifacts(root: string = memoryRoot()): { o
   const summaryPath = path.join(root, "memory_summary.md")
   let summary: string
   try {
+    if (!fs.lstatSync(summaryPath).isFile()) {
+      return { ok: false, reason: `memory summary artifact is not a file: ${summaryPath}` }
+    }
     summary = fs.readFileSync(summaryPath, "utf8")
   } catch {
     return { ok: false, reason: `missing memory summary artifact: ${summaryPath}` }
@@ -122,12 +121,12 @@ export function rebuildRawMemories(outputs: Stage1Output[]): string {
       content += "\n\n"
     }
   }
-  fs.writeFileSync(path.join(memoryRoot(), RAW_MEMORIES_FILE), content, { flag: "w" })
+  fs.writeFileSync(safeResolveMemoryPath(RAW_MEMORIES_FILE), content, { flag: "w" })
   return content
 }
 
 export function writeRolloutSummaries(outputs: Stage1Output[]): void {
-  const dir = path.join(memoryRoot(), ROLLOUT_DIR)
+  const dir = safeResolveMemoryPath(ROLLOUT_DIR)
   fs.mkdirSync(dir, { recursive: true })
   const keep = new Set(outputs.map((o) => `${rolloutSummaryFileStem(o)}.md`))
   for (const name of fs.readdirSync(dir)) {
@@ -136,7 +135,7 @@ export function writeRolloutSummaries(outputs: Stage1Output[]): void {
     }
   }
   for (const o of outputs) {
-    const file = path.join(dir, `${rolloutSummaryFileStem(o)}.md`)
+    const file = safeResolveMemoryPath(path.join(ROLLOUT_DIR, `${rolloutSummaryFileStem(o)}.md`))
     const body =
       `session_id: ${o.session_id}\n` +
       `updated_at: ${new Date(o.source_updated_at).toISOString()}\n` +
@@ -162,7 +161,7 @@ function resourceTimestamp(name: string): number | null {
 // instructions template says "Never delete a note file"). Instructions and
 // untimestamped files are never touched (mirrors prune_old_extension_resources).
 export function pruneExtensionResources(retentionDays: number): void {
-  const extensionsDir = path.join(memoryRoot(), EXTENSIONS_DIR)
+  const extensionsDir = safeResolveMemoryPath(EXTENSIONS_DIR)
   if (!fs.existsSync(extensionsDir)) return
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
   for (const extName of fs.readdirSync(extensionsDir)) {
@@ -172,14 +171,21 @@ export function pruneExtensionResources(retentionDays: number): void {
     try { extStat = fs.lstatSync(extDir) } catch { continue }
     if (!extStat.isDirectory()) continue
     if (!fs.existsSync(path.join(extDir, "instructions.md"))) continue
-    const resDir = path.join(extDir, "resources")
+    let resDir: string
+    try {
+      resDir = safeResolveMemoryPath(path.join(EXTENSIONS_DIR, extName, "resources"))
+    } catch {
+      continue
+    }
     let names: string[]
     try { names = fs.readdirSync(resDir) } catch { continue }
     for (const name of names) {
       if (!name.endsWith(".md")) continue
       const ts = resourceTimestamp(name)
       if (ts === null || ts > cutoff) continue
-      try { fs.unlinkSync(path.join(resDir, name)) } catch {}
+      try {
+        fs.unlinkSync(safeResolveMemoryPath(path.join(EXTENSIONS_DIR, extName, "resources", name)))
+      } catch {}
     }
   }
 }
@@ -209,7 +215,7 @@ export function writeWorkspaceDiff(diff: WorkspaceDiff): string {
     }
     rendered += "\n## Diff\n\n```diff\n" + body + (body.endsWith("\n") ? "" : "\n") + "```\n"
   }
-  const file = path.join(memoryRoot(), DIFF_ARTIFACT)
+  const file = safeResolveMemoryPath(DIFF_ARTIFACT)
   fs.writeFileSync(file, rendered, { flag: "w" })
   return file
 }

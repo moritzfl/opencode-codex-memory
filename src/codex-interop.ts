@@ -2,6 +2,7 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 import { memoryRoot } from "./paths.js"
+import { safeResolveUnderRoot } from "./path-guard.js"
 
 /**
  * Codex interop: memory exchange with an upstream Codex CLI installation on
@@ -248,9 +249,7 @@ function writeIfChanged(file: string, content: Buffer | string): boolean {
  * target workspace changed. Never creates the extension while the source has
  * nothing to offer.
  */
-function syncExtension(sourceRoot: string, extDir: string, subdir: string, instructions: string): boolean {
-  const resDir = path.join(extDir, "resources", subdir)
-
+function syncExtension(sourceRoot: string, targetRoot: string, extension: string, subdir: string, instructions: string): boolean {
   // An unreachable source ROOT is not a deletion signal: a missing/mistyped
   // codex home (or an env context without CODEX_HOME) must not trigger the
   // forgetting path. Keep existing copies untouched and do nothing.
@@ -259,6 +258,8 @@ function syncExtension(sourceRoot: string, extDir: string, subdir: string, instr
     rootIsDir = fs.statSync(sourceRoot).isDirectory()
   } catch {}
   if (!rootIsDir) return false
+  const extensionDir = safeResolveUnderRoot(targetRoot, path.join("extensions", extension))
+  const resDir = safeResolveUnderRoot(targetRoot, path.join("extensions", extension, "resources", subdir))
 
   const sourceAvailable = ARTIFACTS.some((name) => readIfFile(path.join(sourceRoot, name)) !== null)
   if (!sourceAvailable) {
@@ -272,17 +273,16 @@ function syncExtension(sourceRoot: string, extDir: string, subdir: string, instr
   }
 
   let changed = false
-  if (writeIfChanged(path.join(extDir, "instructions.md"), instructions)) changed = true
+  if (writeIfChanged(path.join(extensionDir, "instructions.md"), instructions)) changed = true
   for (const name of ARTIFACTS) {
     const source = readIfFile(path.join(sourceRoot, name))
     const target = path.join(resDir, name)
     if (source === null) {
-      if (readIfFile(target) !== null) {
-        try {
-          fs.unlinkSync(target)
-          changed = true
-        } catch {}
-      }
+      try {
+        fs.lstatSync(target)
+        fs.rmSync(target, { recursive: true, force: true })
+        changed = true
+      } catch {}
       continue
     }
     if (writeIfChanged(target, source)) changed = true
@@ -298,8 +298,7 @@ function syncExtension(sourceRoot: string, extDir: string, subdir: string, instr
  * Returns true when the plugin workspace changed.
  */
 export function syncCodexImport(codexMemoryRoot: string): boolean {
-  const extDir = path.join(memoryRoot(), "extensions", IMPORT_EXTENSION)
-  return syncExtension(codexMemoryRoot, extDir, "codex", IMPORT_INSTRUCTIONS)
+  return syncExtension(codexMemoryRoot, memoryRoot(), IMPORT_EXTENSION, "codex", IMPORT_INSTRUCTIONS)
 }
 
 /**
@@ -321,6 +320,5 @@ export function exportToCodexMemory(codexMemoryRoot: string): boolean {
   if (!rootStat.isDirectory()) return false
   const summary = readIfFile(path.join(memoryRoot(), "memory_summary.md"))
   if (summary === null || summary.toString("utf8").split(/\r?\n/, 1)[0] !== "v1") return false
-  const extDir = path.join(codexMemoryRoot, "extensions", EXPORT_EXTENSION)
-  return syncExtension(memoryRoot(), extDir, "opencode", EXPORT_INSTRUCTIONS)
+  return syncExtension(memoryRoot(), codexMemoryRoot, EXPORT_EXTENSION, "opencode", EXPORT_INSTRUCTIONS)
 }
