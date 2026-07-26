@@ -46,21 +46,26 @@ export function isPhase2InFlight(): boolean {
   return phase2InFlight
 }
 
-export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAULT_PHASE2_OPTIONS): Promise<{ status: string }> {
+export async function runPhase2(
+  store: MemoryStore,
+  opts: Phase2Options = DEFAULT_PHASE2_OPTIONS,
+  rateLimitCheck: typeof checkRateLimit = checkRateLimit,
+): Promise<{ status: string }> {
   if (phase2InFlight) return { status: "already_running" }
   phase2InFlight = true
   try {
-    const rl = await checkRateLimit("phase2")
+    const rl = await rateLimitCheck("phase2")
     if (!rl.ok) return { status: "skipped_rate_limit" }
 
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") return { status: claim.type }
 
-    // Resolved once per claimed job (not per attempt): resolution warns on
-    // misconfiguration, and warning on every skipped attempt would be noise.
-    const interop = opts.codexInterop ? resolveCodexInterop(opts.codexInterop) : null
-
     try {
+      // Resolved once per claimed job (not per attempt): resolution warns on
+      // misconfiguration, and warning on every skipped attempt would be noise.
+      // Keep this inside the claimed-job try so resolution failures release
+      // the lease instead of leaving the row running until it expires.
+      const interop = opts.codexInterop ? resolveCodexInterop(opts.codexInterop) : null
       ensureLayout()
 
       // Preserves an existing baseline (only initializes a missing one): the
@@ -124,10 +129,8 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
         }
       }, 90_000)
 
-      let agentCompleted = false
       try {
         await consolidateViaSubagent(memoryRoot(), DIFF_ARTIFACT, opts.consolidationModel)
-        agentCompleted = true
       } finally {
         clearInterval(heartbeat)
       }
@@ -141,11 +144,6 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
         store.markPhase2Failed(claim.ownershipToken, "ownership lost")
         return { status: "heartbeat_lost" }
-      }
-
-      if (!agentCompleted) {
-        store.markPhase2Failed(claim.ownershipToken, "failed_agent")
-        return { status: "failed_agent" }
       }
 
       // codex failed_invalid_artifacts: do not reset baseline on bad output so
@@ -166,7 +164,7 @@ export async function runPhase2(store: MemoryStore, opts: Phase2Options = DEFAUL
       maybeExportToCodex(interop)
       return { status: "succeeded" }
     } catch (err) {
-      store.markPhase2Failed(claim.ownershipToken, (err as Error).message)
+      store.markPhase2Failed(claim.ownershipToken, err)
       return { status: "failed" }
     }
   } finally {

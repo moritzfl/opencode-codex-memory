@@ -52,6 +52,15 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+function failureMessage(error: unknown): string {
+  try {
+    if (error instanceof Error) return String(error.message ?? "unknown error")
+    return String(error ?? "unknown error")
+  } catch {
+    return "unknown error"
+  }
+}
+
 export class MemoryStore {
   constructor(private db: Database = openDb()) {}
 
@@ -212,7 +221,8 @@ export class MemoryStore {
     }).immediate()
   }
 
-  markStage1Failed(sessionId: string, ownershipToken: string, error: string): void {
+  markStage1Failed(sessionId: string, ownershipToken: string, error: unknown): void {
+    const message = failureMessage(error)
     this.db
       .prepare(
         `UPDATE memory_jobs SET
@@ -224,7 +234,7 @@ export class MemoryStore {
            lease_until = NULL
          WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
       )
-      .run(error.slice(0, 4000), nowSec() + STAGE1_RETRY_DELAY_SECONDS, nowSec(), sessionId, ownershipToken)
+      .run(message.slice(0, 4000), nowSec() + STAGE1_RETRY_DELAY_SECONDS, nowSec(), sessionId, ownershipToken)
   }
 
   /**
@@ -348,7 +358,7 @@ export class MemoryStore {
         )
         .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
       if (res.changes === 0) return
-      this.db.exec("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
+      this.db.run("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
       const mark = this.db.prepare(
         `UPDATE memory_stage1_outputs
          SET selected_for_phase2 = 1, selected_for_phase2_source_updated_at = ?
@@ -370,7 +380,8 @@ export class MemoryStore {
     return row
   }
 
-  markPhase2Failed(ownershipToken: string, error: string): void {
+  markPhase2Failed(ownershipToken: string, error: unknown): void {
+    const message = failureMessage(error)
     const res = this.db
       .prepare(
         `UPDATE memory_jobs SET
@@ -382,7 +393,7 @@ export class MemoryStore {
            lease_until = NULL
          WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
       )
-      .run(error.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec(), ownershipToken)
+      .run(message.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec(), ownershipToken)
     if (res.changes > 0) return
     // codex mark_global_phase2_job_failed_if_unowned: if the owned update
     // matched nothing, recover a stuck running row that lost its owner
@@ -398,7 +409,7 @@ export class MemoryStore {
            lease_until = NULL
          WHERE kind='memory_consolidate_global' AND job_key='global' AND status='running' AND ownership_token IS NULL`,
       )
-      .run(error.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec())
+      .run(message.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec())
   }
 
   /**
@@ -453,8 +464,8 @@ export class MemoryStore {
    */
   clearMemoryData(): void {
     this.db.transaction(() => {
-      this.db.exec("DELETE FROM memory_stage1_outputs")
-      this.db.exec("DELETE FROM memory_jobs")
+      this.db.run("DELETE FROM memory_stage1_outputs")
+      this.db.run("DELETE FROM memory_jobs")
     }).immediate()
   }
 

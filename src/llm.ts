@@ -110,6 +110,11 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
       }),
     ])
     if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
+    const promptError = (res.data as { info?: { error?: { name?: string; data?: { message?: string } } } }).info?.error
+    if (promptError) {
+      const detail = promptError.data?.message
+      throw new Error(`sub-agent prompt failed${promptError.name ? ` (${promptError.name})` : ""}${detail ? `: ${detail}` : ""}`)
+    }
     return res.data
   } finally {
     clearTimeout(timer)

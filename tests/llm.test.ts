@@ -160,4 +160,16 @@ describe("extractViaSubagent (structured output)", () => {
     stubClient(() => ({ data: { info: { structured: { raw_memory: "", rollout_summary: "", rollout_slug: "" } } } }))
     expect(await extractViaSubagent("ses_3", "transcript")).toBeNull()
   })
+
+  it("rejects an HTTP-success response whose assistant message contains an error", async () => {
+    stubClient(() => ({
+      data: {
+        info: {
+          error: { name: "ProviderAuthError", data: { message: "expired key" } },
+          structured: { raw_memory: "partial", rollout_summary: "partial", rollout_slug: "partial" },
+        },
+      },
+    }))
+    expect(extractViaSubagent("ses_error", "transcript")).rejects.toThrow("ProviderAuthError")
+  })
 })

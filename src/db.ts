@@ -49,26 +49,31 @@ export function openDb(): Database {
   if (dbInstance) return dbInstance
   const dbPath = memoryDbPath()
   const db = new Database(dbPath, { create: true, readwrite: true, strict: false })
-  // Match codex's memories-DB open options (runtime.rs): WAL, NORMAL sync,
-  // 5s busy timeout for cross-process access, incremental auto-vacuum.
-  db.exec("PRAGMA journal_mode=WAL")
-  db.exec("PRAGMA synchronous=NORMAL")
-  db.exec("PRAGMA busy_timeout=5000")
-  db.exec("PRAGMA auto_vacuum=INCREMENTAL")
-  runMigrations(db)
-  dbInstance = db
-  return db
+  try {
+    // Match codex's memories-DB open options (runtime.rs): WAL, NORMAL sync,
+    // 5s busy timeout for cross-process access, incremental auto-vacuum.
+    db.run("PRAGMA journal_mode=WAL")
+    db.run("PRAGMA synchronous=NORMAL")
+    db.run("PRAGMA busy_timeout=5000")
+    db.run("PRAGMA auto_vacuum=INCREMENTAL")
+    runMigrations(db)
+    dbInstance = db
+    return db
+  } catch (err) {
+    db.close()
+    throw err
+  }
 }
 
 function runMigrations(db: Database): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_version (
+  db.run(`CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL,
     applied_at INTEGER NOT NULL
   )`)
   const current = db.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").get() as { version: number } | null
   const currentVersion = current?.version ?? 0
   if (currentVersion >= 1) return
-  for (const stmt of SCHEMA_V1) db.exec(stmt)
+  for (const stmt of SCHEMA_V1) db.run(stmt)
   db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(1, Date.now())
 }
 

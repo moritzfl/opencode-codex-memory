@@ -75,7 +75,7 @@ describe("MemoryStore stage1", () => {
     const storeA = new MemoryStore()
     expect(storeA.claimStage1Jobs(many, undefined, 2).length).toBe(2)
     const dbB = new Database(memoryDbPath(), { readwrite: true })
-    dbB.exec("PRAGMA busy_timeout=5000")
+    dbB.run("PRAGMA busy_timeout=5000")
     try {
       const storeB = new MemoryStore(dbB)
       expect(storeB.claimStage1Jobs(many, undefined, 2).length).toBe(0)
@@ -219,6 +219,20 @@ describe("MemoryStore stage1", () => {
     expect(job.lease_until).toBeNull()
   })
 
+  it("finalizes a failed job even when the rejection was not an Error", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const token = claimOne(store, "s1")
+    store.markStage1Failed("s1", token, Object.create(null))
+    const job = openDb()
+      .prepare("SELECT status, lease_until, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'")
+      .get() as { status: string; lease_until: number | null; last_error: string }
+    expect(job.status).toBe("pending")
+    expect(job.lease_until).toBeNull()
+    expect(job.last_error).toBe("unknown error")
+  })
+
   it("blocks retry during backoff but lets newer session activity reset exhausted retries", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")
@@ -321,6 +335,23 @@ describe("MemoryStore phase2", () => {
     openDb().prepare("UPDATE memory_jobs SET retry_at = NULL WHERE kind='memory_consolidate_global'").run()
     // Backoff cleared: claimable immediately, no 6h cooldown for failures.
     expect(store.claimGlobalPhase2Job().type).toBe("claimed")
+  })
+
+  it("finalizes a failed global job even when the rejection was not an Error", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    const malformed: any = new Error("ignored")
+    malformed.message = Object.create(null)
+    store.markPhase2Failed(claim.ownershipToken, malformed)
+    const job = openDb()
+      .prepare("SELECT status, lease_until, last_error FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; lease_until: number | null; last_error: string }
+    expect(job.status).toBe("failed")
+    expect(job.lease_until).toBeNull()
+    expect(job.last_error).toBe("unknown error")
   })
 
   it("failure fallback recovers a stuck unowned running row (codex failed_if_unowned)", () => {

@@ -77,7 +77,7 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
         generated_at: Date.now(),
       })
     } catch (err) {
-      store.markStage1Failed(sid, claim.ownershipToken, (err as Error).message)
+      store.markStage1Failed(sid, claim.ownershipToken, err)
     }
   })
 }
