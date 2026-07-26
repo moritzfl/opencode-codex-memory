@@ -102,8 +102,10 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
 
 ## How it works
 
-You don't need to know any of this to use the plugin, but it's a small system
-and the shape is easy to hold in your head. It's Codex's design, ported as-is.
+You don't need to know any of this to use the plugin. The design is Codex's,
+ported as-is, and it does what any memory system has to do: decide what's worth
+keeping, write it down so it can be found again, surface the right piece at the
+right moment, and forget what stopped being useful.
 
 Think of it as three jobs: two background writers and one reader. **Nothing here
 runs while you're waiting for a reply** — an assistant that stops to take notes
