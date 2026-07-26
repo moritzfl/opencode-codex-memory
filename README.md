@@ -1,20 +1,20 @@
 # OpenCode Codex Memory
 
-Persistent memory for [opencode](https://opencode.ai): your agent remembers what
+Persistent memory for [OpenCode](https://opencode.ai): your agent remembers what
 it learned in past sessions — your conventions, your projects, the decisions you
 made — and brings that context into new conversations automatically.
 
 Despite the name: **no codex subscription or OpenAI account is needed.** This
 project is a faithful port of the memory system in OpenAI's codex. It works out
 of the box with zero extra configuration and uses whatever models you already
-have set up in opencode.
+have set up in OpenCode.
 
 **Local-first by design.** Memory is plain markdown files plus a small SQLite
 database on your own machine — no memory service to sign up for, no MCP server,
 no separate process, no sync. Installing it is one line in your `opencode.json`;
 from there everything lives under `~/.local/share/opencode/`, so you can read it,
 grep it, edit it, or delete it like anything else you own. Nothing leaves your
-machine beyond the model calls opencode already makes.
+machine beyond the model calls OpenCode already makes.
 
 If you *do* also use the Codex CLI: the plugin can share memory with Codex in
 both directions — what one assistant learns on your machine, the other picks
@@ -23,13 +23,13 @@ up. Off by default, one config flag per direction; see
 
 ## Why
 
-By default every opencode session starts from zero. You re-explain your build
+By default every OpenCode session starts from zero. You re-explain your build
 commands, your code style, and the quirks of each repo over and over.
 
 This plugin closes that loop. It reviews finished sessions in the
 background, keeps what's durable — your preferences, how a repo is built, what
 worked and what didn't — and puts that context back in front of the agent in
-later conversations. You don't manage any of it; opencode just gets more useful
+later conversations. You don't manage any of it; OpenCode just gets more useful
 the more you use it.
 
 If you want the mental model before the details, jump to
@@ -45,10 +45,10 @@ If you want the mental model before the details, jump to
    }
    ```
 
-   **Pin the version** (here and for any opencode plugin). opencode installs a
+   **Pin the version** (here and for any OpenCode plugin). OpenCode installs a
    plugin spec once into its package cache and never re-resolves it, so a bare
    `"opencode-codex-memory"` is not "always latest" — it freezes at whatever
-   was latest the first time opencode started. With a version tag you decide
+   was latest the first time OpenCode started. With a version tag you decide
    which release runs, and bumping the tag installs the new one. Check
    [npm](https://www.npmjs.com/package/opencode-codex-memory) for the current
    version.
@@ -61,7 +61,7 @@ If you want the mental model before the details, jump to
    immediately (codex ships the same system behind a default-off feature flag
    with a consent prompt; a standalone memory plugin *is* the consent).
 
-Requires opencode 1.18 or newer (official release). Git is bundled
+Requires OpenCode 1.18 or newer (official release). Git is bundled
 (`isomorphic-git`) — no `git` binary or any other external tool needed.
 
 The two restricted sub-agents that do the background learning (`memorize`,
@@ -75,11 +75,11 @@ override `memorize`, keep an `external_directory` allow for
 `~/.local/share/opencode/memories/*` (e.g.
 `"external_directory": { "$HOME/.local/share/opencode/memories/*": "allow" }`
 after the wildcard deny) — the memory folder lives outside your project, and
-without that grant opencode blocks the consolidator's file access.
+without that grant OpenCode blocks the consolidator's file access.
 
 ## Try it
 
-Just use opencode normally. Sessions that have been idle for a few hours get
+Just use OpenCode normally. Sessions that have been idle for a few hours get
 reviewed in the background and memory starts building up — you don't have to do
 anything. Come back the next day and ask something like *"what do you know about how I
 work?"* or *"what was I doing in this repo?"* and the agent draws on what it
@@ -120,7 +120,7 @@ Sessions are independent, so this part is easy to parallelize and to retry when
 it fails.
 
 **Phase 2 — merge all those notes into one memory.** Every few hours at most
-(and only one run at a time across all your opencode windows), a second pass
+(and only one run at a time across all your OpenCode windows), a second pass
 takes the most relevant per-session notes and rewrites the actual memory files:
 `MEMORY.md` as the full index, `memory_summary.md` as the short version, and
 `skills/` for procedures worth repeating. This is where the interesting work
@@ -150,7 +150,7 @@ finds out which of its own notes were worth writing.
 
 ```
 ~/.local/share/opencode/
-├── memory.db                       # the plugin's own database (opencode's data is only accessed via its API)
+├── memory.db                       # the plugin's own database (OpenCode's data is only accessed via its API)
 └── memories/
     ├── memory_summary.md           # compact summary injected into the system prompt
     ├── MEMORY.md                   # searchable index of everything learned
@@ -159,7 +159,7 @@ finds out which of its own notes were worth writing.
     └── extensions/ad_hoc/notes/    # things you explicitly asked it to remember
 ```
 
-The location follows opencode's own data directory — `$XDG_DATA_HOME/opencode`
+The location follows OpenCode's own data directory — `$XDG_DATA_HOME/opencode`
 when that's set, otherwise `~/.local/share/opencode` (same resolution on macOS,
 Linux, and Windows).
 
@@ -174,7 +174,7 @@ those too.)
   otherwise: codex keeps memory storage behind a backend interface whose only
   implementation today is the local filesystem, and this port implements that
   path and nothing else. Nothing is sent anywhere except through your existing
-  opencode provider, using your existing credentials; the plugin holds no keys
+  OpenCode provider, using your existing credentials; the plugin holds no keys
   of its own.
 - **Secrets are redacted** (API keys, tokens, private keys, passwords) from
   session transcripts and extracted memories before anything is written or sent
@@ -202,8 +202,8 @@ codex's `[memories]` config so the two stay easy to compare:
 | `use_memories` | `true` | Inject the memory summary into the system prompt |
 | `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_list`/`memory_add_note` tools |
 | `disable_on_external_context` | `false` | Exclude sessions that used web/MCP tools from memory |
-| `extract_model` | opencode `small_model`, else see below | Model used for per-session extraction |
-| `consolidation_model` | opencode `model`, else see below | Model used for consolidation |
+| `extract_model` | OpenCode `small_model`, else see below | Model used for per-session extraction |
+| `consolidation_model` | OpenCode `model`, else see below | Model used for consolidation |
 | `max_raw_memories_for_consolidation` | `256` | How many raw memories feed each consolidation pass |
 | `max_rollout_age_days` | `10` | Ignore sessions older than this for extraction |
 | `min_rollout_idle_hours` | `6` | How long a session must be idle before it's eligible |
@@ -221,7 +221,7 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 }
 ```
 
-See the [opencode plugin docs](https://opencode.ai/docs/plugins/) for details.
+See the [OpenCode plugin docs](https://opencode.ai/docs/plugins/) for details.
 
 Numeric options are clamped to codex's valid ranges; unknown option keys are
 ignored with a warning. Setting `use_memories: false` also hides the memory
@@ -235,17 +235,17 @@ interop state. A mistyped option shows up there twice: as a warning, and as
 the default value appearing where you expected your setting.
 
 Model selection mirrors codex's cheap-extraction / capable-consolidation
-split using opencode's own concepts: when `extract_model` is unset, the
+split using OpenCode's own concepts: when `extract_model` is unset, the
 `small_model` from your `opencode.json` is used (codex uses `gpt-5.4-mini`);
 when `consolidation_model` is unset, your main `model` is used (codex uses
 `gpt-5.4`). If neither is configured, the learning sub-agents fall back to
 their own agent-level `model` (if you defined one), else the provider default.
-(opencode's *automatic* small-model pick is internal to opencode and not
+(OpenCode's *automatic* small-model pick is internal to OpenCode and not
 exposed to plugins — set `small_model` explicitly to get the cheap extraction
 path.)
 
 The full precedence per phase: plugin option (`extract_model` /
-`consolidation_model`) → opencode config (`small_model` / `model`) → a `model`
+`consolidation_model`) → OpenCode config (`small_model` / `model`) → a `model`
 on your own `memorize-extract`/`memorize` agent definition, if you overrode
 one → the provider's default model. Note that the first two pass the model
 explicitly, so they win over an agent-level `model`.
@@ -259,7 +259,7 @@ explicitly, so they win over an agent-level `model`.
 > file-based mode — the agent reads the memory files with its normal file
 > tools and writes "remember this" notes directly into
 > `extensions/ad_hoc/notes/`. Caveat: the memory folder lives outside your
-> project, so opencode raises an `external_directory` permission prompt the
+> project, so OpenCode raises an `external_directory` permission prompt the
 > first time an agent touches it (allow-always covers later access); agents
 > whose permissions deny that ask cannot use file-based mode. The dedicated
 > tools have no such friction — that's why they are the default. The
@@ -331,11 +331,11 @@ mirrors that decision rather than layering scoping back on top.
 ## Contributing
 
 The port follows codex closely: same two-phase pipeline, same on-disk artifacts,
-same prompts (adapted only where opencode differs). If you want the full design
+same prompts (adapted only where OpenCode differs). If you want the full design
 and the trade-offs, see [`ARCHITECTURE.md`](./ARCHITECTURE.md); contributor
 guidance lives in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and
 [`AGENTS.md`](./AGENTS.md) — in short: this repo exists to port codex's memory
-system to opencode, and PRs that break that parity will be rejected.
+system to OpenCode, and PRs that break that parity will be rejected.
 
 ## License
 
