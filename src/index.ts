@@ -14,8 +14,12 @@ import path from "path"
 
 let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
-// Configured MCP server names, fetched lazily; null until first successful fetch.
-let mcpServerNames: Set<string> | null = null
+const externalContextCalls = new Map<string, boolean>()
+const MAX_TRACKED_TOOL_CALLS = 500
+
+function externalContextCallKey(sessionID: string, callID: string): string {
+  return `${sessionID}\0${callID}`
+}
 
 // Deliberately uncached: openDb() is already a singleton, and caching a store
 // here would hold a stale handle across closeDb() (e.g. after memory_reset).
@@ -96,6 +100,7 @@ export default {
   async server(input: PluginInput, opts?: PluginOptions) {
     setPluginInput(input)
     pluginClient = input.client
+    externalContextCalls.clear()
     if (opts) applyPluginOptions(opts)
     void cleanupOldSubSessions().catch(() => {})
     return buildHooks()
@@ -165,26 +170,28 @@ export function applyPluginOptions(opts: PluginOptions): void {
  * codex marks every MCP server as memory-polluting unconditionally
  * (codex-mcp server.rs pollutes_memory: true). opencode registers MCP tools
  * as "<server>_<tool>", so match tool names against the configured server
- * list. Fails closed to the web-tools-only check when the list is unavailable.
+ * list. Query live status so runtime MCP changes cannot escape pollution
+ * marking. Falls back to the web-tools-only check when status is unavailable.
  */
-async function isExternalContextTool(toolName: string): Promise<boolean> {
+async function classifyExternalContextTool(toolName: string): Promise<boolean | null> {
   if (toolName === "websearch" || toolName === "webfetch") return true
-  if (!mcpServerNames && pluginClient) {
-    try {
-      const res = await (pluginClient as any).mcp.status()
-      const servers = (res as any)?.data ?? res
-      if (servers && typeof servers === "object") {
-        mcpServerNames = new Set(Object.keys(servers))
-      }
-    } catch {
-      // MCP status unavailable (older opencode); keep web-tools-only checks.
+  if (!pluginClient) return null
+  try {
+    const res = await (pluginClient as any).mcp.status()
+    if ((res as any)?.error) return null
+    const servers = (res as any)?.data
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
+    for (const [server, status] of Object.entries(servers)) {
+      if (!status || typeof status !== "object" || typeof (status as any).status !== "string") continue
+      // Mirrors OpenCode's McpCatalog.sanitize when constructing tool names.
+      const toolPrefix = server.replace(/[^a-zA-Z0-9_-]/g, "_")
+      if (toolName.startsWith(`${toolPrefix}_`)) return true
     }
+    return false
+  } catch {
+    // MCP status unavailable (older OpenCode); keep web-tools-only checks.
+    return null
   }
-  if (!mcpServerNames) return false
-  for (const server of mcpServerNames) {
-    if (toolName.startsWith(`${server}_`)) return true
-  }
-  return false
 }
 
 /**
@@ -241,7 +248,9 @@ function buildHooks() {
   ): Promise<void> {
     try {
       if (!pluginOptions.use_memories) return
-      if (input.sessionID && isMemorySubSession(input.sessionID)) return
+      // OpenCode also invokes this hook while generating agent definitions,
+      // without a session. Memory belongs only in real conversation prompts.
+      if (!input.sessionID || isMemorySubSession(input.sessionID)) return
       ensureMemoryLayout()
       const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
       if (memoryPrompt) {
@@ -334,14 +343,38 @@ function buildHooks() {
     }
   },
 
-  // Dedicated plugin hook (NOT an event-bus type): fires after every tool
-  // call. Mirrors codex: external context (web search or any MCP tool) only
-  // pollutes the session's memory when disable_on_external_context is
-  // enabled. Off by default.
+  // Dedicated plugin hooks (NOT event-bus types): capture external-context
+  // classification before each call and mark memory after successful calls.
+  // Pollution remains gated by disable_on_external_context, which is off by
+  // default.
+  async "tool.execute.before"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
+    try {
+      if (!pluginOptions.disable_on_external_context || !input.callID) return
+      const key = externalContextCallKey(input.sessionID, input.callID)
+      externalContextCalls.delete(key)
+      const classification = await classifyExternalContextTool(input.tool)
+      if (classification === null) return
+      externalContextCalls.set(key, classification)
+      if (externalContextCalls.size > MAX_TRACKED_TOOL_CALLS) {
+        const oldest = externalContextCalls.keys().next().value
+        if (oldest !== undefined) externalContextCalls.delete(oldest)
+      }
+    } catch (err) {
+      console.error("[opencode-codex-memory] tool.execute.before error:", err)
+    }
+  },
+
   async "tool.execute.after"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
     try {
+      const key = externalContextCallKey(input.sessionID, input.callID)
+      const hasCapturedClassification = Boolean(input.callID) && externalContextCalls.has(key)
+      const capturedClassification = input.callID ? externalContextCalls.get(key) : undefined
+      if (input.callID) externalContextCalls.delete(key)
       if (!pluginOptions.disable_on_external_context) return
-      if (input.sessionID && (await isExternalContextTool(input.tool))) {
+      const isExternal = hasCapturedClassification
+        ? capturedClassification === true
+        : (await classifyExternalContextTool(input.tool)) === true
+      if (input.sessionID && isExternal) {
         getStore().markPolluted(input.sessionID)
       }
     } catch (err) {

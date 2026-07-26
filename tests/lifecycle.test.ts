@@ -10,8 +10,78 @@ describe("hook wiring", () => {
     // Regression: pollution marking once lived inside the event() bus handler
     // under a nonexistent "tool.execute.after" event type and never fired.
     const hooks = (await plugin.server({ client: {} } as any, undefined)) as Record<string, unknown>
+    expect(typeof hooks["tool.execute.before"]).toBe("function")
     expect(typeof hooks["tool.execute.after"]).toBe("function")
     expect(typeof hooks.event).toBe("function")
+  })
+
+  it("uses live sanitized MCP server names for pollution marking", async () => {
+    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-mcp-pollution-"))
+    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    let statusResponse: unknown = { data: { "first.server": { status: "connected" } } }
+    try {
+      require("../src/db.js").closeDb()
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
+      const hooks = (await plugin.server(
+        { client: { mcp: { status: async () => statusResponse } } } as any,
+        { disable_on_external_context: true } as any,
+      )) as any
+
+      await hooks["tool.execute.before"]({ tool: "first_server_tool", sessionID: "ses_first", callID: "call_1" })
+      statusResponse = { data: {} }
+      await hooks["tool.execute.after"]({ tool: "first_server_tool", sessionID: "ses_first", callID: "call_1" })
+      const { MemoryStore } = require("../src/store.js")
+      expect(new MemoryStore().getMemoryMode("ses_first")).toBe("polluted")
+
+      statusResponse = { data: { "added.later": { status: "connected" } } }
+      await hooks["tool.execute.before"]({ tool: "added_later_tool", sessionID: "ses_added", callID: "call_2" })
+      await hooks["tool.execute.after"]({ tool: "added_later_tool", sessionID: "ses_added", callID: "call_2" })
+      expect(new MemoryStore().getMemoryMode("ses_added")).toBe("polluted")
+
+      statusResponse = { data: { first: { status: "connected" } } }
+      await hooks["tool.execute.before"]({ tool: "first_tool", sessionID: "ses_reused_external", callID: "call_reused" })
+      statusResponse = { data: {} }
+      await hooks["tool.execute.before"]({ tool: "local_tool", sessionID: "ses_reused_local", callID: "call_reused" })
+      await hooks["tool.execute.after"]({ tool: "first_tool", sessionID: "ses_reused_external", callID: "call_reused" })
+      await hooks["tool.execute.after"]({ tool: "local_tool", sessionID: "ses_reused_local", callID: "call_reused" })
+      expect(new MemoryStore().getMemoryMode("ses_reused_external")).toBe("polluted")
+      expect(new MemoryStore().getMemoryMode("ses_reused_local")).toBeNull()
+
+      statusResponse = { data: undefined, error: { message: "status failed" } }
+      await hooks["tool.execute.before"]({ tool: "error_tool", sessionID: "ses_error", callID: "call_3" })
+      await hooks["tool.execute.after"]({ tool: "error_tool", sessionID: "ses_error", callID: "call_3" })
+      expect(new MemoryStore().getMemoryMode("ses_error")).toBeNull()
+    } finally {
+      await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
+      require("../src/db.js").closeDb()
+      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+      fs.rmSync(testRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("does not inject memory into the sessionless agent-generation hook", async () => {
+    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-system-hook-"))
+    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    try {
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
+      const root = path.join(testRoot, "memories")
+      fs.mkdirSync(root, { recursive: true })
+      fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\nremember this\n")
+      const hooks = (await plugin.server({ client: {} } as any, { use_memories: true } as any)) as any
+
+      const agentOutput = { system: [] as string[] }
+      await hooks["experimental.chat.system.transform"]({ model: {} }, agentOutput)
+      expect(agentOutput.system).toEqual([])
+
+      const sessionOutput = { system: [] as string[] }
+      await hooks["experimental.chat.system.transform"]({ sessionID: "ses_real", model: {} }, sessionOutput)
+      expect(sessionOutput.system.join("\n")).toContain("remember this")
+    } finally {
+      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+      fs.rmSync(testRoot, { recursive: true, force: true })
+    }
   })
 })
 
