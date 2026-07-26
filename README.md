@@ -53,6 +53,16 @@ If you want the mental model before the details, jump to
    [npm](https://www.npmjs.com/package/opencode-codex-memory) for the current
    version.
 
+   Since updating is then just editing version numbers, it's worth automating
+   with a custom command — one that reads your `opencode.json`, compares each
+   pin against npm, and rewrites the ones you confirm. If you'd rather not
+   write your own, this repo has one you can copy:
+   [`docs/commands/update-plugins.md`](./docs/commands/update-plugins.md) →
+   `~/.config/opencode/command/update-plugins.md`, then run `/update-plugins`.
+   It's documentation, not part of the package: nothing about it is installed
+   with the plugin, and it works for every pinned plugin in your config, not
+   just this one.
+
    (While developing locally, point it at an absolute path to your checkout
    instead of the package name.)
 
