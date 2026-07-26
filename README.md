@@ -4,8 +4,8 @@ Persistent memory for [OpenCode](https://opencode.ai): your agent remembers what
 it learned in past sessions — your conventions, your projects, the decisions you
 made — and brings that context into new conversations automatically.
 
-Despite the name: **no codex subscription or OpenAI account is needed.** This
-project is a faithful port of the memory system in OpenAI's codex. It works out
+Despite the name: **no Codex subscription or OpenAI account is needed.** This
+project is a faithful port of the memory system in OpenAI's Codex. It works out
 of the box with zero extra configuration and uses whatever models you already
 have set up in OpenCode.
 
@@ -58,7 +58,7 @@ If you want the mental model before the details, jump to
 
 2. That's it. The memory workspace is created on first use. Installing the
    plugin is the opt-in: background learning and summary injection are active
-   immediately (codex ships the same system behind a default-off feature flag
+   immediately (Codex ships the same system behind a default-off feature flag
    with a consent prompt; a standalone memory plugin *is* the consent).
 
 Requires OpenCode 1.18 or newer (official release). Git is bundled
@@ -103,7 +103,7 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
 ## How it works
 
 You don't need to know any of this to use the plugin, but it's a small system
-and the shape is easy to hold in your head. It's codex's design, ported as-is.
+and the shape is easy to hold in your head. It's Codex's design, ported as-is.
 
 Think of it as three jobs: two background writers and one reader. **Nothing here
 runs while you're waiting for a reply** — an assistant that stops to take notes
@@ -171,7 +171,7 @@ those too.)
 ## Privacy & safety
 
 - **Local only.** There is no remote storage option to enable, by accident or
-  otherwise: codex keeps memory storage behind a backend interface whose only
+  otherwise: Codex keeps memory storage behind a backend interface whose only
   implementation today is the local filesystem, and this port implements that
   path and nothing else. Nothing is sent anywhere except through your existing
   OpenCode provider, using your existing credentials; the plugin holds no keys
@@ -187,14 +187,14 @@ those too.)
 - **Reset is safe.** `memory_reset` refuses to run if the memory folder is a
   symlink, so it can't be tricked into deleting something else.
 - **Web/MCP sessions:** by default, sessions that used web search, fetch, or MCP
-  tools are still eligible for memory (matching codex). If you'd rather exclude
+  tools are still eligible for memory (matching Codex). If you'd rather exclude
   them so scraped or external content can't enter your memory, set
   `disable_on_external_context: true`.
 
 ## Configuration
 
 Optional plugin options (all have sensible defaults). Names and defaults match
-codex's `[memories]` config so the two stay easy to compare:
+Codex's `[memories]` config so the two stay easy to compare:
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -223,9 +223,9 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 
 See the [OpenCode plugin docs](https://opencode.ai/docs/plugins/) for details.
 
-Numeric options are clamped to codex's valid ranges; unknown option keys are
+Numeric options are clamped to Codex's valid ranges; unknown option keys are
 ignored with a warning. Setting `use_memories: false` also hides the memory
-tools, matching codex's extension gating.
+tools, matching Codex's extension gating.
 
 **Verifying your configuration:** the plugin never hard-fails on bad options.
 To check what actually took effect, ask the agent to run `memory_inspect` — it
@@ -234,10 +234,10 @@ unknown or malformed keys (typos included), and shows the resolved Codex
 interop state. A mistyped option shows up there twice: as a warning, and as
 the default value appearing where you expected your setting.
 
-Model selection mirrors codex's cheap-extraction / capable-consolidation
+Model selection mirrors Codex's cheap-extraction / capable-consolidation
 split using OpenCode's own concepts: when `extract_model` is unset, the
-`small_model` from your `opencode.json` is used (codex uses `gpt-5.4-mini`);
-when `consolidation_model` is unset, your main `model` is used (codex uses
+`small_model` from your `opencode.json` is used (Codex uses `gpt-5.4-mini`);
+when `consolidation_model` is unset, your main `model` is used (Codex uses
 `gpt-5.4`). If neither is configured, the learning sub-agents fall back to
 their own agent-level `model` (if you defined one), else the provider default.
 (OpenCode's *automatic* small-model pick is internal to OpenCode and not
@@ -250,12 +250,12 @@ on your own `memorize-extract`/`memorize` agent definition, if you overrode
 one → the provider's default model. Note that the first two pass the model
 explicitly, so they win over an agent-level `model`.
 
-> Note: `dedicated_tools` defaults to `true` here (codex defaults it to `false`).
+> Note: `dedicated_tools` defaults to `true` here (Codex defaults it to `false`).
 > This is the one intentional default difference — the tools are a core part of a
-> standalone memory plugin. Everything else matches codex's defaults.
+> standalone memory plugin. Everything else matches Codex's defaults.
 >
 > Turning `dedicated_tools` off keeps background learning, summary injection,
-> and citation tracking working. The injected guidance switches to codex's
+> and citation tracking working. The injected guidance switches to Codex's
 > file-based mode — the agent reads the memory files with its normal file
 > tools and writes "remember this" notes directly into
 > `extensions/ad_hoc/notes/`. Caveat: the memory folder lives outside your
@@ -305,7 +305,7 @@ There's a single store for everything you do, not one per project — and that's
 the design choice most likely to surprise you, so it's worth explaining where it
 came from.
 
-codex *started* with per-project memory: a separate bucket per directory, plus a
+Codex *started* with per-project memory: a separate bucket per directory, plus a
 user-level scope on top. It **deliberately removed that** in early 2026 and
 collapsed everything into one global root — one store, one lock, one
 consolidation pass — for simplicity.
@@ -325,20 +325,20 @@ conventions follow you into a new repo on day one) while project-specific facts
 stay recognizable as such.
 
 The cost is real: with one store, an unrelated project's details can surface in
-the summary. codex judged that cheaper than the alternative, and this port
+the summary. Codex judged that cheaper than the alternative, and this port
 mirrors that decision rather than layering scoping back on top.
 
 ## Contributing
 
-The port follows codex closely: same two-phase pipeline, same on-disk artifacts,
+The port follows Codex closely: same two-phase pipeline, same on-disk artifacts,
 same prompts (adapted only where OpenCode differs). If you want the full design
 and the trade-offs, see [`ARCHITECTURE.md`](./ARCHITECTURE.md); contributor
 guidance lives in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and
-[`AGENTS.md`](./AGENTS.md) — in short: this repo exists to port codex's memory
+[`AGENTS.md`](./AGENTS.md) — in short: this repo exists to port Codex's memory
 system to OpenCode, and PRs that break that parity will be rejected.
 
 ## License
 
 Apache 2.0 — the same license as [OpenAI Codex](https://github.com/openai/codex),
 whose memory system this project ports. See [`LICENSE`](./LICENSE) and
-[`NOTICE`](./NOTICE). Not affiliated with the codex project.
+[`NOTICE`](./NOTICE). Not affiliated with the Codex project.
