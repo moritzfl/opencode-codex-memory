@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 4c43465133428898aa84f0bfc02c306ed65fb66a
-codex_ref_date: 2026-07-25
+codex_ref: 61a44880a85d2fd0d8770908dea5733495e571c8
+codex_ref_date: 2026-07-26
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -114,6 +114,8 @@ mappings:
       title/created/session header (codex: verbatim unlimited note body).
       list has no cursor (max_results cap only) and errors on file paths
       (codex: returns the single entry).
+      Note writes reject symlinked path components, matching codex local/
+      ad_hoc_note.rs ensure_notes_dir.
   - ours: src/paths.ts
     theirs: codex-rs/utils/home-dir/src/lib.rs
     note: >
@@ -228,6 +230,10 @@ mappings:
       failed or timed-out run can leave a partial summary until the retry
       repairs it — reviewed 2026-07-12 and kept as-is for parity; do not add
       staging unless codex does.
+      The opencode session.prompt transport can return HTTP 200 while the
+      assistant message carries an error; llm.ts treats that as failed_agent
+      so phase2 preserves the workspace diff, matching codex's requirement
+      that AgentStatus be Completed before validation/baseline reset.
       DIVERGENCE (codex_ref 1bbdb32, 2026-07-15 audit): codex now threads a
       parent_permission_profile into phase2::run/agent::get_config so the
       consolidation agent inherits the parent session's OS sandbox choice
@@ -347,10 +353,11 @@ mappings:
       a session (closest plugin-visible moment to codex's
       stamp-at-thread-creation, session.rs), with the idle path as fallback;
       the same hook pumps phase 1 so extraction no longer depends on idle
-      events; pollution marking runs in the
-      tool.execute.after plugin hook and matches websearch/webfetch plus every
-      configured MCP server via client.mcp.status() (codex marks all MCP
-      servers pollutes_memory=true). (3) the memorize / memorize-extract
+      events; pollution marking snapshots classification in tool.execute.before
+      and consumes it in tool.execute.after, matching websearch/webfetch plus
+      every live MCP server via client.mcp.status(); server names use opencode's
+      own tool-prefix sanitization (codex captures pollution on PreparedMcpCall
+      and marks all MCP servers pollutes_memory=true). (3) the memorize / memorize-extract
       sub-agents self-register through the plugin config hook (user-defined
       agents of the same name win) — pure opencode packaging; codex ships its
       memory agents inside the binary; injection appends an external_directory
@@ -384,6 +391,8 @@ mappings:
       exception). parseExtraction (brace-scrape, unknown-field tolerant) stays
       as a fallback for hosts/models that don't populate structured. per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
+      AssistantMessage.error is treated as a failed sub-agent turn even though
+      opencode returns it with HTTP 200;
       reasoning effort is not pinned (codex: Low for extraction, Medium for
       consolidation; no session.prompt equivalent); a consolidator that loses
       phase-2 ownership mid-run is not aborted (codex kills the agent thread on

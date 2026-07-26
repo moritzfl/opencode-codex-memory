@@ -97,9 +97,13 @@ constraints — read before changing the corresponding subsystem.
 opencode's V1 `experimental.chat.system.transform` has no epoch-aware injection;
 the system prompt is rebuilt each turn, and codex's V2 `SystemContext.Source` is
 not exposed to plugins. **Workaround:** append the *same byte-identical string*
-every turn. Provider prompt caches are content-addressed (they key on the byte
-prefix), so a stable append stays cache-warm. The plugin caches the summary in
-process memory and only re-reads the file when Phase 2 writes a new version.
+every turn. opencode folds all plugin appends into the second system message,
+and its provider transform places cache breakpoints on the first two system
+messages. The stable memory block therefore gets its own cache segment: changing
+memory invalidates that segment without invalidating opencode's base prompt.
+The plugin caches the summary in process memory and only re-reads the file when
+Phase 2 writes a new version. Sessionless invocations of the same hook (used by
+opencode while generating agent definitions) are ignored.
 
 Limitation: if opencode's own prompt prefix shifts (date, skills, MCP tool set),
 the prefix cache misses — same as any plugin hook. Accepted.

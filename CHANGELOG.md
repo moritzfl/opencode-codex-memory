@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Consolidation no longer reports success when OpenCode returns an assistant
+  error inside an otherwise successful HTTP response. The job now retries and
+  keeps its pending workspace diff instead of silently accepting stale memory.
+- Failed extraction and consolidation jobs now release their leases even when
+  the host rejects with a non-standard value, avoiding one-hour stalls.
+- Memory writes now reject symlinked paths throughout the workspace, preventing
+  notes and generated artifacts from being redirected outside the memory root.
+- MCP-backed tool calls are classified from the live server list using
+  OpenCode's tool-name sanitization, so dynamically added or dotted server names
+  correctly exclude a session when `disable_on_external_context` is enabled.
+- A failed database open now closes its SQLite handle instead of leaking one on
+  every later memory operation.
+- Memory is no longer injected into OpenCode's sessionless agent-generation
+  prompt; it remains limited to real conversation sessions.
+
 ## [0.4.0] - 2026-07-25
 
 ### Added
