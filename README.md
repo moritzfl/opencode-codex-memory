@@ -1,5 +1,14 @@
 # OpenCode Codex Memory
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/opencode-codex-memory">
+    <img src="https://img.shields.io/npm/v/opencode-codex-memory?logo=npm&amp;label=latest" alt="Latest npm version" />
+  </a>
+  <a href="https://www.npmjs.com/package/opencode-codex-memory">
+    <img src="https://img.shields.io/npm/dt/opencode-codex-memory?logo=npm&amp;label=downloads" alt="npm downloads" />
+  </a>
+</p>
+
 Persistent memory for [OpenCode](https://opencode.ai): your agent remembers what
 it learned in past sessions — your conventions, your projects, the decisions you
 made — and brings that context into new conversations automatically.
