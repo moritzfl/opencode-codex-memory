@@ -152,6 +152,10 @@ function extractText(msg: any): string | undefined {
   // (rollout policy: ResponseItem::Reasoning => false); opencode reasoning
   // parts carry `text`, so they must be dropped before the text check.
   if (msg.type === "reasoning") return undefined
+  // opencode itself drops `ignored` text parts when building model messages
+  // (session/message-v2.ts), e.g. ACP content addressed only to the user.
+  // The assistant never saw them, so they are not conversation.
+  if (msg.ignored === true) return undefined
   if (typeof msg.text === "string") return msg.text
   if (msg.type === "tool") {
     // Full tool payloads: codex serializes complete FunctionCall/Output items
@@ -159,8 +163,17 @@ function extractText(msg: any): string | undefined {
     // the extractor's strongest evidence — do not slice them per call.
     const tool = msg.tool ?? "unknown"
     const input = msg.state?.input ? JSON.stringify(msg.state.input) : ""
-    const output = typeof msg.state?.output === "string" ? msg.state.output : ""
-    return `[tool: ${tool}] ${input}${output ? "\n" + output : ""}`
+    // `output` exists only on status:"completed"; a failed call carries
+    // `error` instead (schema v1/session.ts ToolStateError). codex persists
+    // failed calls too (rollout policy: FunctionCallOutput => true), and "X
+    // failed with Y" is often the most memorable part of a session.
+    const result =
+      typeof msg.state?.output === "string"
+        ? msg.state.output
+        : typeof msg.state?.error === "string"
+          ? `[error] ${msg.state.error}`
+          : ""
+    return `[tool: ${tool}] ${input}${result ? "\n" + result : ""}`
   }
   if (msg.type === "step-start" || msg.type === "step-finish") return undefined
   if (Array.isArray(msg.parts)) {

@@ -47,6 +47,51 @@ describe("loadTranscript", () => {
     expect(msgs.find((m: any) => m.type === "step-start").text).toBeUndefined()
   })
 
+  // ToolStateError has no `output` — only `error`. codex keeps failed calls
+  // (rollout policy FunctionCallOutput => true) and failures are high-signal.
+  it("keeps the error text of a failed tool call", async () => {
+    setClient(
+      messagesClient([
+        {
+          info: { role: "assistant" },
+          parts: [
+            {
+              type: "tool",
+              tool: "bash",
+              state: { status: "error", input: { command: "migrate" }, error: "exit 1: relation does not exist" },
+            },
+          ],
+        },
+      ]),
+    )
+    const { loadTranscript } = require("../src/capture.js")
+    const msgs = await loadTranscript("ses_err")
+    expect(msgs[0].text).toContain("[tool: bash]")
+    expect(msgs[0].text).toContain("migrate")
+    expect(msgs[0].text).toContain("relation does not exist")
+  })
+
+  // opencode drops these when building model messages (session/message-v2.ts),
+  // so the assistant never saw them — they are not conversation.
+  it("skips text parts flagged ignored", async () => {
+    setClient(
+      messagesClient([
+        {
+          info: { role: "user" },
+          parts: [
+            { type: "text", text: "visible ask", ignored: false },
+            { type: "text", text: "client-only chatter", ignored: true },
+          ],
+        },
+      ]),
+    )
+    const { loadTranscript } = require("../src/capture.js")
+    const msgs = await loadTranscript("ses_ignored")
+    const texts = msgs.map((m: any) => m.text)
+    expect(texts).toContain("visible ask")
+    expect(texts).not.toContain("client-only chatter")
+  })
+
   // A swallowed error here used to surface as an empty transcript, which
   // phase 1 records as a successful no-output extraction — erasing memory.
   it("throws on API error responses instead of returning an empty transcript", async () => {
