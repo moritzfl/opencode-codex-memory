@@ -16,12 +16,6 @@ let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
 // Single-flight guard for mcp.status(); see mcpToolPrefixes below.
 let mcpStatusInFlight: Promise<string[] | null> | null = null
-const externalContextCalls = new Map<string, boolean>()
-const MAX_TRACKED_TOOL_CALLS = 500
-
-function externalContextCallKey(sessionID: string, callID: string): string {
-  return `${sessionID}\0${callID}`
-}
 
 // Deliberately uncached: openDb() is already a singleton, and caching a store
 // here would hold a stale handle across closeDb() (e.g. after memory_reset).
@@ -105,7 +99,6 @@ export default {
   async server(input: PluginInput, opts?: PluginOptions) {
     setPluginInput(input)
     pluginClient = input.client
-    externalContextCalls.clear()
     mcpStatusInFlight = null
     // Unconditional, like the caches above: a boot WITHOUT options must not
     // inherit the previous boot's warnings (opencode can host several
@@ -380,38 +373,31 @@ function buildHooks() {
     }
   },
 
-  // Dedicated plugin hooks (NOT event-bus types): capture external-context
-  // classification before each call and mark memory after successful calls.
-  // Pollution remains gated by disable_on_external_context, which is off by
-  // default.
+  /**
+   * Dedicated plugin hook (NOT an event-bus type). Marks the session polluted
+   * at INVOCATION, mirroring codex: mcp_tool_call.rs calls
+   * maybe_mark_thread_memory_mode_polluted inside handle_approved_mcp_tool_call
+   * BEFORE the call runs, and web search marks on the completed response item
+   * (stream_events_utils.rs response_item_may_include_external_context).
+   *
+   * Deliberately not tool.execute.after: opencode does not guarantee that hook
+   * (session/tools.ts awaits execute() with no ensuring/catchAll, and an abort
+   * interrupts the fiber), so a failed or cancelled websearch/webfetch/MCP call
+   * left the session unmarked while its output had already entered the
+   * transcript. Marking early over-marks a permission-denied call, which is the
+   * safe direction for an opt-in guard.
+   *
+   * Pollution remains gated by disable_on_external_context, off by default.
+   */
   async "tool.execute.before"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
     try {
-      if (!pluginOptions.disable_on_external_context || !input.callID) return
-      const key = externalContextCallKey(input.sessionID, input.callID)
-      externalContextCalls.delete(key)
-      const classification = await classifyExternalContextTool(input.tool)
-      if (classification === null) return
-      lruSet(externalContextCalls, key, classification, MAX_TRACKED_TOOL_CALLS)
+      if (!pluginOptions.disable_on_external_context || !input.sessionID) return
+      // null = MCP status unavailable; websearch/webfetch still classify true
+      // without it, so only MCP-prefixed tools go unmarked.
+      if ((await classifyExternalContextTool(input.tool)) !== true) return
+      getStore().markPolluted(input.sessionID)
     } catch (err) {
       console.error("[opencode-codex-memory] tool.execute.before error:", err)
-    }
-  },
-
-  async "tool.execute.after"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
-    try {
-      const key = externalContextCallKey(input.sessionID, input.callID)
-      const hasCapturedClassification = Boolean(input.callID) && externalContextCalls.has(key)
-      const capturedClassification = input.callID ? externalContextCalls.get(key) : undefined
-      if (input.callID) externalContextCalls.delete(key)
-      if (!pluginOptions.disable_on_external_context) return
-      const isExternal = hasCapturedClassification
-        ? capturedClassification === true
-        : (await classifyExternalContextTool(input.tool)) === true
-      if (input.sessionID && isExternal) {
-        getStore().markPolluted(input.sessionID)
-      }
-    } catch (err) {
-      console.error("[opencode-codex-memory] tool.execute.after error:", err)
     }
   },
 

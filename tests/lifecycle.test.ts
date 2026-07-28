@@ -6,13 +6,39 @@ import { handleSessionDeleted, shouldHandleIdle } from "../src/index.js"
 import plugin from "../src/index.js"
 
 describe("hook wiring", () => {
-  it("registers tool.execute.after as a top-level hook (not an event-bus type)", async () => {
+  it("registers tool.execute.before as a top-level hook (not an event-bus type)", async () => {
     // Regression: pollution marking once lived inside the event() bus handler
-    // under a nonexistent "tool.execute.after" event type and never fired.
+    // under a nonexistent "tool.execute.*" event type and never fired.
     const hooks = (await plugin.server({ client: {} } as any, undefined)) as Record<string, unknown>
     expect(typeof hooks["tool.execute.before"]).toBe("function")
-    expect(typeof hooks["tool.execute.after"]).toBe("function")
     expect(typeof hooks.event).toBe("function")
+  })
+
+  it("marks pollution without ever seeing tool.execute.after", async () => {
+    // opencode skips tool.execute.after when the tool throws or the turn is
+    // aborted (session/tools.ts has no ensuring/catchAll), so marking must not
+    // depend on it. codex marks before the call runs (mcp_tool_call.rs).
+    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-pollution-before-"))
+    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    try {
+      require("../src/db.js").closeDb()
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
+      const hooks = (await plugin.server(
+        { client: {} } as any,
+        { disable_on_external_context: true } as any,
+      )) as any
+      expect(hooks["tool.execute.after"]).toBeUndefined()
+      // Only the before hook fires — the tool then "throws".
+      await hooks["tool.execute.before"]({ tool: "webfetch", sessionID: "ses_failed_fetch", callID: "c1" })
+      const { MemoryStore } = require("../src/store.js")
+      expect(new MemoryStore().getMemoryMode("ses_failed_fetch")).toBe("polluted")
+    } finally {
+      await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
+      require("../src/db.js").closeDb()
+      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+      fs.rmSync(testRoot, { recursive: true, force: true })
+    }
   })
 
   it("uses live sanitized MCP server names for pollution marking", async () => {
@@ -27,29 +53,28 @@ describe("hook wiring", () => {
         { disable_on_external_context: true } as any,
       )) as any
 
-      await hooks["tool.execute.before"]({ tool: "first_server_tool", sessionID: "ses_first", callID: "call_1" })
-      statusResponse = { data: {} }
-      await hooks["tool.execute.after"]({ tool: "first_server_tool", sessionID: "ses_first", callID: "call_1" })
       const { MemoryStore } = require("../src/store.js")
+      // Sanitized server name: "first.server" -> tool prefix "first_server_".
+      await hooks["tool.execute.before"]({ tool: "first_server_tool", sessionID: "ses_first", callID: "call_1" })
       expect(new MemoryStore().getMemoryMode("ses_first")).toBe("polluted")
 
+      // A server connected later is picked up (status is queried live, never
+      // cached with a TTL).
       statusResponse = { data: { "added.later": { status: "connected" } } }
       await hooks["tool.execute.before"]({ tool: "added_later_tool", sessionID: "ses_added", callID: "call_2" })
-      await hooks["tool.execute.after"]({ tool: "added_later_tool", sessionID: "ses_added", callID: "call_2" })
       expect(new MemoryStore().getMemoryMode("ses_added")).toBe("polluted")
 
-      statusResponse = { data: { first: { status: "connected" } } }
-      await hooks["tool.execute.before"]({ tool: "first_tool", sessionID: "ses_reused_external", callID: "call_reused" })
+      // A local (non-MCP) tool never marks.
       statusResponse = { data: {} }
-      await hooks["tool.execute.before"]({ tool: "local_tool", sessionID: "ses_reused_local", callID: "call_reused" })
-      await hooks["tool.execute.after"]({ tool: "first_tool", sessionID: "ses_reused_external", callID: "call_reused" })
-      await hooks["tool.execute.after"]({ tool: "local_tool", sessionID: "ses_reused_local", callID: "call_reused" })
-      expect(new MemoryStore().getMemoryMode("ses_reused_external")).toBe("polluted")
-      expect(new MemoryStore().getMemoryMode("ses_reused_local")).toBeNull()
+      await hooks["tool.execute.before"]({ tool: "local_tool", sessionID: "ses_local", callID: "call_3" })
+      expect(new MemoryStore().getMemoryMode("ses_local")).toBeNull()
 
+      // Web tools classify without consulting MCP status at all.
       statusResponse = { data: undefined, error: { message: "status failed" } }
-      await hooks["tool.execute.before"]({ tool: "error_tool", sessionID: "ses_error", callID: "call_3" })
-      await hooks["tool.execute.after"]({ tool: "error_tool", sessionID: "ses_error", callID: "call_3" })
+      await hooks["tool.execute.before"]({ tool: "websearch", sessionID: "ses_web", callID: "call_4" })
+      expect(new MemoryStore().getMemoryMode("ses_web")).toBe("polluted")
+      // ...but an unclassifiable MCP tool stays unmarked when status is down.
+      await hooks["tool.execute.before"]({ tool: "error_tool", sessionID: "ses_error", callID: "call_5" })
       expect(new MemoryStore().getMemoryMode("ses_error")).toBeNull()
     } finally {
       await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)

@@ -357,11 +357,23 @@ mappings:
       a session (closest plugin-visible moment to codex's
       stamp-at-thread-creation, session.rs), with the idle path as fallback;
       the same hook pumps phase 1 so extraction no longer depends on idle
-      events; pollution marking snapshots classification in tool.execute.before
-      and consumes it in tool.execute.after, matching websearch/webfetch plus
-      every live MCP server via client.mcp.status(); server names use opencode's
-      own tool-prefix sanitization (codex captures pollution on PreparedMcpCall
-      and marks all MCP servers pollutes_memory=true). (3) the memorize / memorize-extract
+      events; pollution marking happens in tool.execute.before — at INVOCATION,
+      matching codex, which marks inside handle_approved_mcp_tool_call before
+      the call runs (mcp_tool_call.rs maybe_mark_thread_memory_mode_polluted)
+      and marks web search on the completed response item
+      (stream_events_utils.rs response_item_may_include_external_context:
+      WebSearchCall/ToolSearchCall/ToolSearchOutput). tool.execute.after is
+      deliberately NOT used: opencode does not guarantee it (session/tools.ts
+      awaits execute() with no ensuring/catchAll; an abort interrupts the
+      fiber), so a failed or cancelled call left the session unmarked.
+      DIVERGENCE: marking at invocation also marks permission-denied calls,
+      which codex does not — the safe direction for an opt-in guard, since the
+      alternative under-marks. Classification covers websearch/webfetch plus
+      every live MCP server via client.mcp.status(); server names use
+      opencode's own tool-prefix sanitization (codex marks all MCP servers
+      pollutes_memory=true). codex has a third channel with no port:
+      registry.rs marks on output.contains_external_context() after a
+      successful builtin tool — opencode exposes no equivalent output flag. (3) the memorize / memorize-extract
       sub-agents self-register through the plugin config hook (user-defined
       agents of the same name win) — pure opencode packaging; codex ships its
       memory agents inside the binary; injection appends an external_directory
