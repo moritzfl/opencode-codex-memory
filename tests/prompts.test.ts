@@ -110,6 +110,34 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
 
     expect(buildMemorySystemPrompt(true)).toBeNull()
   })
+
+  it("does not follow a summary swapped to a symlink after path validation", () => {
+    const { buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memoryRoot, memorySummaryPath } = require("../src/paths.js")
+    const summary = memorySummaryPath()
+    const outside = path.join(TEST_ROOT, "raced-outside-summary.md")
+    fs.mkdirSync(memoryRoot(), { recursive: true })
+    fs.writeFileSync(summary, "v1\n\nsafe summary\n")
+    fs.writeFileSync(outside, "v1\n\nsecret from raced symlink\n")
+
+    const originalOpen = fs.openSync
+    let swapped = false
+    ;(fs as any).openSync = (file: any, flags: any, mode?: any) => {
+      if (!swapped && file === summary) {
+        swapped = true
+        fs.unlinkSync(summary)
+        fs.symlinkSync(outside, summary)
+      }
+      return originalOpen(file, flags, mode)
+    }
+    try {
+      invalidateCache()
+      expect(buildMemorySystemPrompt(true)).toBeNull()
+      expect(swapped).toBe(true)
+    } finally {
+      ;(fs as any).openSync = originalOpen
+    }
+  })
 })
 
 describe("template placeholder inventory", () => {
