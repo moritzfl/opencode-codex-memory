@@ -98,6 +98,18 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     // sanity: summary path would have been readable without the guard
     expect(fs.readFileSync(memorySummaryPath(), "utf8")).toContain("secret")
   })
+
+  it("refuses to inject when memory_summary.md is a symlink", () => {
+    const { buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memoryRoot, memorySummaryPath } = require("../src/paths.js")
+    const outside = path.join(TEST_ROOT, "outside-summary.md")
+    fs.mkdirSync(memoryRoot(), { recursive: true })
+    fs.writeFileSync(outside, "v1\n\nsecret from outside the memory root\n")
+    fs.symlinkSync(outside, memorySummaryPath())
+    invalidateCache()
+
+    expect(buildMemorySystemPrompt(true)).toBeNull()
+  })
 })
 
 describe("template placeholder inventory", () => {

@@ -1,7 +1,7 @@
 import fs from "fs"
 import path from "path"
-import { memorySummaryPath, memoryRoot } from "./paths.js"
-import { assertMemoryRootSafe } from "./path-guard.js"
+import { memoryRoot } from "./paths.js"
+import { assertMemoryRootSafe, safeResolveMemoryPath } from "./path-guard.js"
 import { truncateToTokens } from "./token.js"
 import { fillTemplate } from "./llm.js"
 
@@ -44,14 +44,14 @@ function readTemplate(): string {
 }
 
 function readMemorySummary(): string | null {
-  // Same root-symlink refusal as the memory tools (path-guard deliberate
-  // extension over codex): never inject a summary from a redirected root.
+  let summaryPath: string
   try {
-    assertMemoryRootSafe()
+    // Use the same component-by-component symlink refusal as the memory tools:
+    // neither the root nor memory_summary.md may redirect outside the workspace.
+    summaryPath = safeResolveMemoryPath("memory_summary.md")
   } catch {
     return null
   }
-  const summaryPath = memorySummaryPath()
   if (!fs.existsSync(summaryPath)) return null
 
   const stat = fs.statSync(summaryPath)
