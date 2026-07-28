@@ -92,8 +92,9 @@ mappings:
       codex-style file-based guidance snippets for read_path.md.
       DELIBERATE EXTENSION (same as the memory tools' path guard): resolves
       memory_summary.md component-by-component and refuses injection when the
-      root or summary file is a symlink; codex prompts.rs trusts the root and
-      only rejects a symlinked root on clear.
+      root or summary file is a symlink, then reads through the same O_NOFOLLOW
+      file descriptor it verified to close the final-component race; codex
+      prompts.rs trusts the root and only rejects a symlinked root on clear.
   - ours: tools/memory.ts
     theirs: codex-rs/ext/memories/src/tools/search.rs
     note: >
@@ -410,10 +411,14 @@ mappings:
       exception). parseExtraction (brace-scrape, unknown-field tolerant) stays
       as a fallback for hosts/models that don't populate structured. per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
-      timed-out prompts call the bound session.abort SDK method before
-      asynchronous session deletion; plugin-created sessions carry a durable
-      metadata ownership marker so startup cleanup never trusts user-editable
-      titles, and plugin startup awaits that cleanup with a bounded list call;
+      timed-out prompts call the bound session.abort SDK method with a 1s bound
+      before asynchronous session deletion; plugin-created sessions carry a
+      durable metadata ownership marker so startup cleanup never uses titles
+      to authorize deletion. Exact legacy titles are temporarily reseeded but
+      never deleted; plugin startup awaits the bounded list/reseed pass while
+      stale deletions continue asynchronously and retain ownership unless a
+      follow-up session.get confirms 404 (OpenCode may return success after an
+      internally failed remove);
       AssistantMessage.error is treated as a failed sub-agent turn even though
       opencode returns it with HTTP 200;
       reasoning effort is not pinned (codex: Low for extraction, Medium for
@@ -434,11 +439,11 @@ mappings:
       patterns, uses labeled [REDACTED:*] tokens vs codex's [REDACTED_SECRET],
       allows quotes around the assignment KEY so JSON/YAML forms
       like "password": "..." are caught — codex's SECRET_ASSIGNMENT_REGEX
-      misses those — and uses a 4-char value floor vs codex's 8. Assignment
-      replacement preserves key, separator, quotes, and trailing delimiters;
-      unquoted primitive values become quoted [REDACTED] strings, so redacting
-      a JSON/YAML tool payload leaves it parseable. The AKIA/bearer patterns
-      omit codex's \b anchors, which only widens them.
+      misses those. An escape-aware value scanner preserves keys, separators,
+      comments, JSON trailing delimiters, and nested object/array boundaries;
+      unquoted values become quoted [REDACTED] strings, so redacting JSON/YAML
+      payloads remains parseable without leaking punctuation-bearing suffixes.
+      The AKIA/bearer patterns omit codex's \b anchors, which only widens them.
       isMemoryExcludedFragment lives here too (upstream: memories/write
       phase1.rs is_memory_excluded_contextual_user_fragment) but is INERT on
       opencode: AGENTS.md is joined into system[0] and skills are rendered as
