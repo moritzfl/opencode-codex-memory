@@ -25,6 +25,7 @@ const activeSubSessions = new Set<string>()
 const SUBSESSION_METADATA_KEY = "opencode-codex-memory"
 const SUBSESSION_LIST_TIMEOUT_MS = 5_000
 const SUBSESSION_ABORT_TIMEOUT_MS = 1_000
+const SUBSESSION_CONFIRM_TIMEOUT_MS = 1_000
 
 export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
@@ -326,9 +327,40 @@ async function deleteSession(id: string): Promise<void> {
       console.warn(`[opencode-codex-memory] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
       return
     }
-    activeSubSessions.delete(id)
+    // OpenCode's Session.remove logs and swallows some internal failures while
+    // the HTTP route still returns success. Only a confirmed 404 proves the
+    // session is gone; otherwise retain ownership so hooks keep skipping it.
+    if (await sessionDeletionConfirmed(input.client as any, id)) {
+      activeSubSessions.delete(id)
+    }
   } catch (err) {
     console.warn(`[opencode-codex-memory] error deleting sub-session ${id}:`, err)
+  }
+}
+
+async function sessionDeletionConfirmed(
+  client: { session?: { get?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<any> } },
+  id: string,
+): Promise<boolean> {
+  const session = client.session
+  if (typeof session?.get !== "function") return false
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const res = await Promise.race([
+      session.get({ path: { id }, signal: controller.signal }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error(`session.get timed out after ${SUBSESSION_CONFIRM_TIMEOUT_MS}ms`))
+        }, SUBSESSION_CONFIRM_TIMEOUT_MS)
+      }),
+    ])
+    return res?.response?.status === 404
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
   }
 }
 

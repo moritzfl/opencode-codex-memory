@@ -287,11 +287,12 @@ describe("cleanupOldSubSessions", () => {
             ],
           }),
           delete: async () => ({ data: {} }),
+          get: async () => ({ error: { name: "NotFound" }, response: { status: 404 } }),
         },
       },
     } as any)
     await cleanupOldSubSessions(90)
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(isMemorySubSession("sub-live")).toBe(true)
     // Old one was deleted and removed from the set.
     expect(isMemorySubSession("sub-old")).toBe(false)
@@ -370,6 +371,31 @@ describe("cleanupOldSubSessions", () => {
     await cleanupOldSubSessions(90)
     await Promise.resolve()
     expect(isMemorySubSession("failed-delete")).toBe(true)
+  })
+
+  it("keeps ownership when OpenCode reports deletion success but the session survives", async () => {
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              {
+                id: "false-success-delete",
+                metadata: { "opencode-codex-memory": true },
+                time: { created: Date.now() - 120 * 60 * 1000 },
+              },
+            ],
+          }),
+          delete: async () => ({ data: true, response: { status: 200 } }),
+          get: async () => ({ data: { id: "false-success-delete" }, response: { status: 200 } }),
+        },
+      },
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(isMemorySubSession("false-success-delete")).toBe(true)
   })
 
   it("never treats a user-editable title as sub-session ownership", async () => {
