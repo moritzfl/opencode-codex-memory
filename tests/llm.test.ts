@@ -124,11 +124,15 @@ describe("validateExtraction", () => {
 describe("extractViaSubagent (structured output)", () => {
   // Stub the plugin client; capture the prompt body so we can assert the
   // json_schema format request, and control what session.prompt returns.
-  function stubClient(promptResult: (body: any) => any): () => any {
+  function stubClient(promptResult: (body: any) => any): { getPromptBody: () => any; getCreateBody: () => any } {
     let capturedBody: any
+    let capturedCreateBody: any
     const client = {
       session: {
-        create: async () => ({ data: { id: "sub-1" } }),
+        create: async (req: any) => {
+          capturedCreateBody = req.body
+          return { data: { id: "sub-1" } }
+        },
         prompt: async (req: any) => {
           capturedBody = req.body
           return promptResult(req.body)
@@ -138,19 +142,23 @@ describe("extractViaSubagent (structured output)", () => {
       config: { get: async () => ({ data: {} }) },
     }
     setPluginInput({ client } as any)
-    return () => capturedBody
+    return {
+      getPromptBody: () => capturedBody,
+      getCreateBody: () => capturedCreateBody,
+    }
   }
   afterEach(() => setPluginInput({ client: undefined } as any))
 
   it("requests json_schema format and reads the result from AssistantMessage.structured", async () => {
-    const getBody = stubClient(() => ({
+    const captured = stubClient(() => ({
       data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "slug" } } },
     }))
     const r = await extractViaSubagent("ses_1", "transcript", { cwd: "/x" })
     expect(r).toEqual({ raw_memory: "rm", rollout_summary: "rs", rollout_slug: "slug" })
-    const body = getBody()
+    const body = captured.getPromptBody()
     expect(body.format?.type).toBe("json_schema")
     expect(body.format?.schema?.required).toContain("raw_memory")
+    expect(captured.getCreateBody().metadata).toEqual({ "opencode-codex-memory": true })
   })
 
   it("falls back to parsing assistant text when structured output is absent", async () => {
@@ -189,7 +197,8 @@ describe("extractViaSubagent (structured output)", () => {
       session: {
         create: async () => ({ data: { id: "sub-timeout" } }),
         prompt: async () => new Promise(() => {}), // never resolves
-        abort: async (req: { path: { id: string } }) => {
+        abort: async function (this: unknown, req: { path: { id: string } }) {
+          if (this !== client.session) throw new Error("abort called without its SDK receiver")
           aborted.push(req.path.id)
           return { data: {} }
         },
@@ -243,8 +252,8 @@ describe("cleanupOldSubSessions", () => {
         session: {
           list: async () => ({
             data: [
-              { id: "sub-live", title: "codex-memory-consolidate", time: { created: Date.now() } },
-              { id: "sub-old", title: "codex-memory-extract-x", time: { created: Date.now() - 120 * 60 * 1000 } },
+              { id: "sub-live", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() } },
+              { id: "sub-old", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() - 120 * 60 * 1000 } },
               { id: "user-ses", title: "normal chat", time: { created: Date.now() } },
             ],
           }),
@@ -257,5 +266,42 @@ describe("cleanupOldSubSessions", () => {
     // Old one was deleted and removed from the set.
     expect(isMemorySubSession("sub-old")).toBe(false)
     expect(isMemorySubSession("user-ses")).toBe(false)
+  })
+
+  it("never treats a user-editable title as sub-session ownership", async () => {
+    const deleted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              {
+                id: "user-prefixed-title",
+                title: "codex-memory-personal-notes",
+                time: { created: Date.now() - 120 * 60 * 1000 },
+              },
+            ],
+          }),
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: {} }
+          },
+        },
+      },
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    expect(deleted).toEqual([])
+    expect(isMemorySubSession("user-prefixed-title")).toBe(false)
+  })
+
+  it("bounds a stalled sub-session listing", async () => {
+    setPluginInput({
+      client: { session: { list: async () => new Promise(() => {}) } },
+    } as any)
+
+    const started = Date.now()
+    await cleanupOldSubSessions(90, 20)
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })

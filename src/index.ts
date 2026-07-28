@@ -105,7 +105,9 @@ export default {
     // instances in one process — see the ARCHITECTURE known-gaps table).
     clearConfigWarnings()
     if (opts) applyPluginOptions(opts)
-    void cleanupOldSubSessions().catch(() => {})
+    // Finish bounded reseeding before hooks can see a surviving memory
+    // sub-session after a plugin reload.
+    await cleanupOldSubSessions()
     return buildHooks()
   },
 }

@@ -22,6 +22,8 @@ export function getPluginInput(): PluginInput | null {
 // hooks skip these so the plugin never injects memory into (or memorizes) its
 // own sub-agents.
 const activeSubSessions = new Set<string>()
+const SUBSESSION_METADATA_KEY = "opencode-codex-memory"
+const SUBSESSION_LIST_TIMEOUT_MS = 5_000
 
 export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
@@ -31,7 +33,10 @@ async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
   const res = await input.client.session.create({
-    body: { title: title ?? `codex-memory-${agent}` },
+    body: {
+      title: title ?? `codex-memory-${agent}`,
+      metadata: { [SUBSESSION_METADATA_KEY]: true },
+    } as any,
   })
   if (!res.data) throw new Error(`session create failed: ${JSON.stringify(res.error ?? {})}`)
   const body = res.data as { id?: string }
@@ -97,10 +102,10 @@ export class SubagentTimeoutError extends Error {
 
 async function abortSession(sessionId: string): Promise<void> {
   const input = getPluginInput()
-  const abort = (input?.client as { session?: { abort?: (opts: { path: { id: string } }) => Promise<unknown> } })?.session?.abort
-  if (typeof abort !== "function") return
+  const session = (input?.client as { session?: { abort?: (opts: { path: { id: string } }) => Promise<unknown> } })?.session
+  if (typeof session?.abort !== "function") return
   try {
-    await abort({ path: { id: sessionId } })
+    await session.abort({ path: { id: sessionId } })
   } catch {
     // Best-effort: deleteSession is the backup cancel path.
   }
@@ -249,19 +254,32 @@ export async function consolidateViaSubagent(memoryRoot: string, diffFileName: s
 // Must exceed the longest legitimate sub-session lifetime (consolidation may
 // run up to CONSOLIDATION_TIMEOUT_MS = 60min), or a second opencode instance /
 // plugin reload would delete a working sub-session mid-run.
-export async function cleanupOldSubSessions(maxAgeMinutes = 90): Promise<void> {
+export async function cleanupOldSubSessions(
+  maxAgeMinutes = 90,
+  timeoutMs = SUBSESSION_LIST_TIMEOUT_MS,
+): Promise<void> {
   const input = getPluginInput()
   if (!input) return
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const res = await input.client.session.list()
+    if (typeof input.client?.session?.list !== "function") return
+    const res = await Promise.race([
+      input.client.session.list(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`session.list timed out after ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
     if (!res.data) return
-    const list = res.data as Array<{ id: string; title?: string; time?: { created?: number } }>
+    const list = res.data as Array<{
+      id: string
+      metadata?: Record<string, unknown>
+      time?: { created?: number }
+    }>
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     for (const s of list) {
-      if (!s.title || !s.title.startsWith("codex-memory-") || !s.id) continue
-      // Reseed the in-process set so a plugin reload/new process still skips
-      // live extract/consolidate sessions in hooks (title prefix is the durable
-      // identity; the Set is only checked on hot paths).
+      if (!s.id || s.metadata?.[SUBSESSION_METADATA_KEY] !== true) continue
+      // Reseed the hot-path set from the durable ownership marker. Titles are
+      // user-editable and must never authorize deletion.
       activeSubSessions.add(s.id)
       const created = s.time?.created ?? 0
       if (created && created < cutoff) {
@@ -270,6 +288,8 @@ export async function cleanupOldSubSessions(maxAgeMinutes = 90): Promise<void> {
     }
   } catch {
     // best effort only
+  } finally {
+    clearTimeout(timer)
   }
 }
 

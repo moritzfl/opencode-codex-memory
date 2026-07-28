@@ -14,6 +14,37 @@ describe("hook wiring", () => {
     expect(typeof hooks.event).toBe("function")
   })
 
+  it("finishes sub-session reseeding before exposing hooks", async () => {
+    let resolveList!: (value: unknown) => void
+    const listResult = new Promise((resolve) => {
+      resolveList = resolve
+    })
+    let settled = false
+    const serverPromise = plugin.server(
+      { client: { session: { list: () => listResult } } } as any,
+      undefined,
+    ).then((hooks) => {
+      settled = true
+      return hooks
+    })
+
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    resolveList({
+      data: [
+        {
+          id: "sub-reseed-before-hooks",
+          metadata: { "opencode-codex-memory": true },
+          time: { created: Date.now() },
+        },
+      ],
+    })
+    await serverPromise
+
+    const { isMemorySubSession } = require("../src/llm.js")
+    expect(isMemorySubSession("sub-reseed-before-hooks")).toBe(true)
+  })
+
   it("marks pollution without ever seeing tool.execute.after", async () => {
     // opencode skips tool.execute.after when the tool throws or the turn is
     // aborted (session/tools.ts has no ensuring/catchAll), so marking must not
