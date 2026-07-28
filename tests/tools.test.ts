@@ -365,6 +365,11 @@ describe("memory_inspect", () => {
       expect(r.output).toContain("unknown/unsupported option 'generate_memoriez' ignored")
       expect(r.output).toContain("codex_interop must be an object")
       expect(r.metadata.config_warnings).toHaveLength(2)
+      // Re-apply with clean opts drops prior warnings (no stale inspect noise).
+      applyPluginOptions({ generate_memories: true })
+      const r2 = await memory_inspect.execute({}, CTX)
+      expect(r2.output).toContain("config_warnings: none")
+      expect(r2.metadata.config_warnings).toHaveLength(0)
     } finally {
       resetConfigWarningsForTest()
       pluginOptions.codex_interop = { import: false, export: false }

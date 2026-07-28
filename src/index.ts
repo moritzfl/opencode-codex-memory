@@ -7,7 +7,7 @@ import { MemoryStore } from "./store.js"
 import { runPhase1 } from "./phase1.js"
 import { runPhase2 } from "./phase2.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession } from "./llm.js"
-import { pluginOptions, recordConfigWarning } from "./options.js"
+import { pluginOptions, recordConfigWarning, clearConfigWarnings } from "./options.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import fs from "fs"
 import path from "path"
@@ -34,16 +34,25 @@ function getStore(): MemoryStore {
 const recordedCitations = new Map<string, Set<string>>()
 const MAX_TRACKED_PARTS = 500
 
-export function takeNewCitations(partKey: string, ids: string[]): string[] {
-  let seen = recordedCitations.get(partKey)
-  if (!seen) {
-    seen = new Set()
-    recordedCitations.set(partKey, seen)
-    if (recordedCitations.size > MAX_TRACKED_PARTS) {
-      const oldest = recordedCitations.keys().next().value
-      if (oldest !== undefined) recordedCitations.delete(oldest)
-    }
+/** Map insert with LRU refresh on hit; drop oldest key when over cap. */
+function touchMapEntry<K, V>(map: Map<K, V>, key: K, create: () => V, max: number): V {
+  const existing = map.get(key)
+  if (existing !== undefined) {
+    map.delete(key)
+    map.set(key, existing)
+    return existing
   }
+  const value = create()
+  map.set(key, value)
+  if (map.size > max) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest)
+  }
+  return value
+}
+
+export function takeNewCitations(partKey: string, ids: string[]): string[] {
+  const seen = touchMapEntry(recordedCitations, partKey, () => new Set<string>(), MAX_TRACKED_PARTS)
   const fresh = ids.filter((id) => !seen.has(id))
   for (const id of fresh) seen.add(id)
   return fresh
@@ -56,7 +65,12 @@ const seenTurnSessions = new Set<string>()
 const MAX_TRACKED_TURN_SESSIONS = 1000
 
 export function markTurnSeen(sessionId: string): boolean {
-  if (seenTurnSessions.has(sessionId)) return false
+  if (seenTurnSessions.has(sessionId)) {
+    // LRU refresh so long-lived sessions are not FIFO-evicted mid-session.
+    seenTurnSessions.delete(sessionId)
+    seenTurnSessions.add(sessionId)
+    return false
+  }
   seenTurnSessions.add(sessionId)
   if (seenTurnSessions.size > MAX_TRACKED_TURN_SESSIONS) {
     const oldest = seenTurnSessions.keys().next().value
@@ -74,7 +88,13 @@ const MAX_TRACKED_IDLE = 500
 
 export function shouldHandleIdle(sessionId: string, now: number = Date.now()): boolean {
   const last = recentIdle.get(sessionId)
-  if (last !== undefined && now - last < IDLE_DEDUP_MS) return false
+  if (last !== undefined && now - last < IDLE_DEDUP_MS) {
+    // LRU refresh (Map.set alone does not reorder).
+    recentIdle.delete(sessionId)
+    recentIdle.set(sessionId, last)
+    return false
+  }
+  recentIdle.delete(sessionId)
   recentIdle.set(sessionId, now)
   if (recentIdle.size > MAX_TRACKED_IDLE) {
     const oldest = recentIdle.keys().next().value
@@ -101,6 +121,7 @@ export default {
     setPluginInput(input)
     pluginClient = input.client
     externalContextCalls.clear()
+    mcpStatusInFlight = null
     if (opts) applyPluginOptions(opts)
     void cleanupOldSubSessions().catch(() => {})
     return buildHooks()
@@ -131,6 +152,8 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 }
 
 export function applyPluginOptions(opts: PluginOptions): void {
+  // Fresh pass each boot/re-apply so memory_inspect never shows stale warnings.
+  clearConfigWarnings()
   for (const key of Object.keys(opts)) {
     if (!KNOWN_OPTION_KEYS.has(key)) {
       // codex uses deny_unknown_fields; a plugin can only warn (recorded for
@@ -172,26 +195,47 @@ export function applyPluginOptions(opts: PluginOptions): void {
  * as "<server>_<tool>", so match tool names against the configured server
  * list. Query live status so runtime MCP changes cannot escape pollution
  * marking. Falls back to the web-tools-only check when status is unavailable.
+ *
+ * Concurrent tool calls coalesce on one in-flight status fetch (no TTL — a
+ * stale cache would miss servers added mid-session).
  */
+let mcpStatusInFlight: Promise<string[] | null> | null = null
+
+async function mcpToolPrefixes(): Promise<string[] | null> {
+  if (!pluginClient) return null
+  if (!mcpStatusInFlight) {
+    mcpStatusInFlight = (async () => {
+      try {
+        const res = await (pluginClient as any).mcp.status()
+        if ((res as any)?.error) return null
+        const servers = (res as any)?.data
+        if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
+        const prefixes: string[] = []
+        for (const [server, status] of Object.entries(servers)) {
+          if (!status || typeof status !== "object" || typeof (status as any).status !== "string") continue
+          // Mirrors OpenCode's McpCatalog.sanitize when constructing tool names.
+          prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
+        }
+        return prefixes
+      } catch {
+        // MCP status unavailable (older OpenCode); keep web-tools-only checks.
+        return null
+      } finally {
+        mcpStatusInFlight = null
+      }
+    })()
+  }
+  return mcpStatusInFlight
+}
+
 async function classifyExternalContextTool(toolName: string): Promise<boolean | null> {
   if (toolName === "websearch" || toolName === "webfetch") return true
-  if (!pluginClient) return null
-  try {
-    const res = await (pluginClient as any).mcp.status()
-    if ((res as any)?.error) return null
-    const servers = (res as any)?.data
-    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
-    for (const [server, status] of Object.entries(servers)) {
-      if (!status || typeof status !== "object" || typeof (status as any).status !== "string") continue
-      // Mirrors OpenCode's McpCatalog.sanitize when constructing tool names.
-      const toolPrefix = server.replace(/[^a-zA-Z0-9_-]/g, "_")
-      if (toolName.startsWith(`${toolPrefix}_`)) return true
-    }
-    return false
-  } catch {
-    // MCP status unavailable (older OpenCode); keep web-tools-only checks.
-    return null
+  const prefixes = await mcpToolPrefixes()
+  if (prefixes === null) return null
+  for (const prefix of prefixes) {
+    if (toolName.startsWith(`${prefix}_`)) return true
   }
+  return false
 }
 
 /**
@@ -354,6 +398,8 @@ function buildHooks() {
       externalContextCalls.delete(key)
       const classification = await classifyExternalContextTool(input.tool)
       if (classification === null) return
+      // delete+set so a reused callID refreshes LRU order (Map.set alone does not).
+      externalContextCalls.delete(key)
       externalContextCalls.set(key, classification)
       if (externalContextCalls.size > MAX_TRACKED_TOOL_CALLS) {
         const oldest = externalContextCalls.keys().next().value

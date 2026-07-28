@@ -56,7 +56,12 @@ export function getConfigWarnings(): readonly string[] {
   return configWarnings
 }
 
+/** Drop warnings from a previous apply pass (server boot / option re-apply). */
+export function clearConfigWarnings(): void {
+  configWarnings.length = 0
+}
+
 /** Test seam: options/warnings are module state, tests need a clean slate. */
 export function resetConfigWarningsForTest(): void {
-  configWarnings.length = 0
+  clearConfigWarnings()
 }
