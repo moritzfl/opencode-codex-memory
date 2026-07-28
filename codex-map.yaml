@@ -90,6 +90,9 @@ mappings:
       builds the injected summary block; takes no cwd/project arg (codex takes
       codex_home only). Extra dedicatedTools flag selects tool-based vs
       codex-style file-based guidance snippets for read_path.md.
+      DELIBERATE EXTENSION (same as path-guard assertMemoryRootSafe): refuses
+      to inject when the memory root is a symlink; codex prompts.rs trusts the
+      root and only rejects a symlinked root on clear.
   - ours: tools/memory.ts
     theirs: codex-rs/ext/memories/src/tools/search.rs
     note: >
@@ -140,8 +143,9 @@ mappings:
       containment + per-component symlink rejection + dot-components hidden,
       mirroring local.rs resolve_scoped_path. DELIBERATE EXTENSION: the root
       itself is also rejected when symlinked (assertMemoryRootSafe, applied by
-      every memory tool); codex only enforces that rule when clearing
-      (control.rs clear_memory_root_contents) and trusts the root elsewhere.
+      every memory tool AND the read-path injector in source.ts); codex only
+      enforces that rule when clearing (control.rs clear_memory_root_contents)
+      and trusts the root elsewhere.
 
   # --- Citations ---
   - ours: src/citation.ts

@@ -1,6 +1,7 @@
 import fs from "fs"
 import path from "path"
 import { memorySummaryPath, memoryRoot } from "./paths.js"
+import { assertMemoryRootSafe } from "./path-guard.js"
 import { truncateToTokens } from "./token.js"
 import { fillTemplate } from "./llm.js"
 
@@ -43,6 +44,13 @@ function readTemplate(): string {
 }
 
 function readMemorySummary(): string | null {
+  // Same root-symlink refusal as the memory tools (path-guard deliberate
+  // extension over codex): never inject a summary from a redirected root.
+  try {
+    assertMemoryRootSafe()
+  } catch {
+    return null
+  }
   const summaryPath = memorySummaryPath()
   if (!fs.existsSync(summaryPath)) return null
 
@@ -81,5 +89,6 @@ export function buildMemorySystemPrompt(dedicatedTools: boolean): string | null 
 }
 
 export function ensureMemoryLayout(): void {
-  fs.mkdirSync(memoryRoot(), { recursive: true })
+  const root = assertMemoryRootSafe()
+  fs.mkdirSync(root, { recursive: true })
 }

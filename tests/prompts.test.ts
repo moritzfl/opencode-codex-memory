@@ -80,6 +80,24 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     expect(prompt).toContain("<memory-citation>")
     expect(prompt).toContain("<session_ids>")
   })
+
+  it("refuses to inject when the memory root is a symlink", () => {
+    const { buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memoryRoot, memorySummaryPath } = require("../src/paths.js")
+    const real = path.join(TEST_ROOT, "real-memories")
+    fs.mkdirSync(real, { recursive: true })
+    fs.writeFileSync(path.join(real, "memory_summary.md"), "v1\n\nsecret from redirected root\n")
+    // memoryRoot() = TEST_ROOT/memories — replace with a symlink.
+    fs.symlinkSync(real, memoryRoot())
+    invalidateCache()
+    expect(buildMemorySystemPrompt(true)).toBeNull()
+    expect(() => {
+      const { ensureMemoryLayout } = require("../src/source.js")
+      ensureMemoryLayout()
+    }).toThrow(/symlink/)
+    // sanity: summary path would have been readable without the guard
+    expect(fs.readFileSync(memorySummaryPath(), "utf8")).toContain("secret")
+  })
 })
 
 describe("template placeholder inventory", () => {
