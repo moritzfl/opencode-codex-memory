@@ -119,6 +119,7 @@ describe("hook wiring", () => {
   it("bounds a stalled MCP status lookup before tool execution", async () => {
     const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-mcp-timeout-"))
     const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    let statusSignal: AbortSignal | undefined
     try {
       require("../src/db.js").closeDb()
       process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
@@ -126,7 +127,12 @@ describe("hook wiring", () => {
         {
           client: {
             session: { list: async () => ({ data: [] }) },
-            mcp: { status: async () => new Promise(() => {}) },
+            mcp: {
+              status: async (options: { signal?: AbortSignal }) => {
+                statusSignal = options.signal
+                return new Promise(() => {})
+              },
+            },
           },
         } as any,
         { disable_on_external_context: true } as any,
@@ -135,6 +141,7 @@ describe("hook wiring", () => {
       const started = Date.now()
       await hooks["tool.execute.before"]({ tool: "local_tool", sessionID: "ses_stalled_mcp", callID: "call_1" })
       expect(Date.now() - started).toBeLessThan(2_000)
+      expect(statusSignal?.aborted).toBe(true)
     } finally {
       await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
       require("../src/db.js").closeDb()
