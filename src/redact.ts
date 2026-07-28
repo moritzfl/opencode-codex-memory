@@ -13,23 +13,39 @@ const REDACTIONS: { re: RegExp; replacement: string }[] = [
   // Optional quotes around the KEY cover JSON/YAML forms like
   // "password": "value" — codex's SECRET_ASSIGNMENT_REGEX misses those (it
   // allows a quote only before the value); this is a deliberate superset.
-  // Quoted and unquoted values are separate so commas/brackets after JSON
-  // primitives stay intact. Unquoted replacements become strings, which are
-  // valid in both JSON and YAML.
+  // Quoted strings are escape-aware. JSON primitives stop before their closing
+  // delimiter; YAML/plain assignments consume the value through the line so a
+  // punctuation-bearing suffix cannot leak. Every replacement stays quoted.
   {
-    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*[:=]\s*)(["'])[^"'\r\n]{4,}\4/gi,
-    replacement: "$1$2$1$3$4[REDACTED]$4",
-  },
-  {
-    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*[:=]\s*)([^\s"',;}\]]{4,})/gi,
+    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*[:=]\s*)"(?:\\.|[^"\\])*"/gi,
     replacement: '$1$2$1$3"[REDACTED]"',
   },
   {
-    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*[:=]\s*)(["'])[^"'\r\n]{4,}\4/gi,
-    replacement: "$1$2$1$3$4[REDACTED]$4",
+    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*[:=]\s*)'(?:''|[^'])*'/gi,
+    replacement: "$1$2$1$3'[REDACTED]'",
   },
   {
-    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*[:=]\s*)([^\s"',;}\]]{4,})/gi,
+    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*:\s*)(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)(?=\s*[,}\]])/gi,
+    replacement: '$1$2$1$3"[REDACTED]"',
+  },
+  {
+    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*[:=]\s*)([^\s"'][^\r\n]*?\S)(?=\s*(?:#.*)?$)/gim,
+    replacement: '$1$2$1$3"[REDACTED]"',
+  },
+  {
+    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*[:=]\s*)"(?:\\.|[^"\\])*"/gi,
+    replacement: '$1$2$1$3"[REDACTED]"',
+  },
+  {
+    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*[:=]\s*)'(?:''|[^'])*'/gi,
+    replacement: "$1$2$1$3'[REDACTED]'",
+  },
+  {
+    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*:\s*)(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)(?=\s*[,}\]])/gi,
+    replacement: '$1$2$1$3"[REDACTED]"',
+  },
+  {
+    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*[:=]\s*)([^\s"'][^\r\n]*?\S)(?=\s*(?:#.*)?$)/gim,
     replacement: '$1$2$1$3"[REDACTED]"',
   },
 ]

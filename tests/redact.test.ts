@@ -58,6 +58,17 @@ describe("redact", () => {
 
   it("keeps YAML structure after redacting an unquoted value", () => {
     expect(redact("password: 123456\nsafe: ok")).toBe('password: "[REDACTED]"\nsafe: ok')
+    expect(redact("password: abcdef;ghijkl")).toBe('password: "[REDACTED]"')
+    expect(redact("password: abc def ghi # keep this comment")).toBe(
+      'password: "[REDACTED]" # keep this comment',
+    )
+  })
+
+  it("redacts a complete JSON string containing escaped quotes", () => {
+    const out = redact(String.raw`{"password":"abc\"defghijkl","safe":"ok"}`)
+    expect(out).toBe('{"password":"[REDACTED]","safe":"ok"}')
+    expect(() => JSON.parse(out)).not.toThrow()
+    expect(out).not.toContain("defghijkl")
   })
 
   it("redacts aws credential assignments with the key name preserved", () => {
