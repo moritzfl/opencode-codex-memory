@@ -14,6 +14,8 @@ import path from "path"
 
 let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
+// Single-flight guard for mcp.status(); see mcpToolPrefixes below.
+let mcpStatusInFlight: Promise<string[] | null> | null = null
 const externalContextCalls = new Map<string, boolean>()
 const MAX_TRACKED_TOOL_CALLS = 500
 
@@ -105,6 +107,10 @@ export default {
     pluginClient = input.client
     externalContextCalls.clear()
     mcpStatusInFlight = null
+    // Unconditional, like the caches above: a boot WITHOUT options must not
+    // inherit the previous boot's warnings (opencode can host several
+    // instances in one process — see the ARCHITECTURE known-gaps table).
+    clearConfigWarnings()
     if (opts) applyPluginOptions(opts)
     void cleanupOldSubSessions().catch(() => {})
     return buildHooks()
@@ -135,7 +141,8 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 }
 
 export function applyPluginOptions(opts: PluginOptions): void {
-  // Fresh pass each boot/re-apply so memory_inspect never shows stale warnings.
+  // Fresh pass per apply so memory_inspect never shows warnings for keys the
+  // caller has since fixed. server() clears too, for boots without options.
   clearConfigWarnings()
   for (const key of Object.keys(opts)) {
     if (!KNOWN_OPTION_KEYS.has(key)) {
@@ -179,11 +186,14 @@ export function applyPluginOptions(opts: PluginOptions): void {
  * list. Query live status so runtime MCP changes cannot escape pollution
  * marking. Falls back to the web-tools-only check when status is unavailable.
  *
- * Concurrent tool calls coalesce on one in-flight status fetch (no TTL — a
- * stale cache would miss servers added mid-session).
+ * Concurrent tool calls coalesce on one in-flight status fetch. Deliberately
+ * NOT cached with a TTL: a stale list would miss servers connected
+ * mid-session and silently stop marking their calls as polluting, which is
+ * the failure this classification exists to prevent. The accepted cost is one
+ * status round trip per tool call — bounded to sessions that opt in with
+ * disable_on_external_context (off by default), and paid only in
+ * tool.execute.before (the after hook reuses the captured verdict).
  */
-let mcpStatusInFlight: Promise<string[] | null> | null = null
-
 async function mcpToolPrefixes(): Promise<string[] | null> {
   if (!pluginClient) return null
   if (!mcpStatusInFlight) {
