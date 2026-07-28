@@ -83,6 +83,17 @@ function parseModelRef(ref: string): { providerID: string; modelID: string } | n
   return { providerID: ref.slice(0, slash), modelID: ref.slice(slash + 1) }
 }
 
+async function abortSession(sessionId: string): Promise<void> {
+  const input = getPluginInput()
+  const abort = (input?.client as { session?: { abort?: (opts: { path: { id: string } }) => Promise<unknown> } })?.session?.abort
+  if (typeof abort !== "function") return
+  try {
+    await abort({ path: { id: sessionId } })
+  } catch {
+    // Best-effort: deleteSession is the backup cancel path.
+  }
+}
+
 /** Runs a sub-agent prompt and returns the raw response data (`{ info, parts }`). */
 async function runPrompt(sessionId: string, prompt: string, agent: string, opts: PromptOptions = {}): Promise<any> {
   const timeoutMs = opts.timeoutMs ?? 300_000
@@ -116,6 +127,13 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
       throw new Error(`sub-agent prompt failed${promptError.name ? ` (${promptError.name})` : ""}${detail ? `: ${detail}` : ""}`)
     }
     return res.data
+  } catch (err) {
+    // Timeout (or other mid-prompt failure): stop the run so tokens stop
+    // burning. deleteSession in the caller finally is the backup.
+    if (err instanceof Error && err.message.includes("timed out")) {
+      await abortSession(sessionId)
+    }
+    throw err
   } finally {
     clearTimeout(timer)
   }
@@ -145,6 +163,8 @@ function extractAssistantText(body: any): string {
 export interface ExtractOptions {
   cwd?: string
   model?: string
+  /** Override the default 1h extract timeout (tests / advanced). */
+  timeoutMs?: number
 }
 
 // JSON Schema for structured stage-1 output. Mirrors the deliverables in
@@ -173,7 +193,7 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
       // Mirrors the stage-1 job lease (1h): codex has no per-request timeout,
       // and a near-600k-char transcript on a slow model can easily exceed a
       // short one — repeated timeouts would exhaust the job's retries.
-      timeoutMs: 3600_000,
+      timeoutMs: opts.timeoutMs ?? 3600_000,
       system: readTemplate("stage_one_system.md"),
       model,
       // opencode enforces json_schema output via a forced StructuredOutput tool
@@ -225,11 +245,14 @@ export async function cleanupOldSubSessions(maxAgeMinutes = 90): Promise<void> {
     const list = res.data as Array<{ id: string; title?: string; time?: { created?: number } }>
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     for (const s of list) {
-      if (s.title && s.title.startsWith("codex-memory-")) {
-        const created = s.time?.created ?? 0
-        if (created && created < cutoff) {
-          await deleteSession(s.id)
-        }
+      if (!s.title || !s.title.startsWith("codex-memory-") || !s.id) continue
+      // Reseed the in-process set so a plugin reload/new process still skips
+      // live extract/consolidate sessions in hooks (title prefix is the durable
+      // identity; the Set is only checked on hot paths).
+      activeSubSessions.add(s.id)
+      const created = s.time?.created ?? 0
+      if (created && created < cutoff) {
+        await deleteSession(s.id)
       }
     }
   } catch {

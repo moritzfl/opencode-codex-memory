@@ -1,5 +1,13 @@
 import { afterEach, describe, it, expect } from "bun:test"
-import { parseExtraction, validateExtraction, extractViaSubagent, setPluginInput, fillTemplate } from "../src/llm.js"
+import {
+  parseExtraction,
+  validateExtraction,
+  extractViaSubagent,
+  setPluginInput,
+  fillTemplate,
+  cleanupOldSubSessions,
+  isMemorySubSession,
+} from "../src/llm.js"
 
 describe("fillTemplate", () => {
   it("substitutes placeholders", () => {
@@ -171,5 +179,58 @@ describe("extractViaSubagent (structured output)", () => {
       },
     }))
     expect(extractViaSubagent("ses_error", "transcript")).rejects.toThrow("ProviderAuthError")
+  })
+
+  it("aborts the sub-session when the prompt times out", async () => {
+    const aborted: string[] = []
+    const deleted: string[] = []
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "sub-timeout" } }),
+        prompt: async () => new Promise(() => {}), // never resolves
+        abort: async (req: { path: { id: string } }) => {
+          aborted.push(req.path.id)
+          return { data: {} }
+        },
+        delete: async (req: { path: { id: string } }) => {
+          deleted.push(req.path.id)
+          return { data: {} }
+        },
+      },
+      config: { get: async () => ({ data: {} }) },
+    }
+    setPluginInput({ client } as any)
+    await expect(extractViaSubagent("ses_timeout", "transcript", { timeoutMs: 30 })).rejects.toThrow(/timed out/)
+    expect(aborted).toEqual(["sub-timeout"])
+    // finally still deletes
+    expect(deleted).toEqual(["sub-timeout"])
+  })
+})
+
+describe("cleanupOldSubSessions", () => {
+  afterEach(() => setPluginInput({ client: undefined } as any))
+
+  it("reseeds isMemorySubSession for live codex-memory-* sessions", async () => {
+    // Simulate a plugin reload: Set is empty, but live sub-sessions remain.
+    expect(isMemorySubSession("sub-live")).toBe(false)
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              { id: "sub-live", title: "codex-memory-consolidate", time: { created: Date.now() } },
+              { id: "sub-old", title: "codex-memory-extract-x", time: { created: Date.now() - 120 * 60 * 1000 } },
+              { id: "user-ses", title: "normal chat", time: { created: Date.now() } },
+            ],
+          }),
+          delete: async () => ({ data: {} }),
+        },
+      },
+    } as any)
+    await cleanupOldSubSessions(90)
+    expect(isMemorySubSession("sub-live")).toBe(true)
+    // Old one was deleted and removed from the set.
+    expect(isMemorySubSession("sub-old")).toBe(false)
+    expect(isMemorySubSession("user-ses")).toBe(false)
   })
 })
