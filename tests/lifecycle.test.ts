@@ -109,6 +109,41 @@ describe("idle event handling", () => {
     expect(shouldHandleIdle("ses_other", 1006)).toBe(true)
   })
 
+  it("does not extend the dedup window through a stream of twins", () => {
+    expect(shouldHandleIdle("ses_stream", 0)).toBe(true)
+    // Repeated twins keep the ORIGINAL stamp, so the 5s window still expires
+    // on schedule instead of sliding forward with every event.
+    expect(shouldHandleIdle("ses_stream", 2000)).toBe(false)
+    expect(shouldHandleIdle("ses_stream", 4000)).toBe(false)
+    expect(shouldHandleIdle("ses_stream", 5001)).toBe(true)
+  })
+
+  it("evicts least-recently-used idle entries, not first-inserted", () => {
+    // Cap is 500. Insert the victim first, then fill to the cap.
+    expect(shouldHandleIdle("lru_keep", 0)).toBe(true)
+    for (let i = 0; i < 499; i++) expect(shouldHandleIdle(`lru_filler_${i}`, 0)).toBe(true)
+    // Touch the oldest entry: dedup path must still refresh its LRU position.
+    expect(shouldHandleIdle("lru_keep", 1)).toBe(false)
+    // Overflow by one: the evicted entry is filler_0, not the refreshed one.
+    expect(shouldHandleIdle("lru_overflow", 0)).toBe(true)
+    // Still tracked (deduped) => survived eviction.
+    expect(shouldHandleIdle("lru_keep", 2)).toBe(false)
+    // Evicted => treated as unseen, so it is handled again.
+    expect(shouldHandleIdle("lru_filler_0", 1)).toBe(true)
+  })
+
+  it("evicts least-recently-used turn sessions, not first-inserted", () => {
+    const { markTurnSeen } = require("../src/index.js")
+    // Cap is 1000; this test owns a fresh key space.
+    expect(markTurnSeen("turn_keep")).toBe(true)
+    for (let i = 0; i < 999; i++) expect(markTurnSeen(`turn_filler_${i}`)).toBe(true)
+    // Re-marking refreshes LRU order without changing the "already seen" answer.
+    expect(markTurnSeen("turn_keep")).toBe(false)
+    expect(markTurnSeen("turn_overflow")).toBe(true)
+    expect(markTurnSeen("turn_keep")).toBe(false)
+    expect(markTurnSeen("turn_filler_0")).toBe(true)
+  })
+
   it("stamps memory mode at turn start via chat.message (codex stamp-at-thread-creation)", async () => {
     process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
     const hooks = (await plugin.server({ client: {} } as any, undefined)) as any

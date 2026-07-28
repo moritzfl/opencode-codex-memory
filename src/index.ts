@@ -34,15 +34,14 @@ function getStore(): MemoryStore {
 const recordedCitations = new Map<string, Set<string>>()
 const MAX_TRACKED_PARTS = 500
 
-/** Map insert with LRU refresh on hit; drop oldest key when over cap. */
-function touchMapEntry<K, V>(map: Map<K, V>, key: K, create: () => V, max: number): V {
-  const existing = map.get(key)
-  if (existing !== undefined) {
-    map.delete(key)
-    map.set(key, existing)
-    return existing
-  }
-  const value = create()
+/**
+ * Inserts `key` at the most-recently-used end and evicts the oldest entry
+ * beyond `max`. Map.set alone does NOT reorder an existing key, so the
+ * delete is what makes eviction least-recently-*used* rather than
+ * first-inserted — long-lived sessions must not age out mid-use.
+ */
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, max: number): V {
+  map.delete(key)
   map.set(key, value)
   if (map.size > max) {
     const oldest = map.keys().next().value
@@ -52,7 +51,8 @@ function touchMapEntry<K, V>(map: Map<K, V>, key: K, create: () => V, max: numbe
 }
 
 export function takeNewCitations(partKey: string, ids: string[]): string[] {
-  const seen = touchMapEntry(recordedCitations, partKey, () => new Set<string>(), MAX_TRACKED_PARTS)
+  const seen = recordedCitations.get(partKey) ?? new Set<string>()
+  lruSet(recordedCitations, partKey, seen, MAX_TRACKED_PARTS)
   const fresh = ids.filter((id) => !seen.has(id))
   for (const id of fresh) seen.add(id)
   return fresh
@@ -60,23 +60,14 @@ export function takeNewCitations(partKey: string, ids: string[]): string[] {
 
 // One stamp+pump per session per process from the chat.message hook; later
 // messages in the same session add nothing (stamp is idempotent, the pump
-// re-fires on idle anyway).
-const seenTurnSessions = new Set<string>()
+// re-fires on idle anyway). Value = first-seen timestamp (debugging only).
+const seenTurnSessions = new Map<string, number>()
 const MAX_TRACKED_TURN_SESSIONS = 1000
 
 export function markTurnSeen(sessionId: string): boolean {
-  if (seenTurnSessions.has(sessionId)) {
-    // LRU refresh so long-lived sessions are not FIFO-evicted mid-session.
-    seenTurnSessions.delete(sessionId)
-    seenTurnSessions.add(sessionId)
-    return false
-  }
-  seenTurnSessions.add(sessionId)
-  if (seenTurnSessions.size > MAX_TRACKED_TURN_SESSIONS) {
-    const oldest = seenTurnSessions.keys().next().value
-    if (oldest !== undefined) seenTurnSessions.delete(oldest)
-  }
-  return true
+  const first = seenTurnSessions.get(sessionId)
+  lruSet(seenTurnSessions, sessionId, first ?? Date.now(), MAX_TRACKED_TURN_SESSIONS)
+  return first === undefined
 }
 
 // opencode 1.17 publishes BOTH session.status {type:"idle"} and the
@@ -88,19 +79,11 @@ const MAX_TRACKED_IDLE = 500
 
 export function shouldHandleIdle(sessionId: string, now: number = Date.now()): boolean {
   const last = recentIdle.get(sessionId)
-  if (last !== undefined && now - last < IDLE_DEDUP_MS) {
-    // LRU refresh (Map.set alone does not reorder).
-    recentIdle.delete(sessionId)
-    recentIdle.set(sessionId, last)
-    return false
-  }
-  recentIdle.delete(sessionId)
-  recentIdle.set(sessionId, now)
-  if (recentIdle.size > MAX_TRACKED_IDLE) {
-    const oldest = recentIdle.keys().next().value
-    if (oldest !== undefined) recentIdle.delete(oldest)
-  }
-  return true
+  const deduped = last !== undefined && now - last < IDLE_DEDUP_MS
+  // Keep the original stamp while deduping so the window cannot be extended
+  // indefinitely by a stream of twins; refresh LRU order either way.
+  lruSet(recentIdle, sessionId, deduped ? last! : now, MAX_TRACKED_IDLE)
+  return !deduped
 }
 
 export function handleSessionDeleted(
@@ -398,13 +381,7 @@ function buildHooks() {
       externalContextCalls.delete(key)
       const classification = await classifyExternalContextTool(input.tool)
       if (classification === null) return
-      // delete+set so a reused callID refreshes LRU order (Map.set alone does not).
-      externalContextCalls.delete(key)
-      externalContextCalls.set(key, classification)
-      if (externalContextCalls.size > MAX_TRACKED_TOOL_CALLS) {
-        const oldest = externalContextCalls.keys().next().value
-        if (oldest !== undefined) externalContextCalls.delete(oldest)
-      }
+      lruSet(externalContextCalls, key, classification, MAX_TRACKED_TOOL_CALLS)
     } catch (err) {
       console.error("[opencode-codex-memory] tool.execute.before error:", err)
     }
