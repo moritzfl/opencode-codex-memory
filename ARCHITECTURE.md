@@ -97,16 +97,32 @@ constraints — read before changing the corresponding subsystem.
 opencode's V1 `experimental.chat.system.transform` has no epoch-aware injection;
 the system prompt is rebuilt each turn, and codex's V2 `SystemContext.Source` is
 not exposed to plugins. **Workaround:** append the *same byte-identical string*
-every turn. opencode folds all plugin appends into the second system message,
-and its provider transform places cache breakpoints on the first two system
-messages. The stable memory block therefore gets its own cache segment: changing
-memory invalidates that segment without invalidating opencode's base prompt.
-The plugin caches the summary in process memory and only re-reads the file when
-Phase 2 writes a new version. Sessionless invocations of the same hook (used by
-opencode while generating agent definitions) are ignored.
+every turn.
 
-Limitation: if opencode's own prompt prefix shifts (date, skills, MCP tool set),
-the prefix cache misses — same as any plugin hook. Accepted.
+opencode pre-joins everything of its own (agent/provider prompt, environment,
+AGENTS.md, MCP instructions, skills, user system) into a single `system[0]`
+before calling the hook, then keeps at most two entries: appending one string
+leaves `[base, memory]` untouched, and two or more are collapsed into
+`[base, rest.join("\n")]` (`session/llm/request.ts`). Its provider transform
+puts cache breakpoints on the first two system messages
+(`provider/transform.ts`, `.slice(0, 2)`). The stable memory block therefore
+gets its own cache segment: changing memory invalidates that segment without
+invalidating opencode's base prompt. The plugin caches the summary in process
+memory and only re-reads the file when Phase 2 writes a new version. Sessionless
+invocations of the same hook (used by opencode while generating agent
+definitions) are ignored, as is a symlinked memory root.
+
+Limitations, both accepted:
+
+- If opencode's own prompt prefix shifts (date, skills, MCP tool set), the
+  prefix cache misses — same as any plugin hook.
+- On OpenAI-OAuth providers opencode sends **no system messages at all**; the
+  whole array is joined into the request's `instructions` field
+  (`request.ts`), so no system cache breakpoints exist and D1 buys nothing
+  there. Injection itself is unaffected — only the caching benefit is.
+- Another plugin appending a *volatile* string triggers the collapse and shares
+  one cache segment with ours, invalidating it whenever that plugin's text
+  changes. Plugin order is deterministic, so a stable co-tenant is harmless.
 
 ### D2 — Consolidation subagent sandboxing (`opencode.json`)
 
