@@ -45,29 +45,32 @@ function readTemplate(): string {
 
 function readMemorySummary(): string | null {
   let summaryPath: string
+  let fd: number | undefined
   try {
     // Use the same component-by-component symlink refusal as the memory tools:
     // neither the root nor memory_summary.md may redirect outside the workspace.
     summaryPath = safeResolveMemoryPath("memory_summary.md")
+    fd = fs.openSync(summaryPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
+    const stat = fs.fstatSync(fd)
+    if (!stat.isFile()) return null
+    if (cached && cached.mtime === stat.mtimeMs) {
+      return cached.content
+    }
+
+    const raw = fs.readFileSync(fd, "utf8").trim()
+    if (!raw) return null
+
+    const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
+    cached = {
+      content: truncated,
+      mtime: stat.mtimeMs,
+    }
+    return truncated
   } catch {
     return null
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd)
   }
-  if (!fs.existsSync(summaryPath)) return null
-
-  const stat = fs.statSync(summaryPath)
-  if (cached && cached.mtime === stat.mtimeMs) {
-    return cached.content
-  }
-
-  const raw = fs.readFileSync(summaryPath, "utf8").trim()
-  if (!raw) return null
-
-  const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
-  cached = {
-    content: truncated,
-    mtime: stat.mtimeMs,
-  }
-  return truncated
 }
 
 export function invalidateCache(): void {
