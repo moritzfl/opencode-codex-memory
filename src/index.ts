@@ -16,6 +16,7 @@ let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
 // Single-flight guard for mcp.status(); see mcpToolPrefixes below.
 let mcpStatusInFlight: Promise<string[] | null> | null = null
+const MCP_STATUS_TIMEOUT_MS = 1_000
 
 // Deliberately uncached: openDb() is already a singleton, and caching a store
 // here would hold a stale handle across closeDb() (e.g. after memory_reset).
@@ -187,14 +188,24 @@ export function applyPluginOptions(opts: PluginOptions): void {
  * the failure this classification exists to prevent. The accepted cost is one
  * status round trip per tool call — bounded to sessions that opt in with
  * disable_on_external_context (off by default), and paid only in
- * tool.execute.before (the after hook reuses the captured verdict).
+ * tool.execute.before.
  */
 async function mcpToolPrefixes(): Promise<string[] | null> {
   if (!pluginClient) return null
   if (!mcpStatusInFlight) {
     mcpStatusInFlight = (async () => {
+      const controller = new AbortController()
+      let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        const res = await (pluginClient as any).mcp.status()
+        const res = await Promise.race([
+          (pluginClient as any).mcp.status({ signal: controller.signal }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort()
+              reject(new Error(`mcp.status timed out after ${MCP_STATUS_TIMEOUT_MS}ms`))
+            }, MCP_STATUS_TIMEOUT_MS)
+          }),
+        ])
         if ((res as any)?.error) return null
         const servers = (res as any)?.data
         if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
@@ -209,6 +220,7 @@ async function mcpToolPrefixes(): Promise<string[] | null> {
         // MCP status unavailable (older OpenCode); keep web-tools-only checks.
         return null
       } finally {
+        clearTimeout(timer)
         mcpStatusInFlight = null
       }
     })()

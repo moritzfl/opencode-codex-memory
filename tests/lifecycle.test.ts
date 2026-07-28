@@ -116,6 +116,34 @@ describe("hook wiring", () => {
     }
   })
 
+  it("bounds a stalled MCP status lookup before tool execution", async () => {
+    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-mcp-timeout-"))
+    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    try {
+      require("../src/db.js").closeDb()
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
+      const hooks = (await plugin.server(
+        {
+          client: {
+            session: { list: async () => ({ data: [] }) },
+            mcp: { status: async () => new Promise(() => {}) },
+          },
+        } as any,
+        { disable_on_external_context: true } as any,
+      )) as any
+
+      const started = Date.now()
+      await hooks["tool.execute.before"]({ tool: "local_tool", sessionID: "ses_stalled_mcp", callID: "call_1" })
+      expect(Date.now() - started).toBeLessThan(2_000)
+    } finally {
+      await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
+      require("../src/db.js").closeDb()
+      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+      fs.rmSync(testRoot, { recursive: true, force: true })
+    }
+  })
+
   it("does not inject memory into the sessionless agent-generation hook", async () => {
     const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-system-hook-"))
     const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
