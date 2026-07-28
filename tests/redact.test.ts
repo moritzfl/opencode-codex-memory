@@ -62,6 +62,13 @@ describe("redact", () => {
     expect(redact("password: abc def ghi # keep this comment")).toBe(
       'password: "[REDACTED]" # keep this comment',
     )
+    expect(redact("password:\nsafe: ok")).toBe("password:\nsafe: ok")
+    expect(redact("{password: hunter2, safe: ok}")).toBe('{password: "[REDACTED]", safe: ok}')
+    expect(redact("{\n  password: hunter2,\n  safe: ok\n}")).toBe(
+      '{\n  password: "[REDACTED]",\n  safe: ok\n}',
+    )
+    expect(redact("{ broken\npassword: abc,def")).toBe('{ broken\npassword: "[REDACTED]"')
+    expect(redact("[ broken\npassword:\nsafe: ok")).toBe("[ broken\npassword:\nsafe: ok")
   })
 
   it("redacts a complete JSON string containing escaped quotes", () => {
@@ -69,6 +76,33 @@ describe("redact", () => {
     expect(out).toBe('{"password":"[REDACTED]","safe":"ok"}')
     expect(() => JSON.parse(out)).not.toThrow()
     expect(out).not.toContain("defghijkl")
+  })
+
+  it("preserves safe fields around nested structured secret values", () => {
+    for (const value of ['{"nested":{"value":"x"}}', '["x",{"y":1}]']) {
+      const input = `{"password":${value},"safe":"ok"}`
+      const out = redact(input)
+      expect(() => JSON.parse(out)).not.toThrow()
+      expect(JSON.parse(out)).toEqual({ password: "[REDACTED]", safe: "ok" })
+    }
+  })
+
+  it("redacts pretty-printed JSON values after a newline", () => {
+    const input = '{\n  "password":\n    "hunter2",\n  "safe": "ok"\n}'
+    const out = redact(input)
+    expect(JSON.parse(out)).toEqual({ password: "[REDACTED]", safe: "ok" })
+  })
+
+  it("tracks YAML single quotes while scanning nested flow values", () => {
+    expect(redact("{password: {value: 'abc}def'}, safe: ok}")).toBe(
+      '{password: "[REDACTED]", safe: ok}',
+    )
+  })
+
+  it("preserves embedded tool payload structure around a nested secret", () => {
+    expect(redact('[tool: demo] {"password":{"nested":"x"},"safe":"ok"}')).toBe(
+      '[tool: demo] {"password":"[REDACTED]","safe":"ok"}',
+    )
   })
 
   it("redacts aws credential assignments with the key name preserved", () => {
