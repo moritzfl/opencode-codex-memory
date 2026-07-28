@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- If the memory root is a symlink, the plugin no longer injects that content
+  into new chats (same refusal the tools already used for writes).
+- Timed-out background extraction/consolidation now aborts the model run
+  instead of leaving it running until the session is deleted.
+- After a plugin reload, live memory sub-sessions are recognized again so they
+  are not treated like ordinary chats.
+- Citation usage for several sessions is recorded in one database transaction,
+  so a mid-batch interruption cannot update only some of them.
+- `memory_inspect` config warnings reset when options are re-applied, so fixed
+  typos no longer linger.
+- Under heavy load, citation and idle tracking is less likely to forget
+  long-lived sessions (LRU refresh instead of drop-oldest-only).
+
 ## [0.4.1] - 2026-07-26
 
 ### Fixed
