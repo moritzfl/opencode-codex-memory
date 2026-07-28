@@ -90,9 +90,10 @@ mappings:
       builds the injected summary block; takes no cwd/project arg (codex takes
       codex_home only). Extra dedicatedTools flag selects tool-based vs
       codex-style file-based guidance snippets for read_path.md.
-      DELIBERATE EXTENSION (same as path-guard assertMemoryRootSafe): refuses
-      to inject when the memory root is a symlink; codex prompts.rs trusts the
-      root and only rejects a symlinked root on clear.
+      DELIBERATE EXTENSION (same as the memory tools' path guard): resolves
+      memory_summary.md component-by-component and refuses injection when the
+      root or summary file is a symlink; codex prompts.rs trusts the root and
+      only rejects a symlinked root on clear.
   - ours: tools/memory.ts
     theirs: codex-rs/ext/memories/src/tools/search.rs
     note: >
@@ -143,9 +144,9 @@ mappings:
       containment + per-component symlink rejection + dot-components hidden,
       mirroring local.rs resolve_scoped_path. DELIBERATE EXTENSION: the root
       itself is also rejected when symlinked (assertMemoryRootSafe, applied by
-      every memory tool AND the read-path injector in source.ts); codex only
-      enforces that rule when clearing (control.rs clear_memory_root_contents)
-      and trusts the root elsewhere.
+      every memory tool; source.ts uses the full safeResolveMemoryPath for the
+      injected summary); codex only enforces that rule when clearing
+      (control.rs clear_memory_root_contents) and trusts the root elsewhere.
 
   # --- Citations ---
   - ours: src/citation.ts
@@ -371,7 +372,9 @@ mappings:
       alternative under-marks. Classification covers websearch/webfetch plus
       every live MCP server via client.mcp.status(); server names use
       opencode's own tool-prefix sanitization (codex marks all MCP servers
-      pollutes_memory=true). codex has a third channel with no port:
+      pollutes_memory=true). The live status request is aborted after 1s so a
+      stalled local endpoint cannot block tool execution. codex has a third
+      channel with no port:
       registry.rs marks on output.contains_external_context() after a
       successful builtin tool — opencode exposes no equivalent output flag. (3) the memorize / memorize-extract
       sub-agents self-register through the plugin config hook (user-defined
@@ -407,6 +410,10 @@ mappings:
       exception). parseExtraction (brace-scrape, unknown-field tolerant) stays
       as a fallback for hosts/models that don't populate structured. per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
+      timed-out prompts call the bound session.abort SDK method before
+      asynchronous session deletion; plugin-created sessions carry a durable
+      metadata ownership marker so startup cleanup never trusts user-editable
+      titles, and plugin startup awaits that cleanup with a bounded list call;
       AssistantMessage.error is treated as a failed sub-agent turn even though
       opencode returns it with HTTP 200;
       reasoning effort is not pinned (codex: Low for extraction, Medium for
@@ -427,11 +434,11 @@ mappings:
       patterns, uses labeled [REDACTED:*] tokens vs codex's [REDACTED_SECRET],
       allows quotes around the assignment KEY so JSON/YAML forms
       like "password": "..." are caught — codex's SECRET_ASSIGNMENT_REGEX
-      misses those — and uses a 4-char value floor vs codex's 8. Like codex
-      ($1$2$3), the assignment replacement preserves key + separator + opening
-      quote and never consumes the closing quote, so redacting a JSON/YAML tool
-      payload leaves it parseable. The AKIA/bearer patterns omit codex's \b
-      anchors, which only widens them.
+      misses those — and uses a 4-char value floor vs codex's 8. Assignment
+      replacement preserves key, separator, quotes, and trailing delimiters;
+      unquoted primitive values become quoted [REDACTED] strings, so redacting
+      a JSON/YAML tool payload leaves it parseable. The AKIA/bearer patterns
+      omit codex's \b anchors, which only widens them.
       isMemoryExcludedFragment lives here too (upstream: memories/write
       phase1.rs is_memory_excluded_contextual_user_fragment) but is INERT on
       opencode: AGENTS.md is joined into system[0] and skills are rendered as
