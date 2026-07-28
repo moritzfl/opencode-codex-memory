@@ -119,11 +119,14 @@ export class MemoryStore {
 
   recordUsage(sessionIds: string[]): void {
     if (sessionIds.length === 0) return
+    // One transaction for the whole batch (codex record_stage1_output_usage).
     const ts = now()
     const stmt = this.db.prepare(
       "UPDATE memory_stage1_outputs SET usage_count = usage_count + 1, last_usage = ? WHERE session_id = ?",
     )
-    for (const id of sessionIds) stmt.run(ts, id)
+    this.db.transaction(() => {
+      for (const id of sessionIds) stmt.run(ts, id)
+    })()
   }
 
   claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string, maxClaimed?: number): Stage1Claim[] {
