@@ -48,6 +48,18 @@ describe("redact", () => {
     expect(JSON.parse(out).password).toBe("[REDACTED]")
   })
 
+  it("keeps JSON valid when secret values are unquoted primitives", () => {
+    for (const value of ["123456", "true", "null"]) {
+      const out = redact(`{"password":${value},"safe":"ok"}`)
+      expect(() => JSON.parse(out)).not.toThrow()
+      expect(JSON.parse(out)).toEqual({ password: "[REDACTED]", safe: "ok" })
+    }
+  })
+
+  it("keeps YAML structure after redacting an unquoted value", () => {
+    expect(redact("password: 123456\nsafe: ok")).toBe('password: "[REDACTED]"\nsafe: ok')
+  })
+
   it("redacts aws credential assignments with the key name preserved", () => {
     const out = redact('aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG"')
     expect(out).not.toContain("wJalrXUtnFEMI")
