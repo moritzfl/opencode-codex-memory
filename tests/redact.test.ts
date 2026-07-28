@@ -29,7 +29,7 @@ describe("redact", () => {
   })
 
   it("redacts password assignments", () => {
-    expect(redact('password: "supersecret123"')).toMatch(/password=\[REDACTED\]/)
+    expect(redact('password: "supersecret123"')).toBe('password: "[REDACTED]"')
   })
 
   it("redacts quoted keys in JSON tool payloads", () => {
@@ -39,12 +39,22 @@ describe("redact", () => {
     expect(redact('"access-token"="abcd1234efgh"')).not.toContain("abcd1234efgh")
   })
 
+  // codex replaces with $1$2$3, keeping key + separator + opening quote so the
+  // surrounding document stays parseable; the port matches that shape.
+  it("preserves the separator and quoting so redacted JSON stays valid", () => {
+    const out = redact('{"password":"hunter2secret"}')
+    expect(out).toBe('{"password":"[REDACTED]"}')
+    expect(() => JSON.parse(out)).not.toThrow()
+    expect(JSON.parse(out).password).toBe("[REDACTED]")
+  })
+
   it("redacts aws credential assignments with the key name preserved", () => {
     const out = redact('aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG"')
     expect(out).not.toContain("wJalrXUtnFEMI")
-    expect(out).toContain("aws_secret_access_key=[REDACTED]")
+    expect(out).toBe('aws_secret_access_key = "[REDACTED]"')
     const json = redact('"aws_access_key_id": "AKIAIOSFODNN7EXAMPLE"')
     expect(json).not.toContain("AKIAIOSFODNN7EXAMPLE")
+    expect(json).toBe('"aws_access_key_id": "[REDACTED]"')
   })
 
   it("leaves non-secret text intact", () => {

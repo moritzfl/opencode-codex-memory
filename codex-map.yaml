@@ -425,10 +425,20 @@ mappings:
       DELIBERATE SUPERSET: codex ships 4 patterns (openai key, AKIA, bearer,
       bare-key assignment); the port adds anthropic/github/slack/private-key
       patterns, uses labeled [REDACTED:*] tokens vs codex's [REDACTED_SECRET],
-      and allows quotes around the assignment KEY so JSON/YAML forms
+      allows quotes around the assignment KEY so JSON/YAML forms
       like "password": "..." are caught — codex's SECRET_ASSIGNMENT_REGEX
-      misses those. isMemoryExcludedFragment lives here too (upstream:
-      memories/write phase1.rs is_memory_excluded_contextual_user_fragment).
+      misses those — and uses a 4-char value floor vs codex's 8. Like codex
+      ($1$2$3), the assignment replacement preserves key + separator + opening
+      quote and never consumes the closing quote, so redacting a JSON/YAML tool
+      payload leaves it parseable. The AKIA/bearer patterns omit codex's \b
+      anchors, which only widens them.
+      isMemoryExcludedFragment lives here too (upstream: memories/write
+      phase1.rs is_memory_excluded_contextual_user_fragment) but is INERT on
+      opencode: AGENTS.md is joined into system[0] and skills are rendered as
+      an <available_skills> system catalog (skill/index.ts fmt), so neither
+      ever appears as a user text part. Kept for parity; the structural
+      `ignored`-part filter in capture.ts is what actually excludes
+      non-conversation content here.
   - ours: src/token.ts
     theirs: codex-rs/utils/output-truncation
     note: token-limit truncation for the 2500-token summary cap (chars/4 estimate here).

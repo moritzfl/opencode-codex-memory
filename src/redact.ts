@@ -13,8 +13,17 @@ const REDACTIONS: { re: RegExp; replacement: string }[] = [
   // Optional quotes around the KEY cover JSON/YAML forms like
   // "password": "value" — codex's SECRET_ASSIGNMENT_REGEX misses those (it
   // allows a quote only before the value); this is a deliberate superset.
-  { re: /["']?(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)["']?\s*[:=]\s*["']?[^\s"']{4,}["']?/gi, replacement: "$1=[REDACTED]" },
-  { re: /["']?(aws_secret_access_key|aws_access_key_id)["']?\s*[:=]\s*["']?[^\s"']{4,}["']?/gi, replacement: "$1=[REDACTED]" },
+  // Key, separator and opening quote are preserved (codex replaces with
+  // $1$2$3), and the closing quote is left unconsumed, so a redacted JSON or
+  // YAML payload keeps its shape instead of collapsing to `key=[REDACTED]`.
+  {
+    re: /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)\1(\s*[:=]\s*)(["']?)[^\s"']{4,}/gi,
+    replacement: "$1$2$1$3$4[REDACTED]",
+  },
+  {
+    re: /(["']?)(aws_secret_access_key|aws_access_key_id)\1(\s*[:=]\s*)(["']?)[^\s"']{4,}/gi,
+    replacement: "$1$2$1$3$4[REDACTED]",
+  },
 ]
 
 export function redact(text: string): string {
@@ -38,6 +47,14 @@ function matchesMarkedFragment(text: string, startMarker: string, endMarker: str
  * injected AGENTS.md instruction blocks and <skill> payloads inside user
  * content are contextual boilerplate, not conversation — they must not be
  * mined for memories.
+ *
+ * NOTE: inert on opencode today, kept for codex parity and future-proofing.
+ * opencode delivers both of these through the SYSTEM prompt, never as a user
+ * text part: AGENTS.md is joined into `system[0]` and skills are a
+ * `<available_skills>` catalog (skill/index.ts `fmt`), so neither shape ever
+ * reaches this check. Do not treat it as an active safeguard — the structural
+ * filters in capture.ts (`ignored` parts) are what actually exclude
+ * non-conversation content on this platform.
  */
 export function isMemoryExcludedFragment(text: string): boolean {
   return (
