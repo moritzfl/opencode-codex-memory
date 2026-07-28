@@ -83,6 +83,18 @@ function parseModelRef(ref: string): { providerID: string; modelID: string } | n
   return { providerID: ref.slice(0, slash), modelID: ref.slice(slash + 1) }
 }
 
+/**
+ * Thrown when a sub-agent prompt exceeds its budget. A distinct type (rather
+ * than matching on the message text) is what tells the catch below that the
+ * run is still executing server-side and must be aborted.
+ */
+export class SubagentTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`sub-agent prompt timed out after ${timeoutMs}ms`)
+    this.name = "SubagentTimeoutError"
+  }
+}
+
 async function abortSession(sessionId: string): Promise<void> {
   const input = getPluginInput()
   const abort = (input?.client as { session?: { abort?: (opts: { path: { id: string } }) => Promise<unknown> } })?.session?.abort
@@ -117,7 +129,7 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
     const res = await Promise.race([
       promptPromise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`sub-agent prompt timed out after ${timeoutMs}ms`)), timeoutMs)
+        timer = setTimeout(() => reject(new SubagentTimeoutError(timeoutMs)), timeoutMs)
       }),
     ])
     if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
@@ -128,9 +140,10 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
     }
     return res.data
   } catch (err) {
-    // Timeout (or other mid-prompt failure): stop the run so tokens stop
-    // burning. deleteSession in the caller finally is the backup.
-    if (err instanceof Error && err.message.includes("timed out")) {
+    // Only a timeout leaves the turn running server-side; every other failure
+    // here means the request already settled. Stop the run so tokens stop
+    // burning — deleteSession in the caller finally is the backup.
+    if (err instanceof SubagentTimeoutError) {
       await abortSession(sessionId)
     }
     throw err

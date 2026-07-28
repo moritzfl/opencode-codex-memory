@@ -7,6 +7,7 @@ import {
   fillTemplate,
   cleanupOldSubSessions,
   isMemorySubSession,
+  SubagentTimeoutError,
 } from "../src/llm.js"
 
 describe("fillTemplate", () => {
@@ -200,10 +201,34 @@ describe("extractViaSubagent (structured output)", () => {
       config: { get: async () => ({ data: {} }) },
     }
     setPluginInput({ client } as any)
-    await expect(extractViaSubagent("ses_timeout", "transcript", { timeoutMs: 30 })).rejects.toThrow(/timed out/)
+    // Typed, not message-matched: the abort branch keys on the class.
+    await expect(extractViaSubagent("ses_timeout", "transcript", { timeoutMs: 30 })).rejects.toBeInstanceOf(
+      SubagentTimeoutError,
+    )
     expect(aborted).toEqual(["sub-timeout"])
     // finally still deletes
     expect(deleted).toEqual(["sub-timeout"])
+  })
+
+  it("does not abort when the failure is not a timeout", async () => {
+    const aborted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-err" } }),
+          prompt: async () => ({ data: { info: { error: { name: "ProviderAuthError" } } } }),
+          abort: async (req: { path: { id: string } }) => {
+            aborted.push(req.path.id)
+            return { data: {} }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    await expect(extractViaSubagent("ses_err", "transcript")).rejects.toThrow("ProviderAuthError")
+    // The request already settled — aborting would be a pointless extra call.
+    expect(aborted).toEqual([])
   })
 })
 
