@@ -24,6 +24,7 @@ export function getPluginInput(): PluginInput | null {
 const activeSubSessions = new Set<string>()
 const SUBSESSION_METADATA_KEY = "opencode-codex-memory"
 const SUBSESSION_LIST_TIMEOUT_MS = 5_000
+const SUBSESSION_ABORT_TIMEOUT_MS = 1_000
 
 export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
@@ -102,12 +103,26 @@ export class SubagentTimeoutError extends Error {
 
 async function abortSession(sessionId: string): Promise<void> {
   const input = getPluginInput()
-  const session = (input?.client as { session?: { abort?: (opts: { path: { id: string } }) => Promise<unknown> } })?.session
+  const session = (input?.client as {
+    session?: { abort?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<unknown> }
+  })?.session
   if (typeof session?.abort !== "function") return
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    await session.abort({ path: { id: sessionId } })
+    await Promise.race([
+      session.abort({ path: { id: sessionId }, signal: controller.signal }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error(`session.abort timed out after ${SUBSESSION_ABORT_TIMEOUT_MS}ms`))
+        }, SUBSESSION_ABORT_TIMEOUT_MS)
+      }),
+    ])
   } catch {
     // Best-effort: deleteSession is the backup cancel path.
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -272,18 +287,23 @@ export async function cleanupOldSubSessions(
     if (!res.data) return
     const list = res.data as Array<{
       id: string
+      title?: string
       metadata?: Record<string, unknown>
       time?: { created?: number }
     }>
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     for (const s of list) {
-      if (!s.id || s.metadata?.[SUBSESSION_METADATA_KEY] !== true) continue
+      if (!s.id) continue
+      const owned = s.metadata?.[SUBSESSION_METADATA_KEY] === true
+      const legacy = isLegacySubSessionTitle(s.title)
+      if (!owned && !legacy) continue
       // Reseed the hot-path set from the durable ownership marker. Titles are
-      // user-editable and must never authorize deletion.
+      // accepted only for pre-marker sessions and never authorize deletion.
       activeSubSessions.add(s.id)
+      if (!owned) continue
       const created = s.time?.created ?? 0
       if (created && created < cutoff) {
-        await deleteSession(s.id)
+        void deleteSession(s.id)
       }
     }
   } catch {
@@ -293,15 +313,20 @@ export async function cleanupOldSubSessions(
   }
 }
 
+function isLegacySubSessionTitle(title: string | undefined): boolean {
+  return title === "codex-memory-consolidate" || /^codex-memory-extract-ses_[A-Za-z0-9]+$/.test(title ?? "")
+}
+
 async function deleteSession(id: string): Promise<void> {
-  activeSubSessions.delete(id)
   const input = getPluginInput()
   if (!input) return
   try {
     const res = await input.client.session.delete({ path: { id } })
     if (res.error) {
       console.warn(`[opencode-codex-memory] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
+      return
     }
+    activeSubSessions.delete(id)
   } catch (err) {
     console.warn(`[opencode-codex-memory] error deleting sub-session ${id}:`, err)
   }

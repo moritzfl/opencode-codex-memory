@@ -239,6 +239,35 @@ describe("extractViaSubagent (structured output)", () => {
     // The request already settled — aborting would be a pointless extra call.
     expect(aborted).toEqual([])
   })
+
+  it("does not let a stalled abort hide the original prompt timeout", async () => {
+    let abortSignal: AbortSignal | undefined
+    const deleted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-stalled-abort" } }),
+          prompt: async () => new Promise(() => {}),
+          abort: async (req: { signal?: AbortSignal }) => {
+            abortSignal = req.signal
+            return new Promise(() => {})
+          },
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: {} }
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    await expect(extractViaSubagent("ses_stalled_abort", "transcript", { timeoutMs: 20 })).rejects.toBeInstanceOf(
+      SubagentTimeoutError,
+    )
+    expect(abortSignal?.aborted).toBe(true)
+    await Promise.resolve()
+    expect(deleted).toEqual(["sub-stalled-abort"])
+  })
 })
 
 describe("cleanupOldSubSessions", () => {
@@ -262,10 +291,85 @@ describe("cleanupOldSubSessions", () => {
       },
     } as any)
     await cleanupOldSubSessions(90)
+    await Promise.resolve()
     expect(isMemorySubSession("sub-live")).toBe(true)
     // Old one was deleted and removed from the set.
     expect(isMemorySubSession("sub-old")).toBe(false)
     expect(isMemorySubSession("user-ses")).toBe(false)
+  })
+
+  it("reseeds legacy sub-sessions without allowing their titles to authorize deletion", async () => {
+    const deleted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              {
+                id: "legacy-live",
+                title: "codex-memory-extract-ses_legacy123",
+                time: { created: Date.now() - 120 * 60 * 1000 },
+              },
+            ],
+          }),
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: {} }
+          },
+        },
+      },
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    expect(isMemorySubSession("legacy-live")).toBe(true)
+    expect(deleted).toEqual([])
+  })
+
+  it("does not block startup on stale sub-session deletion", async () => {
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              {
+                id: "stale-delete",
+                metadata: { "opencode-codex-memory": true },
+                time: { created: Date.now() - 120 * 60 * 1000 },
+              },
+            ],
+          }),
+          delete: async () => new Promise(() => {}),
+        },
+      },
+    } as any)
+
+    const started = Date.now()
+    await cleanupOldSubSessions(90)
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(isMemorySubSession("stale-delete")).toBe(true)
+  })
+
+  it("keeps ownership when stale sub-session deletion fails", async () => {
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              {
+                id: "failed-delete",
+                metadata: { "opencode-codex-memory": true },
+                time: { created: Date.now() - 120 * 60 * 1000 },
+              },
+            ],
+          }),
+          delete: async () => ({ error: { message: "busy" } }),
+        },
+      },
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    await Promise.resolve()
+    expect(isMemorySubSession("failed-delete")).toBe(true)
   })
 
   it("never treats a user-editable title as sub-session ownership", async () => {
