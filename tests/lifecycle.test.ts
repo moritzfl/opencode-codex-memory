@@ -34,6 +34,7 @@ describe("hook wiring", () => {
       data: [
         {
           id: "sub-reseed-before-hooks",
+          title: "codex-memory-consolidate",
           metadata: { "opencode-codex-memory": true },
           time: { created: Date.now() },
         },

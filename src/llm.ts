@@ -295,11 +295,12 @@ export async function cleanupOldSubSessions(
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     for (const s of list) {
       if (!s.id) continue
-      const owned = s.metadata?.[SUBSESSION_METADATA_KEY] === true
-      const legacy = isLegacySubSessionTitle(s.title)
+      const pluginTitle = isPluginSubSessionTitle(s.title)
+      const owned = s.metadata?.[SUBSESSION_METADATA_KEY] === true && pluginTitle
+      const legacy = s.metadata?.[SUBSESSION_METADATA_KEY] !== true && pluginTitle
       if (!owned && !legacy) continue
-      // Reseed the hot-path set from the durable ownership marker. Titles are
-      // accepted only for pre-marker sessions and never authorize deletion.
+      // Durable ownership requires marker + generated title; a legacy title
+      // alone can reseed the skip set but never authorizes deletion.
       activeSubSessions.add(s.id)
       if (!owned) continue
       const created = s.time?.created ?? 0
@@ -314,7 +315,7 @@ export async function cleanupOldSubSessions(
   }
 }
 
-function isLegacySubSessionTitle(title: string | undefined): boolean {
+function isPluginSubSessionTitle(title: string | undefined): boolean {
   return title === "codex-memory-consolidate" || /^codex-memory-extract-ses_[A-Za-z0-9]+$/.test(title ?? "")
 }
 

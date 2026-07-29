@@ -281,8 +281,8 @@ describe("cleanupOldSubSessions", () => {
         session: {
           list: async () => ({
             data: [
-              { id: "sub-live", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() } },
-              { id: "sub-old", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() - 120 * 60 * 1000 } },
+              { id: "sub-live", title: "codex-memory-consolidate", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() } },
+              { id: "sub-old", title: "codex-memory-extract-ses_old123", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() - 120 * 60 * 1000 } },
               { id: "user-ses", title: "normal chat", time: { created: Date.now() } },
             ],
           }),
@@ -334,6 +334,7 @@ describe("cleanupOldSubSessions", () => {
             data: [
               {
                 id: "stale-delete",
+                title: "codex-memory-consolidate",
                 metadata: { "opencode-codex-memory": true },
                 time: { created: Date.now() - 120 * 60 * 1000 },
               },
@@ -358,6 +359,7 @@ describe("cleanupOldSubSessions", () => {
             data: [
               {
                 id: "failed-delete",
+                title: "codex-memory-consolidate",
                 metadata: { "opencode-codex-memory": true },
                 time: { created: Date.now() - 120 * 60 * 1000 },
               },
@@ -381,6 +383,7 @@ describe("cleanupOldSubSessions", () => {
             data: [
               {
                 id: "false-success-delete",
+                title: "codex-memory-consolidate",
                 metadata: { "opencode-codex-memory": true },
                 time: { created: Date.now() - 120 * 60 * 1000 },
               },
@@ -396,6 +399,34 @@ describe("cleanupOldSubSessions", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(isMemorySubSession("false-success-delete")).toBe(true)
+  })
+
+  it("does not claim or delete user forks that copied plugin metadata", async () => {
+    const deleted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          list: async () => ({
+            data: [
+              {
+                id: "forked-memory-session",
+                title: "codex-memory-consolidate (fork #1)",
+                metadata: { "opencode-codex-memory": true },
+                time: { created: Date.now() - 120 * 60 * 1000 },
+              },
+            ],
+          }),
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: true }
+          },
+        },
+      },
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    expect(deleted).toEqual([])
+    expect(isMemorySubSession("forked-memory-session")).toBe(false)
   })
 
   it("never treats a user-editable title as sub-session ownership", async () => {
