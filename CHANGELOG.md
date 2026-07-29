@@ -7,20 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-29
+
 ### Fixed
 
-- If the memory root is a symlink, the plugin no longer injects that content
-  into new chats (same refusal the tools already used for writes).
-- Timed-out background extraction/consolidation now aborts the model run
-  instead of leaving it running until the session is deleted.
-- After a plugin reload, live memory sub-sessions are recognized again so they
-  are not treated like ordinary chats.
+- A session that invokes an external-context tool is now excluded from memory
+  immediately. Failed or cancelled web/MCP calls can no longer slip through
+  when `disable_on_external_context` is enabled, and a stalled MCP status check
+  can no longer block the tool itself.
+- Failed tool calls now reach memory extraction along with their error message;
+  content OpenCode hides from the assistant is no longer mined.
+- Secret redaction now preserves JSON and YAML structure around quoted,
+  primitive, nested, multiline, and punctuation-bearing values instead of
+  corrupting the surrounding tool payload or leaking part of the value.
+- If the memory root or `memory_summary.md` is a symlink, the plugin no longer
+  injects redirected content into new chats. The summary stays protected even
+  if the file is swapped while it is being opened.
+- Timed-out background extraction/consolidation now aborts the model run with a
+  bounded request instead of leaving it running indefinitely.
+- After a plugin reload, live memory sub-sessions are recognized before hooks
+  start. Cleanup uses a private ownership marker plus the generated title, so
+  ordinary chats, renamed chats, and user forks cannot be deleted by mistake.
 - Citation usage for several sessions is recorded in one database transaction,
   so a mid-batch interruption cannot update only some of them.
 - `memory_inspect` config warnings reset when options are re-applied, so fixed
   typos no longer linger.
-- Under heavy load, citation and idle tracking is less likely to forget
-  long-lived sessions (LRU refresh instead of drop-oldest-only).
+- Under heavy load, citation, idle, and turn trackers no longer forget
+  long-lived sessions before short-lived ones.
+- A burst of duplicate idle events can no longer keep extending the
+  de-duplication window and delaying extraction on busy sessions.
 
 ## [0.4.1] - 2026-07-26
 
@@ -399,7 +414,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.0...v0.3.1
