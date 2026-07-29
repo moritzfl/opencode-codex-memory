@@ -48,11 +48,11 @@ If you want the mental model before the details, jump to
 
 1. Add the plugin to your `~/.config/opencode/opencode.json`:
 
-   ```json
-   {
+```json
+{
   "plugin": ["opencode-codex-memory@0.4.2"]
-   }
-   ```
+}
+```
 
    **Pin the version** (here and for any OpenCode plugin). OpenCode installs a
    plugin spec once into its package cache and never re-resolves it, so a bare
