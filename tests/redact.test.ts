@@ -105,6 +105,11 @@ describe("redact", () => {
     )
   })
 
+  it("redacts assignment-like prose inside a JSON string without corrupting it", () => {
+    const out = redact('{"note":"password: hunter2","safe":"ok"}')
+    expect(JSON.parse(out)).toEqual({ note: "password: [REDACTED]", safe: "ok" })
+  })
+
   it("redacts aws credential assignments with the key name preserved", () => {
     const out = redact('aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG"')
     expect(out).not.toContain("wJalrXUtnFEMI")

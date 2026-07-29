@@ -37,7 +37,14 @@ function redactAssignments(text: string): string {
     advanceFlowState(text, flowCursor, match.index, flowState, matchedOpeners)
     flowCursor = match.index
     const valueStart = SECRET_ASSIGNMENT_START.lastIndex
-    const value = scanAssignmentValue(text, valueStart, match[1], match[3], flowState.closers.length > 0)
+    const value = scanAssignmentValue(
+      text,
+      valueStart,
+      match[1],
+      match[3],
+      flowState.closers.length > 0,
+      flowState.quote,
+    )
     if (!value) continue
     out += text.slice(cursor, value.start) + value.replacement
     cursor = value.end
@@ -52,8 +59,13 @@ function scanAssignmentValue(
   keyQuote: string,
   separator: string,
   flowCollection: boolean,
+  enclosingQuote: string | null,
 ): { start: number; end: number; replacement: string } | null {
   let valueStart = start
+  if (enclosingQuote) {
+    const end = scanEnclosingQuote(text, valueStart, enclosingQuote)
+    return end > valueStart ? { start: valueStart, end, replacement: "[REDACTED]" } : null
+  }
   if (flowCollection && separator.includes(":")) {
     while (/\s/.test(text[valueStart] ?? "")) valueStart++
   }
@@ -73,6 +85,22 @@ function scanAssignmentValue(
   }
   const end = plainValueEnd(text, valueStart, flowCollection)
   return end > valueStart ? { start: valueStart, end, replacement: '"[REDACTED]"' } : null
+}
+
+function scanEnclosingQuote(text: string, start: number, quote: string): number {
+  for (let i = start; i < text.length; i++) {
+    if (quote === '"' && text[i] === "\\") {
+      i++
+      continue
+    }
+    if (text[i] !== quote) continue
+    if (quote === "'" && text[i + 1] === "'") {
+      i++
+      continue
+    }
+    return i
+  }
+  return plainValueEnd(text, start, false)
 }
 
 function scanQuoted(text: string, start: number, quote: string): number | null {
