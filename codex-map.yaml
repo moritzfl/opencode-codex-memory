@@ -413,9 +413,10 @@ mappings:
       timeouts mirror the 1h job leases (codex relies on the lease alone);
       timed-out prompts call the bound session.abort SDK method with a 1s bound
       before asynchronous session deletion; plugin-created sessions carry a
-      durable metadata ownership marker so startup cleanup never uses titles
-      to authorize deletion. Exact legacy titles are temporarily reseeded but
-      never deleted; plugin startup awaits the bounded list/reseed pass while
+      durable metadata ownership marker, and startup cleanup requires both that
+      marker and an exact generated title because OpenCode copies metadata to
+      user forks. Exact legacy titles are temporarily reseeded but never
+      deleted; plugin startup awaits the bounded list/reseed pass while
       stale deletions continue asynchronously and retain ownership unless a
       follow-up session.get confirms 404 (OpenCode may return success after an
       internally failed remove);
@@ -442,7 +443,9 @@ mappings:
       misses those. An escape-aware value scanner preserves keys, separators,
       comments, JSON trailing delimiters, and nested object/array boundaries;
       unquoted values become quoted [REDACTED] strings, so redacting JSON/YAML
-      payloads remains parseable without leaking punctuation-bearing suffixes.
+      payloads remains parseable without leaking punctuation-bearing suffixes;
+      assignment-like content inside an enclosing quoted string is replaced
+      without adding another quote layer.
       The AKIA/bearer patterns omit codex's \b anchors, which only widens them.
       isMemoryExcludedFragment lives here too (upstream: memories/write
       phase1.rs is_memory_excluded_contextual_user_fragment) but is INERT on
