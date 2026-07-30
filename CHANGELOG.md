@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-07-30
+
+### Fixed
+
+- Memory consolidation now waits for its background helper chat to be closed
+  before it finishes. If the helper cannot be closed, the run keeps its lock
+  until it expires instead of handing it over, so a second consolidation can
+  never edit your memory files while the first one may still be writing.
+
 ## [0.4.2] - 2026-07-29
 
 ### Fixed
@@ -414,7 +423,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.3.1...v0.4.0
