@@ -102,6 +102,18 @@ export class SubagentTimeoutError extends Error {
   }
 }
 
+/**
+ * Thrown when a sub-agent session could not be closed. Codex treats a failed
+ * consolidation-agent shutdown as "the agent may still be alive", so the caller
+ * must keep its job lease instead of completing the job (phase2.rs).
+ */
+export class SubagentShutdownError extends Error {
+  constructor(sessionId: string) {
+    super(`failed to close memory sub-session ${sessionId}`)
+    this.name = "SubagentShutdownError"
+  }
+}
+
 async function abortSession(sessionId: string): Promise<void> {
   const input = getPluginInput()
   const session = (input?.client as {
@@ -245,6 +257,9 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
     }
     return parseExtraction(extractAssistantText(data))
   } finally {
+    // Fire-and-forget on purpose (unlike consolidation): stage 1 has no codex
+    // agent-shutdown step, and memorize-extract has no write tools, so a
+    // lingering extract session cannot touch the memory root.
     void deleteSession(subId).catch(() => {})
   }
 }
@@ -257,14 +272,25 @@ const CONSOLIDATION_TIMEOUT_MS = 3600_000
 export async function consolidateViaSubagent(memoryRoot: string, diffFileName: string, model?: string): Promise<void> {
   const agent = "memorize"
   const subId = await createSession(agent, "codex-memory-consolidate")
+  let promptError: unknown
+  let promptFailed = false
   try {
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
     // consolidation_model option > opencode model (main) > session default.
     const resolved = model ?? (await getConfigModels()).model
     await promptSession(subId, prompt, agent, { model: resolved, timeoutMs: CONSOLIDATION_TIMEOUT_MS })
-  } finally {
-    void deleteSession(subId).catch(() => {})
+  } catch (err) {
+    promptError = err
+    promptFailed = true
   }
+  // codex phase2.rs awaits the consolidation agent's shutdown BEFORE artifacts
+  // are validated and the job is finished, and a failed shutdown outranks the
+  // run result: the caller must keep its lease rather than release it to a
+  // worker that could race a consolidator which is still alive. The
+  // consolidation agent holds write access to the memory root, so this is the
+  // difference between one writer and two.
+  if (!(await deleteSession(subId))) throw new SubagentShutdownError(subId)
+  if (promptFailed) throw promptError
 }
 
 // Must exceed the longest legitimate sub-session lifetime (consolidation may
@@ -319,23 +345,36 @@ function isPluginSubSessionTitle(title: string | undefined): boolean {
   return title === "codex-memory-consolidate" || /^codex-memory-extract-ses_[A-Za-z0-9]+$/.test(title ?? "")
 }
 
-async function deleteSession(id: string): Promise<void> {
+/**
+ * Closes a sub-session. Returns true when the delete call itself succeeded —
+ * the port's equivalent of codex's `shutdown_consolidation_agent` returning Ok
+ * (runtime.rs). A false return means the sub-agent may still be running.
+ *
+ * The 404 confirmation below is a separate, stricter question (is the session
+ * really gone?) and only governs ownership tracking, never the shutdown result:
+ * hosts without `session.get` would otherwise never report a clean shutdown.
+ */
+async function deleteSession(id: string): Promise<boolean> {
   const input = getPluginInput()
-  if (!input) return
+  if (!input) return false
   try {
     const res = await input.client.session.delete({ path: { id } })
     if (res.error) {
       console.warn(`[opencode-codex-memory] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
-      return
+      return false
     }
     // OpenCode's Session.remove logs and swallows some internal failures while
     // the HTTP route still returns success. Only a confirmed 404 proves the
     // session is gone; otherwise retain ownership so hooks keep skipping it.
+    // codex runtime.rs drops the thread from its manager the same way: only
+    // after shutdown succeeded.
     if (await sessionDeletionConfirmed(input.client as any, id)) {
       activeSubSessions.delete(id)
     }
+    return true
   } catch (err) {
     console.warn(`[opencode-codex-memory] error deleting sub-session ${id}:`, err)
+    return false
   }
 }
 

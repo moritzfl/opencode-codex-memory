@@ -8,7 +8,7 @@ import {
   validateConsolidationArtifacts,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
-import { consolidateViaSubagent } from "./llm.js"
+import { consolidateViaSubagent, SubagentShutdownError } from "./llm.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
 import { checkRateLimit } from "./ratelimit.js"
@@ -131,6 +131,16 @@ export async function runPhase2(
 
       try {
         await consolidateViaSubagent(memoryRoot(), DIFF_ARTIFACT, opts.consolidationModel)
+      } catch (err) {
+        // codex phase2.rs: when the consolidation agent's shutdown fails, keep
+        // the existing lease until it expires so another worker cannot race a
+        // consolidator whose shutdown has not completed. Neither succeed nor
+        // fail the job — marking it failed would release the lease immediately.
+        if (err instanceof SubagentShutdownError) {
+          console.warn(`[opencode-codex-memory] ${err.message}; holding the phase2 lease until it expires`)
+          return { status: "shutdown_failed" }
+        }
+        throw err
       } finally {
         clearInterval(heartbeat)
       }

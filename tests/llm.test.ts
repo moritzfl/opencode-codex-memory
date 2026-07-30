@@ -3,11 +3,13 @@ import {
   parseExtraction,
   validateExtraction,
   extractViaSubagent,
+  consolidateViaSubagent,
   setPluginInput,
   fillTemplate,
   cleanupOldSubSessions,
   isMemorySubSession,
   SubagentTimeoutError,
+  SubagentShutdownError,
 } from "../src/llm.js"
 
 describe("fillTemplate", () => {
@@ -267,6 +269,65 @@ describe("extractViaSubagent (structured output)", () => {
     expect(abortSignal?.aborted).toBe(true)
     await Promise.resolve()
     expect(deleted).toEqual(["sub-stalled-abort"])
+  })
+})
+
+describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finish)", () => {
+  afterEach(() => setPluginInput({ client: undefined } as any))
+
+  function stubConsolidationClient(deleteImpl: () => Promise<any>, promptImpl?: () => Promise<any>) {
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-consolidate" } }),
+          prompt: promptImpl ?? (async () => ({ data: { info: {}, parts: [{ type: "text", text: "done" }] } })),
+          delete: deleteImpl,
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+  }
+
+  it("resolves only after the sub-session is closed", async () => {
+    const order: string[] = []
+    stubConsolidationClient(async () => {
+      order.push("delete")
+      return { data: {} }
+    })
+    await consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")
+    order.push("returned")
+    expect(order).toEqual(["delete", "returned"])
+  })
+
+  it("throws SubagentShutdownError when the delete call fails", async () => {
+    stubConsolidationClient(async () => ({ error: { message: "boom" } }))
+    await expect(consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")).rejects.toBeInstanceOf(
+      SubagentShutdownError,
+    )
+  })
+
+  it("lets a failed shutdown outrank the prompt failure", async () => {
+    stubConsolidationClient(
+      async () => {
+        throw new Error("delete exploded")
+      },
+      async () => ({ data: { info: { error: { name: "ProviderAuthError" } } } }),
+    )
+    // codex returns early on shutdown failure regardless of the agent status:
+    // an agent that may still be alive must keep the lease, not fail the job.
+    await expect(consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")).rejects.toBeInstanceOf(
+      SubagentShutdownError,
+    )
+  })
+
+  it("still surfaces the prompt failure when the shutdown succeeds", async () => {
+    stubConsolidationClient(
+      async () => ({ data: {} }),
+      async () => ({ data: { info: { error: { name: "ProviderAuthError" } } } }),
+    )
+    await expect(consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")).rejects.toThrow(
+      "ProviderAuthError",
+    )
   })
 })
 
