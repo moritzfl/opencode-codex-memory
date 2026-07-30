@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 12b3e88028b983051913fb6bb95d7a11218bdceb
-codex_ref_date: 2026-07-28
+codex_ref: ba42e6866cef4baed7ad92c73e6be8cd42e49d8b
+codex_ref_date: 2026-07-30
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -248,6 +248,12 @@ mappings:
       the consolidator's sandbox is the opencode `memorize` agent allowlist
       (D2), not a codex SandboxPolicy, and opencode plugins get no parent
       permission profile. No behavior to port; consolidateViaSubagent stays.
+      DIVERGENCE (codex_ref ba42e68, 2026-07-30 audit): codex holds the lease
+      when the consolidation agent's shutdown fails, where "failed" is a thread
+      handle that did not terminate. The port has no thread handle: a failed
+      shutdown is a failed session.delete call, deliberately NOT an unconfirmed
+      404 — sessionDeletionConfirmed returns false on hosts without session.get
+      and would otherwise stall every job for a full lease.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
     note: >
@@ -412,7 +418,10 @@ mappings:
       as a fallback for hosts/models that don't populate structured. per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
       timed-out prompts call the bound session.abort SDK method with a 1s bound
-      before asynchronous session deletion; plugin-created sessions carry a
+      before session deletion — awaited for consolidation because the phase-2
+      lease depends on it (see the src/phase2.ts note), fire-and-forget for
+      extraction, which has no codex agent-shutdown counterpart and no write
+      tools; plugin-created sessions carry a
       durable metadata ownership marker, and startup cleanup requires both that
       marker and an exact generated title because OpenCode copies metadata to
       user forks. Exact legacy titles are temporarily reseeded but never
