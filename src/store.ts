@@ -70,6 +70,12 @@ export class MemoryStore {
       .all() as Stage1Output[]
   }
 
+  hasStage1Output(sessionId: string): boolean {
+    return this.db
+      .prepare("SELECT 1 FROM memory_stage1_outputs WHERE session_id = ?")
+      .get(sessionId) !== null
+  }
+
   /**
    * Deletes stale rows; snapshots consumed by the last successful Phase 2 are
    * protected. Stalest-first, capped per run (codex PRUNE_BATCH_SIZE).
@@ -378,12 +384,30 @@ export class MemoryStore {
   phase2LastSuccess(): { finished_at: number | null; last_success_watermark: number | null } | null {
     const row = this.db
       .prepare(
-        `SELECT finished_at, last_success_watermark FROM memory_jobs
+        `SELECT status, finished_at, last_error, last_success_watermark FROM memory_jobs
          WHERE kind='memory_consolidate_global' AND job_key='global'`,
       )
-      .get() as { finished_at: number | null; last_success_watermark: number | null } | null
-    if (!row || !row.last_success_watermark) return null
-    return row
+      .get() as {
+        status: string
+        finished_at: number | null
+        last_error: string | null
+        last_success_watermark: number | null
+      } | null
+    if (!row || row.last_success_watermark === null) return null
+    const cleanSuccess =
+      row.last_error === null &&
+      row.finished_at !== null &&
+      (row.status === "done" || row.status === "pending")
+    // Codex initializes pending global jobs with watermark 0, so zero proves a
+    // success only while the row itself is a clean completed attempt.
+    if (row.last_success_watermark === 0 && !cleanSuccess) return null
+    return {
+      // Codex preserves last_success_watermark across later attempts, while
+      // finished_at describes only the latest attempt. Expose them separately
+      // so a failure timestamp is never labeled as a success timestamp.
+      finished_at: cleanSuccess ? row.finished_at : null,
+      last_success_watermark: row.last_success_watermark,
+    }
   }
 
   markPhase2Failed(ownershipToken: string, error: unknown): void {

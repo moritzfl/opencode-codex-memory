@@ -308,6 +308,61 @@ describe("MemoryStore phase2", () => {
     expect(again.type).toBe("skipped_cooldown")
   })
 
+  it("reports only a clean current success and accepts a zero success watermark", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const first = store.claimGlobalPhase2Job()
+    if (first.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(first.ownershipToken, [])
+    const success = store.phase2LastSuccess()
+    expect(success?.last_success_watermark).toBe(0)
+    expect(success?.finished_at).toBeGreaterThan(0)
+
+    // A later failure overwrites finished_at. Do not misreport that failure
+    // time as a successful run; Codex keeps one attempt timestamp as well.
+    openDb().prepare("UPDATE memory_jobs SET finished_at=1 WHERE kind='memory_consolidate_global'").run()
+    const retry = store.claimGlobalPhase2Job()
+    if (retry.type !== "claimed") throw new Error("expected retry claim")
+    store.markPhase2Failed(retry.ownershipToken, "later failure")
+    expect(store.phase2LastSuccess()).toBeNull()
+  })
+
+  it("does not treat an initialized pending zero watermark as success", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const stage1Token = claimOne(store, "s1")
+    store.markStage1Succeeded("s1", stage1Token, {
+      session_id: "s1",
+      source_updated_at: 1,
+      raw_memory: "raw",
+      rollout_summary: "summary",
+      rollout_slug: null,
+      generated_at: 1,
+    })
+    expect(store.phase2LastSuccess()).toBeNull()
+  })
+
+  it("keeps reporting a clean success after new input queues another run", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const phase2 = store.claimGlobalPhase2Job()
+    if (phase2.type !== "claimed") throw new Error("expected phase2 claim")
+    store.markPhase2Succeeded(phase2.ownershipToken, [])
+    const success = store.phase2LastSuccess()
+
+    const stage1Token = claimOne(store, "s1")
+    store.markStage1Succeeded("s1", stage1Token, {
+      session_id: "s1",
+      source_updated_at: 1,
+      raw_memory: "raw",
+      rollout_summary: "summary",
+      rollout_slug: null,
+      generated_at: 1,
+    })
+    expect(store.phase2LastSuccess()).toEqual(success)
+  })
+
   it("failure enters retry backoff but never exhausts (codex phase-2 semantics)", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")

@@ -70,11 +70,16 @@ function runMigrations(db: Database): void {
     version INTEGER NOT NULL,
     applied_at INTEGER NOT NULL
   )`)
-  const current = db.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").get() as { version: number } | null
-  const currentVersion = current?.version ?? 0
-  if (currentVersion >= 1) return
-  for (const stmt of SCHEMA_V1) db.run(stmt)
-  db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(1, Date.now())
+  db.transaction(() => {
+    // Read the version only after taking the write lock so concurrent plugin
+    // instances cannot both apply the same ALTER TABLE.
+    const current = db.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").get() as { version: number } | null
+    const currentVersion = current?.version ?? 0
+    if (currentVersion < 1) {
+      for (const stmt of SCHEMA_V1) db.run(stmt)
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(1, Date.now())
+    }
+  }).immediate()
 }
 
 export function closeDb(): void {

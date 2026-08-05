@@ -34,9 +34,13 @@ const TRANSCRIPT_MAX_CHARS = 600_000
 const TRANSCRIPT_HEAD_CHARS = 300_000
 const TRANSCRIPT_TAIL_CHARS = 300_000
 
-export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAULT_PHASE1_OPTIONS): Promise<void> {
+export async function runPhase1(
+  store: MemoryStore,
+  opts: Phase1Options = DEFAULT_PHASE1_OPTIONS,
+  rateLimitCheck: typeof checkRateLimit = checkRateLimit,
+): Promise<void> {
   store.pruneStage1Outputs(opts.maxUnusedDays ?? 30)
-  const rl = await checkRateLimit("phase1")
+  const rl = await rateLimitCheck("phase1")
   if (!rl.ok) {
     console.warn("[opencode-codex-memory] skipping phase1 due to rate limit:", rl.reason)
     return
@@ -54,6 +58,12 @@ export async function runPhase1(store: MemoryStore, opts: Phase1Options = DEFAUL
       const sourceUpdatedAt = session?.updated_at ?? Date.now()
       const transcript = await buildTranscript(sid)
       if (!transcript.trim()) {
+        // A newly empty chat is a legitimate no-output result. An existing
+        // extraction plus an empty API success is anomalous: retry instead of
+        // permanently forgetting memory because of a transient host glitch.
+        if (store.hasStage1Output(sid)) {
+          throw new Error(`empty transcript for previously extracted session ${sid}`)
+        }
         store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
         return
       }
