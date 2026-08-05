@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-08-05
+
+### Fixed
+
+- Memory consolidation now stops and closes its background helper immediately
+  if it loses the job lock or can no longer refresh it. A reclaimed job can no
+  longer overlap with an older helper that is still editing memory files.
+- An unexpectedly empty session response no longer deletes memory previously
+  extracted from that session. The extraction retries instead; genuinely empty
+  new sessions and explicit no-memory results still behave as before.
+- Memory tools, workspace updates, and consolidation diffs now refuse files
+  that become symlinks while being opened, preventing redirected reads and
+  overwrites outside the memory directory.
+- `memory_inspect` now distinguishes the last successful consolidation
+  watermark from the latest failed attempt, reports malformed option types,
+  and shows clean defaults after configuration reloads.
+
 ## [0.4.3] - 2026-07-30
 
 ### Fixed
@@ -423,7 +440,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.0...v0.4.1
