@@ -18,6 +18,8 @@ project is a faithful port of the memory system in OpenAI's Codex. It works out
 of the box with zero extra configuration and uses whatever models you already
 have set up in OpenCode.
 
+See the [changelog](./CHANGELOG.md) for release history.
+
 **Local-first by design.** Memory is plain markdown files plus a small SQLite
 database on your own machine — no memory service to sign up for, no MCP server,
 no separate process, no sync. Installing it is one line in your `opencode.json`;
