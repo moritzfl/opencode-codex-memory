@@ -139,6 +139,13 @@ poisoned transcript still cannot induce file reads or any side effect. This also
 blocks IDE and MCP tools that could otherwise bypass a narrower `bash` deny.
 Tool-permission-level, not process-level — accepted trade-off.
 
+The allowlist is not a memory-root-only filesystem sandbox. The helper session
+retains `read`/`edit`/`write` access to its originating project, while the
+`external_directory` grant below adds access to the global memory root. It has
+no shell or network tools, but a poisoned consolidation input could still cause
+project-file reads or edits. This residual FS-scope gap remains until opencode
+offers per-agent workspace roots or a process sandbox equivalent to Seatbelt.
+
 One required carve-out: opencode additionally gates file tools outside the
 session's project behind the `external_directory` permission, and the memory
 workspace is global — outside every project — so the wildcard deny would match
@@ -165,9 +172,9 @@ authenticated client (`input.client`), which shares auth with the host:
 
 - Transcripts: `session.messages` — the same surface opencode's own UI renders
   history from; the session-scoped route resolves the right instance even for
-  sessions from other projects. Errors propagate so the job fails and retries
-  (an empty transcript finalizes as no-output and deletes the previous
-  extraction, so errors must never masquerade as empty).
+  sessions from other projects. Errors propagate so the job fails and retries.
+  A first-time empty transcript finalizes as no-output; an empty transcript for
+  a session with an existing extraction retries instead of deleting that row.
 - Discovery: `session.list` is project-scoped, so the plugin enumerates
   `project.list()` and lists each project with `scope=project&roots=true`
   (scope widens the filter from the session directory to the whole project).
@@ -240,6 +247,7 @@ root" invariant. The extension approach is pure content.
 | Gap | Codex | This plugin | Mitigation |
 |---|---|---|---|
 | Network sandbox | Seatbelt | Tool-permission deny on subagents | `memorize*` deny `bash`/`webfetch`/`websearch`/`task` |
+| Consolidator FS scope | `WorkspaceWrite` limited to memory root | Built-in file tools can also access the originating project | No shell/network; explicit residual gap until opencode exposes rooted agent workspaces |
 | Token counting | tiktoken | chars/4 estimate | Sufficient for the 2500-token cap |
 | Cache-stable injection | V2 `SystemContext.Source` | V1 hook + byte-identical append | Content-addressed provider caches (D1) |
 | LLM call API | Internal model client | HTTP API → subagent sessions | Reuses opencode auth/usage (D3) |

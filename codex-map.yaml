@@ -146,7 +146,10 @@ mappings:
       mirroring local.rs resolve_scoped_path. DELIBERATE EXTENSION: the root
       itself is also rejected when symlinked (assertMemoryRootSafe, applied by
       every memory tool; source.ts uses the full safeResolveMemoryPath for the
-      injected summary); codex only enforces that rule when clearing
+      injected summary). Reads and overwrites open the final component with
+      O_NOFOLLOW, verify fstat against a post-open lstat, and truncate only
+      after verification, closing path-swap races in tools/workspace/baseline;
+      codex only enforces the root rule when clearing
       (control.rs clear_memory_root_contents) and trusts the root elsewhere.
 
   # --- Citations ---
@@ -191,9 +194,11 @@ mappings:
       Transcript budget 600k chars, 50/50 head+tail split ~ codex's 150k-token
       fallback (codex uses 70% of the model context window when known).
       Reasoning parts are excluded like codex (rollout policy Reasoning=false).
-      DIVERGENCES: an empty transcript is treated as success-with-no-output
-      (codex fails the job when a rollout cannot be loaded); empty sessions are
-      normal in opencode, not an error. Partial-empty stage-1 fields
+      DIVERGENCES: a first-time empty transcript is treated as
+      success-with-no-output (codex fails when a rollout cannot be loaded)
+      because empty opencode sessions are normal; if a prior extraction exists,
+      empty fails/retries so a transient empty API response cannot erase it.
+      Partial-empty stage-1 fields
       (empty raw_memory OR empty rollout_summary) match codex → no-output.
       Citation blocks are stripped from the transcript before extraction
       (codex rollouts retain them; keeps the extractor from mining our own
@@ -251,8 +256,8 @@ mappings:
       DIVERGENCE (codex_ref ba42e68, 2026-07-30 audit): codex holds the lease
       when the consolidation agent's shutdown fails, where "failed" is a thread
       handle that did not terminate. The port has no thread handle: a failed
-      shutdown is a failed session.delete call, deliberately NOT an unconfirmed
-      404 — sessionDeletionConfirmed returns false on hosts without session.get
+      shutdown is a failed or timed-out session.delete call, deliberately NOT
+      an unconfirmed 404 — sessionDeletionConfirmed returns false on hosts without session.get
       and would otherwise stall every job for a full lease.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
@@ -315,7 +320,8 @@ mappings:
       re-init (ports reset_git_repository_sync-on-unusable).
       DIVERGENCES: patches use the `diff` package's createPatch headers
       (Index:/---/+++) instead of codex's git-style `diff --git` rendering; no
-      file-mode/symlink diff handling (the memory root contains neither).
+      file-mode/symlink diff rendering; workdir content reads fail closed on
+      symlinks instead of including their targets in the generated diff.
   - ours: src/templates/consolidation.md
     theirs: codex-rs/memories/write/templates/memories/consolidation.md
     note: >
@@ -417,9 +423,10 @@ mappings:
       exception). parseExtraction (brace-scrape, unknown-field tolerant) stays
       as a fallback for hosts/models that don't populate structured. per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
-      timed-out prompts call the bound session.abort SDK method with a 1s bound
-      before session deletion — awaited for consolidation because the phase-2
-      lease depends on it (see the src/phase2.ts note), fire-and-forget for
+      timed-out or ownership-cancelled prompts call the bound session.abort SDK
+      method with a 1s bound before session deletion; deletion is bounded to
+      codex's 10s shutdown timeout. Cleanup is awaited for consolidation because the phase-2 lease
+      depends on it (see the src/phase2.ts note), fire-and-forget for
       extraction, which has no codex agent-shutdown counterpart and no write
       tools; plugin-created sessions carry a
       durable metadata ownership marker, and startup cleanup requires both that
@@ -432,10 +439,7 @@ mappings:
       AssistantMessage.error is treated as a failed sub-agent turn even though
       opencode returns it with HTTP 200;
       reasoning effort is not pinned (codex: Low for extraction, Medium for
-      consolidation; no session.prompt equivalent); a consolidator that loses
-      phase-2 ownership mid-run is not aborted (codex kills the agent thread on
-      heartbeat loss) — it runs to completion/timeout but the token-guarded
-      final ownership confirm in phase2.ts blocks it from finalizing.
+      consolidation; no session.prompt equivalent).
 
   # --- Utilities ---
   - ours: src/redact.ts
@@ -506,5 +510,6 @@ mappings:
       exposed to plugins, only the explicit config keys are;
       (4) the legacy alias no_memories_if_mcp_or_web_search is not accepted
       (fresh plugin, no legacy configs); (5) wrong-TYPED values on known keys
-      silently fall back to the default (codex: serde hard-fails the whole
-      config parse — a plugin must not break the host on bad options).
+      warn via memory_inspect and fall back to the default (codex: serde
+      hard-fails the whole config parse — a plugin must not break the host on
+      bad options).
