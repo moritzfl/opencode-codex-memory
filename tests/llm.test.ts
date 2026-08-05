@@ -273,6 +273,32 @@ describe("extractViaSubagent (structured output)", () => {
   })
 })
 
+describe("memory sub-session directory", () => {
+  afterEach(() => setPluginInput({ client: undefined } as any))
+
+  it("anchors sub-sessions on the memory root, not a possibly-deleted project cwd", async () => {
+    const { memoryRoot } = await import("../src/paths.js")
+    const seen: Array<{ query?: { directory?: string } }> = []
+    setPluginInput({
+      directory: "/private/tmp/oc space test-missing-definitely",
+      client: {
+        session: {
+          create: async (req: { query?: { directory?: string } }) => {
+            seen.push(req)
+            return { data: { id: "sub-dir" } }
+          },
+          prompt: async () => ({ data: { info: {}, parts: [{ type: "text", text: "done" }] } }),
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    await consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")
+    expect(seen).toHaveLength(1)
+    expect(seen[0].query?.directory).toBe(memoryRoot())
+  })
+})
+
 describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finish)", () => {
   afterEach(() => setPluginInput({ client: undefined } as any))
 

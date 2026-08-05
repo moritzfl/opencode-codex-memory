@@ -1,6 +1,7 @@
 import fs from "fs"
 import path from "path"
 import type { PluginInput } from "@opencode-ai/plugin"
+import { memoryRoot } from "./paths.js"
 
 export interface ExtractionResult {
   raw_memory: string
@@ -33,15 +34,32 @@ export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
 }
 
+/**
+ * Host directory for memory sub-sessions. Must exist: OpenCode resolves it in
+ * SystemPrompt.environment and fails the turn with UnknownError/ENOENT when
+ * missing. Prefer the memory workspace itself — global, always ours, already
+ * granted to `memorize` via external_directory, and independent of whatever
+ * (possibly deleted) project PluginInput.directory points at.
+ */
+function resolveSubSessionDirectory(): string {
+  const root = memoryRoot()
+  fs.mkdirSync(root, { recursive: true })
+  return root
+}
+
 async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
+  const directory = resolveSubSessionDirectory()
   const res = await input.client.session.create({
+    // directory is a query param (not body); without it the client inherits
+    // PluginInput.directory, which may be a deleted project path.
+    query: { directory },
     body: {
       title: title ?? `codex-memory-${agent}`,
       metadata: { [SUBSESSION_METADATA_KEY]: true },
     } as any,
-  })
+  } as any)
   if (!res.data) throw new Error(`session create failed: ${JSON.stringify(res.error ?? {})}`)
   const body = res.data as { id?: string }
   const id = body.id

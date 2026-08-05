@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Memory extraction/consolidation sub-sessions no longer inherit a deleted
+  project directory from the plugin host. OpenCode fails those turns with
+  `UnknownError` / ENOENT when the path is gone; sub-sessions are now anchored
+  on the memory workspace directory (always ours, already granted to
+  `memorize`).
+
 ## [0.4.5] - 2026-08-05
 
 ### Fixed
