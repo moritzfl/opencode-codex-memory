@@ -20,6 +20,8 @@ export interface Phase2Options {
   extensionRetentionDays: number
   consolidationModel?: string
   codexInterop?: CodexInteropOptions
+  /** Override the 90s heartbeat interval (tests / advanced). */
+  heartbeatIntervalMs?: number
 }
 
 export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
@@ -116,21 +118,45 @@ export async function runPhase2(
       writeWorkspaceDiff(diff)
 
       let heartbeatLost = false
-      const heartbeat = setInterval(() => {
+      let heartbeatFailure: unknown = "ownership lost"
+      const consolidationAbort = new AbortController()
+      const heartbeatOnce = (): boolean => {
+        if (heartbeatLost) return false
         try {
           if (!store.heartbeatPhase2Job(claim.ownershipToken)) {
             heartbeatLost = true
+            consolidationAbort.abort()
+            return false
           }
         } catch (err) {
-          // Transient DB error (e.g. SQLITE_BUSY): don't treat as ownership
-          // loss — the token+status-guarded final confirmation below stays
-          // authoritative. Uncaught, this would kill the interval silently.
           console.warn("[opencode-codex-memory] phase2 heartbeat error:", err)
+          // Codex stops the consolidation agent on heartbeat Ok(false) OR Err.
+          // Fail closed: without a refreshed lease, another process may reclaim
+          // the job while this helper still has live write access.
+          heartbeatLost = true
+          heartbeatFailure = err
+          consolidationAbort.abort()
+          return false
         }
-      }, 90_000)
+        return true
+      }
+
+      // Workspace preparation can itself be slow. Confirm ownership before
+      // granting a new helper write access, then keep the lease alive while it
+      // runs. This also mirrors tokio::time::interval's immediate first tick.
+      if (!heartbeatOnce()) {
+        store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
+        return { status: "heartbeat_lost" }
+      }
+      const heartbeat = setInterval(heartbeatOnce, opts.heartbeatIntervalMs ?? 90_000)
 
       try {
-        await consolidateViaSubagent(memoryRoot(), DIFF_ARTIFACT, opts.consolidationModel)
+        await consolidateViaSubagent(
+          memoryRoot(),
+          DIFF_ARTIFACT,
+          opts.consolidationModel,
+          consolidationAbort.signal,
+        )
       } catch (err) {
         // codex phase2.rs: when the consolidation agent's shutdown fails, keep
         // the existing lease until it expires so another worker cannot race a
@@ -139,6 +165,10 @@ export async function runPhase2(
         if (err instanceof SubagentShutdownError) {
           console.warn(`[opencode-codex-memory] ${err.message}; holding the phase2 lease until it expires`)
           return { status: "shutdown_failed" }
+        }
+        if (heartbeatLost) {
+          store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
+          return { status: "heartbeat_lost" }
         }
         throw err
       } finally {
@@ -152,7 +182,7 @@ export async function runPhase2(
       // heartbeat is token+status guarded, so it fails once ownership is lost;
       // markPhase2Failed is equally guarded and becomes a no-op then.
       if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
-        store.markPhase2Failed(claim.ownershipToken, "ownership lost")
+        store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
         return { status: "heartbeat_lost" }
       }
 

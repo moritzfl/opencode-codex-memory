@@ -9,6 +9,7 @@ import {
   cleanupOldSubSessions,
   isMemorySubSession,
   SubagentTimeoutError,
+  SubagentCancelledError,
   SubagentShutdownError,
 } from "../src/llm.js"
 
@@ -306,6 +307,38 @@ describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finis
     )
   })
 
+  it("bounds a stalled consolidation-session delete", async () => {
+    stubConsolidationClient(async () => new Promise(() => {}))
+    const started = Date.now()
+    await expect(consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")).rejects.toBeInstanceOf(
+      SubagentShutdownError,
+    )
+    expect(Date.now() - started).toBeLessThan(11_000)
+  }, 12_000)
+
+  it("refreshes configured model defaults when the plugin client changes", async () => {
+    const seen: string[] = []
+    const install = (smallModel: string) => setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: `sub-${smallModel}` } }),
+          prompt: async (req: any) => {
+            seen.push(`${req.body.model.providerID}/${req.body.model.modelID}`)
+            return { data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" } } } }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: { small_model: smallModel } }) },
+      },
+    } as any)
+
+    install("provider/first")
+    await extractViaSubagent("ses_first", "transcript")
+    install("provider/second")
+    await extractViaSubagent("ses_second", "transcript")
+    expect(seen).toEqual(["provider/first", "provider/second"])
+  })
+
   it("lets a failed shutdown outrank the prompt failure", async () => {
     stubConsolidationClient(
       async () => {
@@ -328,6 +361,39 @@ describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finis
     await expect(consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")).rejects.toThrow(
       "ProviderAuthError",
     )
+  })
+
+  it("aborts and closes the consolidation session when its owner cancels", async () => {
+    const calls: string[] = []
+    const controller = new AbortController()
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-consolidate-cancel" } }),
+          prompt: async () => new Promise(() => {}),
+          abort: async (req: { path: { id: string } }) => {
+            calls.push(`abort:${req.path.id}`)
+            return { data: {} }
+          },
+          delete: async (req: { path: { id: string } }) => {
+            calls.push(`delete:${req.path.id}`)
+            return { data: {} }
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const running = consolidateViaSubagent(
+      "/tmp/does-not-matter",
+      "phase2_workspace_diff.md",
+      undefined,
+      controller.signal,
+    )
+    await Promise.resolve()
+    controller.abort()
+    await expect(running).rejects.toBeInstanceOf(SubagentCancelledError)
+    expect(calls).toEqual(["abort:sub-consolidate-cancel", "delete:sub-consolidate-cancel"])
   })
 })
 

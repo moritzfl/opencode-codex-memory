@@ -12,6 +12,7 @@ let inputRef: PluginInput | null = null
 
 export function setPluginInput(input: PluginInput): void {
   inputRef = input
+  configModels = null
 }
 
 export function getPluginInput(): PluginInput | null {
@@ -26,6 +27,7 @@ const SUBSESSION_METADATA_KEY = "opencode-codex-memory"
 const SUBSESSION_LIST_TIMEOUT_MS = 5_000
 const SUBSESSION_ABORT_TIMEOUT_MS = 1_000
 const SUBSESSION_CONFIRM_TIMEOUT_MS = 1_000
+const SUBSESSION_DELETE_TIMEOUT_MS = 10_000
 
 export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
@@ -52,6 +54,7 @@ interface PromptOptions {
   timeoutMs?: number
   system?: string
   model?: string
+  signal?: AbortSignal
   // json_schema structured-output request. opencode's PromptInput accepts a
   // `format` field (schema v1/session.ts) but the generated SDK body type omits
   // it, so it is passed through an `as any` cast at the call site.
@@ -102,6 +105,14 @@ export class SubagentTimeoutError extends Error {
   }
 }
 
+/** Thrown after an external owner cancels a running sub-agent prompt. */
+export class SubagentCancelledError extends Error {
+  constructor() {
+    super("sub-agent prompt cancelled")
+    this.name = "SubagentCancelledError"
+  }
+}
+
 /**
  * Thrown when a sub-agent session could not be closed. Codex treats a failed
  * consolidation-agent shutdown as "the agent may still be alive", so the caller
@@ -144,6 +155,10 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
   const timeoutMs = opts.timeoutMs ?? 300_000
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
+  if (opts.signal?.aborted) {
+    await abortSession(sessionId)
+    throw new SubagentCancelledError()
+  }
   const model = opts.model ? parseModelRef(opts.model) : null
   const promptPromise = input.client.session.prompt({
     path: { id: sessionId },
@@ -158,9 +173,16 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
     } as any,
   })
   let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
   try {
+    const cancellation = new Promise<never>((_, reject) => {
+      if (!opts.signal) return
+      onAbort = () => reject(new SubagentCancelledError())
+      opts.signal.addEventListener("abort", onAbort, { once: true })
+    })
     const res = await Promise.race([
       promptPromise,
+      cancellation,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new SubagentTimeoutError(timeoutMs)), timeoutMs)
       }),
@@ -173,15 +195,16 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
     }
     return res.data
   } catch (err) {
-    // Only a timeout leaves the turn running server-side; every other failure
-    // here means the request already settled. Stop the run so tokens stop
-    // burning — deleteSession in the caller finally is the backup.
-    if (err instanceof SubagentTimeoutError) {
+    // A timeout or owner cancellation can leave the turn running server-side;
+    // other failures mean the request already settled. Stop the live run so
+    // tokens stop burning — deleteSession in the caller is the backup.
+    if (err instanceof SubagentTimeoutError || err instanceof SubagentCancelledError) {
       await abortSession(sessionId)
     }
     throw err
   } finally {
     clearTimeout(timer)
+    if (onAbort) opts.signal?.removeEventListener("abort", onAbort)
   }
 }
 
@@ -269,7 +292,12 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
 // timeout here would fail the job after the workspace was already synced.
 const CONSOLIDATION_TIMEOUT_MS = 3600_000
 
-export async function consolidateViaSubagent(memoryRoot: string, diffFileName: string, model?: string): Promise<void> {
+export async function consolidateViaSubagent(
+  memoryRoot: string,
+  diffFileName: string,
+  model?: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const agent = "memorize"
   const subId = await createSession(agent, "codex-memory-consolidate")
   let promptError: unknown
@@ -278,7 +306,7 @@ export async function consolidateViaSubagent(memoryRoot: string, diffFileName: s
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
     // consolidation_model option > opencode model (main) > session default.
     const resolved = model ?? (await getConfigModels()).model
-    await promptSession(subId, prompt, agent, { model: resolved, timeoutMs: CONSOLIDATION_TIMEOUT_MS })
+    await promptSession(subId, prompt, agent, { model: resolved, timeoutMs: CONSOLIDATION_TIMEOUT_MS, signal })
   } catch (err) {
     promptError = err
     promptFailed = true
@@ -357,8 +385,19 @@ function isPluginSubSessionTitle(title: string | undefined): boolean {
 async function deleteSession(id: string): Promise<boolean> {
   const input = getPluginInput()
   if (!input) return false
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const res = await input.client.session.delete({ path: { id } })
+    const res = await Promise.race([
+      input.client.session.delete({ path: { id }, signal: controller.signal }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error(`session.delete timed out after ${SUBSESSION_DELETE_TIMEOUT_MS}ms`))
+        }, SUBSESSION_DELETE_TIMEOUT_MS)
+        timer.unref?.()
+      }),
+    ])
     if (res.error) {
       console.warn(`[opencode-codex-memory] failed to delete sub-session ${id}: ${JSON.stringify(res.error)}`)
       return false
@@ -375,6 +414,8 @@ async function deleteSession(id: string): Promise<boolean> {
   } catch (err) {
     console.warn(`[opencode-codex-memory] error deleting sub-session ${id}:`, err)
     return false
+  } finally {
+    clearTimeout(timer)
   }
 }
 

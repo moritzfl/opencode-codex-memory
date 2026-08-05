@@ -5,7 +5,7 @@ import path from "path"
 import { closeDb, openDb } from "../src/db.js"
 import { captureWorkspaceDiff } from "../src/git-baseline.js"
 import { setPluginInput } from "../src/llm.js"
-import { runPhase2 } from "../src/phase2.js"
+import { DEFAULT_PHASE2_OPTIONS, runPhase2 } from "../src/phase2.js"
 import { MemoryStore } from "../src/store.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase2-${process.pid}-${Date.now()}`)
@@ -24,6 +24,26 @@ afterEach(() => {
 })
 
 describe("phase 2 orchestration", () => {
+  function installStalledConsolidator(aborted: string[], deleted: string[]): void {
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-heartbeat" } }),
+          prompt: async () => new Promise(() => {}),
+          abort: async (req: { path: { id: string } }) => {
+            aborted.push(req.path.id)
+            return { data: {} }
+          },
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: {} }
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+  }
+
   it("preserves the workspace diff when the assistant response contains an error", async () => {
     setPluginInput({
       client: {
@@ -78,5 +98,65 @@ describe("phase 2 orchestration", () => {
     // The workspace diff stays pending so the next run still has input.
     const pending = await captureWorkspaceDiff()
     expect(pending.changes.some((change) => change.path === "raw_memories.md")).toBe(true)
+  })
+
+  it("aborts the consolidator immediately when another worker takes ownership", async () => {
+    const aborted: string[] = []
+    const deleted: string[] = []
+    installStalledConsolidator(aborted, deleted)
+    const store = new MemoryStore()
+    const ownedHeartbeat = store.heartbeatPhase2Job.bind(store)
+    let heartbeats = 0
+    store.heartbeatPhase2Job = (token: string) => {
+      heartbeats++
+      if (heartbeats === 1) return ownedHeartbeat(token)
+      openDb()
+        .prepare("UPDATE memory_jobs SET ownership_token='replacement-worker' WHERE kind='memory_consolidate_global'")
+        .run()
+      return false
+    }
+
+    const result = await runPhase2(
+      store,
+      { ...DEFAULT_PHASE2_OPTIONS, heartbeatIntervalMs: 5 },
+      async () => ({ ok: true }),
+    )
+    expect(result.status).toBe("heartbeat_lost")
+    expect(aborted).toEqual(["sub-phase2-heartbeat"])
+    expect(deleted).toEqual(["sub-phase2-heartbeat"])
+    const job = openDb()
+      .prepare("SELECT status, ownership_token FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; ownership_token: string }
+    expect(job).toEqual({ status: "running", ownership_token: "replacement-worker" })
+    expect((await captureWorkspaceDiff()).changes.length).toBeGreaterThan(0)
+  })
+
+  it("aborts the consolidator on a heartbeat database error", async () => {
+    const aborted: string[] = []
+    const deleted: string[] = []
+    installStalledConsolidator(aborted, deleted)
+    const store = new MemoryStore()
+    const ownedHeartbeat = store.heartbeatPhase2Job.bind(store)
+    let heartbeats = 0
+    store.heartbeatPhase2Job = (token: string) => {
+      heartbeats++
+      if (heartbeats === 1) return ownedHeartbeat(token)
+      throw new Error("heartbeat database unavailable")
+    }
+
+    const result = await runPhase2(
+      store,
+      { ...DEFAULT_PHASE2_OPTIONS, heartbeatIntervalMs: 5 },
+      async () => ({ ok: true }),
+    )
+    expect(result.status).toBe("heartbeat_lost")
+    expect(aborted).toEqual(["sub-phase2-heartbeat"])
+    expect(deleted).toEqual(["sub-phase2-heartbeat"])
+    const job = openDb()
+      .prepare("SELECT status, lease_until, last_error FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; lease_until: number | null; last_error: string }
+    expect(job.status).toBe("failed")
+    expect(job.lease_until).toBeNull()
+    expect(job.last_error).toContain("heartbeat database unavailable")
   })
 })
