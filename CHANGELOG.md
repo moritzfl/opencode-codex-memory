@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `memory_inspect` now reports Phase 2 job status, last error, retry time, and
+  last attempt finish time. After a failed consolidation the success watermark
+  alone no longer looked healthy while the failure stayed invisible.
+
 ## [0.4.4] - 2026-08-05
 
 ### Fixed

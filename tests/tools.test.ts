@@ -332,7 +332,10 @@ describe("memory_inspect", () => {
     const root = path.join(TEST_ROOT, "memories")
     fs.symlinkSync(root, path.join(root, "loop"))
     const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("phase2_status: done")
+    expect(r.output).toContain("phase2_last_error: none")
     expect(r.output).toContain(`phase2_last_success_watermark: ${new Date(ts).toISOString()}`)
+    expect(r.output).toMatch(/phase2_last_success_finished_at: \d{4}-/)
     expect(r.output).toContain("loop@")
     expect(r.output).not.toContain("loop/MEMORY.md")
   })
@@ -340,7 +343,43 @@ describe("memory_inspect", () => {
   it("reports 'none' before any phase-2 success", async () => {
     const { memory_inspect } = require("../tools/control.js")
     const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("phase2_status: none")
     expect(r.output).toContain("phase2_last_success_watermark: none")
+    expect(r.output).toContain("phase2_last_success_finished_at: none")
+  })
+
+  it("surfaces a failed phase-2 job without labeling the failure as success", async () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const { memory_inspect } = require("../tools/control.js")
+    const store = new MemoryStore()
+    const ts = Date.UTC(2026, 5, 1)
+    store.upsertStage1Output({
+      session_id: "ses_fail",
+      source_updated_at: ts,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: Date.now(),
+    })
+    const ok = store.claimGlobalPhase2Job()
+    if (ok.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(ok.ownershipToken, [{ session_id: "ses_fail", source_updated_at: ts }])
+    // Expire success cooldown so the next claim is allowed.
+    openDb().prepare("UPDATE memory_jobs SET finished_at=1 WHERE kind='memory_consolidate_global'").run()
+    const retry = store.claimGlobalPhase2Job()
+    if (retry.type !== "claimed") throw new Error("expected retry claim")
+    store.markPhase2Failed(retry.ownershipToken, "prompt failed: boom")
+
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("phase2_status: failed")
+    expect(r.output).toContain("phase2_last_error: prompt failed: boom")
+    expect(r.output).toContain(`phase2_last_success_watermark: ${new Date(ts).toISOString()}`)
+    expect(r.output).toContain("phase2_last_success_finished_at: none")
+    expect(r.output).toMatch(/phase2_last_attempt_finished_at: \d{4}-/)
+    expect(r.output).toMatch(/phase2_retry_at: \d{4}-/)
+    expect(r.metadata.phase2_status).toBe("failed")
+    expect(r.metadata.phase2_last_success_finished_at).toBeNull()
   })
 
   it("does not read a memory summary through a symlink", async () => {

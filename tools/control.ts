@@ -148,12 +148,23 @@ export const memory_reset = tool({
   },
 })
 
+function fmtUnixSec(sec: number | null | undefined): string {
+  return sec ? new Date(sec * 1000).toISOString() : "none"
+}
+
+function fmtWatermarkMs(ms: number | null | undefined): string {
+  if (ms === 0) return "0 (no consumed inputs)"
+  if (ms === null || ms === undefined) return "none"
+  return new Date(ms).toISOString()
+}
+
 export const memory_inspect = tool({
   description:
-    "Inspect the current memory state. Returns: stage1_outputs count, last Phase 2 success watermark, " +
-    "memory_summary token estimate, a listing of the memories directory, the effective plugin options, " +
-    "and any configuration warnings (unknown/malformed options). Use it to verify the plugin " +
-    "configuration took effect. Read-only.",
+    "Inspect the current memory state. Returns: stage1_outputs count, Phase 2 job status " +
+    "(including last error / retry time when failed), last Phase 2 success watermark, " +
+    "memory_summary token estimate (on-disk; injection caps at ~2500), a listing of the " +
+    "memories directory, the effective plugin options, and any configuration warnings " +
+    "(unknown/malformed options). Use it to verify the plugin configuration took effect. Read-only.",
   args: {},
   async execute() {
     try {
@@ -170,20 +181,30 @@ export const memory_inspect = tool({
         summaryTokens = estimateTokens(text)
       }
       const listing = listMemoriesDir()
-      // The tool description promises the last Phase 2 success watermark.
-      const phase2 = store.phase2LastSuccess()
-      const watermark = phase2?.last_success_watermark === 0
-        ? "0 (no consumed inputs)"
-        : phase2?.last_success_watermark !== null && phase2?.last_success_watermark !== undefined
-          ? new Date(phase2.last_success_watermark).toISOString()
-          : "none"
-      const finishedAt = phase2?.finished_at ? new Date(phase2.finished_at * 1000).toISOString() : "none"
+      const phase2 = store.phase2JobSnapshot()
+      const phase2Lines = phase2
+        ? [
+            `phase2_status: ${phase2.status}`,
+            `phase2_last_error: ${phase2.last_error ?? "none"}`,
+            `phase2_retry_at: ${fmtUnixSec(phase2.retry_at)}`,
+            `phase2_last_attempt_finished_at: ${fmtUnixSec(phase2.finished_at)}`,
+            `phase2_last_success_watermark: ${fmtWatermarkMs(phase2.last_success_watermark)}`,
+            // Clean-success finish only — never a failure timestamp.
+            `phase2_last_success_finished_at: ${fmtUnixSec(phase2.success_finished_at)}`,
+          ]
+        : [
+            "phase2_status: none",
+            "phase2_last_error: none",
+            "phase2_retry_at: none",
+            "phase2_last_attempt_finished_at: none",
+            "phase2_last_success_watermark: none",
+            "phase2_last_success_finished_at: none",
+          ]
       const out = [
         `stage1_outputs: ${outputs.length}`,
-        `phase2_last_success_watermark: ${watermark}`,
-        `phase2_last_finished_at: ${finishedAt}`,
+        ...phase2Lines,
         `memory_summary_chars: ${summaryChars}`,
-        `memory_summary_tokens_est: ${summaryTokens}`,
+        `memory_summary_tokens_est: ${summaryTokens} (on disk; injection caps at ~2500)`,
         `memories_dir_entries: ${listing.length}`,
         "",
         ...renderEffectiveConfig(),
@@ -195,8 +216,14 @@ export const memory_inspect = tool({
         output: out,
         metadata: {
           stage1_count: outputs.length,
+          phase2_status: phase2?.status ?? null,
+          phase2_last_error: phase2?.last_error ?? null,
+          phase2_retry_at: phase2?.retry_at ?? null,
+          phase2_last_attempt_finished_at: phase2?.finished_at ?? null,
           phase2_last_success_watermark: phase2?.last_success_watermark ?? null,
-          phase2_last_finished_at: phase2?.finished_at ?? null,
+          phase2_last_success_finished_at: phase2?.success_finished_at ?? null,
+          // Back-compat aliases used by earlier inspect consumers.
+          phase2_last_finished_at: phase2?.success_finished_at ?? null,
           summary_chars: summaryChars,
           summary_tokens_est: summaryTokens,
           files: listing,

@@ -380,33 +380,66 @@ export class MemoryStore {
     }).immediate()
   }
 
-  /** Last recorded phase-2 success info (memory_inspect). Null when phase 2 never succeeded. */
-  phase2LastSuccess(): { finished_at: number | null; last_success_watermark: number | null } | null {
+  /**
+   * Phase-2 job snapshot for memory_inspect. Always returns the global job row
+   * when it exists (including failed/running), so diagnostics are not limited
+   * to clean successes. `success_finished_at` is set only for a clean success
+   * (never a failure timestamp); `last_success_watermark` follows codex
+   * (preserved across later attempts; zero only counts while clean).
+   */
+  phase2JobSnapshot(): {
+    status: string
+    last_error: string | null
+    finished_at: number | null
+    retry_at: number | null
+    success_finished_at: number | null
+    last_success_watermark: number | null
+  } | null {
     const row = this.db
       .prepare(
-        `SELECT status, finished_at, last_error, last_success_watermark FROM memory_jobs
+        `SELECT status, finished_at, last_error, retry_at, last_success_watermark FROM memory_jobs
          WHERE kind='memory_consolidate_global' AND job_key='global'`,
       )
       .get() as {
         status: string
         finished_at: number | null
         last_error: string | null
+        retry_at: number | null
         last_success_watermark: number | null
       } | null
-    if (!row || row.last_success_watermark === null) return null
+    if (!row) return null
     const cleanSuccess =
       row.last_error === null &&
       row.finished_at !== null &&
       (row.status === "done" || row.status === "pending")
     // Codex initializes pending global jobs with watermark 0, so zero proves a
     // success only while the row itself is a clean completed attempt.
-    if (row.last_success_watermark === 0 && !cleanSuccess) return null
+    const watermark =
+      row.last_success_watermark === null
+        ? null
+        : row.last_success_watermark === 0 && !cleanSuccess
+          ? null
+          : row.last_success_watermark
     return {
-      // Codex preserves last_success_watermark across later attempts, while
-      // finished_at describes only the latest attempt. Expose them separately
-      // so a failure timestamp is never labeled as a success timestamp.
-      finished_at: cleanSuccess ? row.finished_at : null,
-      last_success_watermark: row.last_success_watermark,
+      status: row.status,
+      last_error: row.last_error,
+      finished_at: row.finished_at,
+      retry_at: row.retry_at,
+      // Codex preserves last_success_watermark across later attempts, while the
+      // job finished_at describes only the latest attempt. Never label a failure
+      // timestamp as a success finish time.
+      success_finished_at: cleanSuccess ? row.finished_at : null,
+      last_success_watermark: watermark,
+    }
+  }
+
+  /** Last recorded phase-2 success info. Null when phase 2 never succeeded. */
+  phase2LastSuccess(): { finished_at: number | null; last_success_watermark: number | null } | null {
+    const snap = this.phase2JobSnapshot()
+    if (!snap || snap.last_success_watermark === null) return null
+    return {
+      finished_at: snap.success_finished_at,
+      last_success_watermark: snap.last_success_watermark,
     }
   }
 
