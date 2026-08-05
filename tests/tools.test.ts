@@ -343,6 +343,18 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("phase2_last_success_watermark: none")
   })
 
+  it("does not read a memory summary through a symlink", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    const outside = path.join(TEST_ROOT, "outside-summary.md")
+    fs.writeFileSync(outside, "v1\noutside secret\n")
+    fs.symlinkSync(outside, path.join(root, "memory_summary.md"))
+    const { memory_inspect } = require("../tools/control.js")
+
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("memory_inspect error:")
+    expect(r.output).not.toContain("outside secret")
+  })
+
   it("echoes the effective options as the config-verification surface", async () => {
     const { memory_inspect } = require("../tools/control.js")
     const r = await memory_inspect.execute({}, CTX)
@@ -376,6 +388,26 @@ describe("memory_inspect", () => {
     }
   })
 
+  it("warns on wrong-typed known options and restores clean defaults", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const { pluginOptions } = require("../src/options.js")
+    applyPluginOptions({
+      generate_memories: "yes",
+      max_raw_memories_for_consolidation: "many",
+      codex_interop: { import: "yes", mystery: true },
+    } as any)
+
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("generate_memories must be a boolean")
+    expect(r.output).toContain("max_raw_memories_for_consolidation must be a finite number")
+    expect(r.output).toContain("codex_interop.import must be a boolean")
+    expect(r.output).toContain("unknown codex_interop option 'mystery'")
+    expect(pluginOptions.generate_memories).toBe(true)
+    expect(pluginOptions.max_raw_memories_for_consolidation).toBe(256)
+    expect(pluginOptions.codex_interop.import).toBe(false)
+  })
+
   it("reports the resolved codex memories root when interop is enabled", async () => {
     const { memory_inspect } = require("../tools/control.js")
     const { pluginOptions } = require("../src/options.js")
@@ -406,5 +438,28 @@ describe("memory_add_note collisions", () => {
     const { memory_add_note } = require("../tools/memory.js")
     const r = await memory_add_note.execute({ note: "x", title: "my note" }, CTX)
     expect(r.metadata.file).toMatch(/notes\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-my-note\.md$/)
+  })
+
+  it("persists note content verbatim like Codex", async () => {
+    const { memory_add_note } = require("../tools/memory.js")
+    const secretShaped = "password=sk-" + "a".repeat(30)
+    const r = await memory_add_note.execute({ note: secretShaped, title: "verbatim note" }, CTX)
+    const root = path.join(TEST_ROOT, "memories")
+    const written = fs.readFileSync(path.join(root, r.metadata.file), "utf8")
+    expect(written).toContain(secretShaped)
+  })
+})
+
+describe("memory_mode", () => {
+  it("defaults to the current session and accepts an explicit target", async () => {
+    const { memory_mode } = require("../tools/control.js")
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+
+    await memory_mode.execute({ mode: "disabled" }, CTX)
+    await memory_mode.execute({ mode: "enabled", sessionId: "ses_other" }, CTX)
+
+    expect(store.getMemoryMode(CTX.sessionID)).toBe("disabled")
+    expect(store.getMemoryMode("ses_other")).toBe("enabled")
   })
 })

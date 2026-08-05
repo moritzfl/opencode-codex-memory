@@ -25,7 +25,7 @@ export interface PluginOptionsState {
   codex_interop: CodexInteropOptions
 }
 
-export const pluginOptions: PluginOptionsState = {
+const DEFAULT_PLUGIN_OPTIONS: PluginOptionsState = {
   generate_memories: true,
   use_memories: true,
   dedicated_tools: true,
@@ -36,6 +36,19 @@ export const pluginOptions: PluginOptionsState = {
   max_rollouts_per_startup: 2,
   min_rollout_idle_hours: 6,
   codex_interop: { import: false, export: false },
+}
+
+export const pluginOptions: PluginOptionsState = {
+  ...DEFAULT_PLUGIN_OPTIONS,
+  codex_interop: { ...DEFAULT_PLUGIN_OPTIONS.codex_interop },
+}
+
+export function resetPluginOptions(): void {
+  delete pluginOptions.extract_model
+  delete pluginOptions.consolidation_model
+  Object.assign(pluginOptions, DEFAULT_PLUGIN_OPTIONS, {
+    codex_interop: { ...DEFAULT_PLUGIN_OPTIONS.codex_interop },
+  })
 }
 
 /**

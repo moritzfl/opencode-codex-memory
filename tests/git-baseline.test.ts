@@ -110,6 +110,18 @@ describe("git-baseline", () => {
     expect(fs.lstatSync(memFile(".git")).isSymbolicLink()).toBe(false)
   })
 
+  it("fails closed instead of diffing content through a workdir symlink", async () => {
+    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+    const outside = path.join(TEST_ROOT, "outside-memory.md")
+    fs.writeFileSync(memFile("memory.md"), "inside\n")
+    fs.writeFileSync(outside, "outside secret\n")
+    expect(await ensureBaseline()).toBe(true)
+    fs.unlinkSync(memFile("memory.md"))
+    fs.symlinkSync(outside, memFile("memory.md"))
+
+    await expect(captureWorkspaceDiff()).rejects.toThrow(/symlink|non-regular/)
+  })
+
   it("removes the phase2 diff artifact before diffing and committing", async () => {
     const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
     expect(await ensureBaseline()).toBe(true)

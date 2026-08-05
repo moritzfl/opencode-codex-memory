@@ -2,7 +2,12 @@ import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
-import { assertMemoryRootSafe, safeResolveMemoryPath } from "./path-guard.js"
+import {
+  assertMemoryRootSafe,
+  readRegularFileNoFollow,
+  safeResolveMemoryPath,
+  writeRegularFileNoFollow,
+} from "./path-guard.js"
 import type { Stage1Output } from "./store.js"
 import { DIFF_ARTIFACT, type WorkspaceDiff } from "./git-baseline.js"
 
@@ -41,11 +46,11 @@ export function ensureLayout(): void {
     fs.mkdirSync(safeResolveMemoryPath(dir), { recursive: true })
   }
   const memoryMd = safeResolveMemoryPath("MEMORY.md")
-  if (!fs.existsSync(memoryMd)) fs.writeFileSync(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n", { flag: "w" })
+  if (!fs.existsSync(memoryMd)) writeRegularFileNoFollow(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n")
   const summary = safeResolveMemoryPath("memory_summary.md")
-  if (!fs.existsSync(summary)) fs.writeFileSync(summary, "", { flag: "w" })
+  if (!fs.existsSync(summary)) writeRegularFileNoFollow(summary, "")
   const adhocInstructions = safeResolveMemoryPath(path.join(EXTENSIONS_DIR, "ad_hoc", "instructions.md"))
-  if (!fs.existsSync(adhocInstructions)) fs.writeFileSync(adhocInstructions, ADHOC_INSTRUCTIONS, { flag: "w" })
+  if (!fs.existsSync(adhocInstructions)) writeRegularFileNoFollow(adhocInstructions, ADHOC_INSTRUCTIONS)
 }
 
 /**
@@ -69,7 +74,7 @@ export function validateConsolidationArtifacts(root: string = memoryRoot()): { o
     if (!fs.lstatSync(summaryPath).isFile()) {
       return { ok: false, reason: `memory summary artifact is not a file: ${summaryPath}` }
     }
-    summary = fs.readFileSync(summaryPath, "utf8")
+    summary = readRegularFileNoFollow(summaryPath).content.toString("utf8")
   } catch {
     return { ok: false, reason: `missing memory summary artifact: ${summaryPath}` }
   }
@@ -121,7 +126,7 @@ export function rebuildRawMemories(outputs: Stage1Output[]): string {
       content += "\n\n"
     }
   }
-  fs.writeFileSync(safeResolveMemoryPath(RAW_MEMORIES_FILE), content, { flag: "w" })
+  writeRegularFileNoFollow(safeResolveMemoryPath(RAW_MEMORIES_FILE), content)
   return content
 }
 
@@ -143,7 +148,7 @@ export function writeRolloutSummaries(outputs: Stage1Output[]): void {
       `usage_count: ${o.usage_count}\n\n` +
       o.rollout_summary +
       "\n"
-    fs.writeFileSync(file, body, { flag: "w" })
+    writeRegularFileNoFollow(file, body)
   }
 }
 
@@ -216,6 +221,6 @@ export function writeWorkspaceDiff(diff: WorkspaceDiff): string {
     rendered += "\n## Diff\n\n```diff\n" + body + (body.endsWith("\n") ? "" : "\n") + "```\n"
   }
   const file = safeResolveMemoryPath(DIFF_ARTIFACT)
-  fs.writeFileSync(file, rendered, { flag: "w" })
+  writeRegularFileNoFollow(file, rendered)
   return file
 }

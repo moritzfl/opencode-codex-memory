@@ -80,3 +80,97 @@ export function safeResolveUnderRoot(root: string, rel: string): string {
   }
   return current
 }
+
+function sameFile(a: fs.Stats, b: fs.Stats): boolean {
+  return a.dev === b.dev && a.ino === b.ino
+}
+
+/**
+ * Opens a regular file without following its final path component. The lstat
+ * after open is a fallback for platforms without O_NOFOLLOW and also verifies
+ * that a path-swap race did not give us a different inode.
+ */
+export function withRegularFileNoFollow<T>(
+  file: string,
+  flags: number,
+  fn: (fd: number, stat: fs.Stats) => T,
+): T {
+  const noFollow = fs.constants.O_NOFOLLOW ?? 0
+  const nonBlock = fs.constants.O_NONBLOCK ?? 0
+  let fd: number
+  try {
+    fd = fs.openSync(file, flags | noFollow | nonBlock)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+      throw new Error(`symlinks are not allowed in the memory workspace: ${file}`)
+    }
+    throw err
+  }
+  try {
+    const opened = fs.fstatSync(fd)
+    const current = fs.lstatSync(file)
+    if (current.isSymbolicLink() || !current.isFile() || !opened.isFile() || !sameFile(opened, current)) {
+      throw new Error(`refusing non-regular or replaced file: ${file}`)
+    }
+    return fn(fd, opened)
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+export function readRegularFileNoFollow(file: string): { content: Buffer; stat: fs.Stats } {
+  return withRegularFileNoFollow(file, fs.constants.O_RDONLY, (fd, stat) => ({
+    content: fs.readFileSync(fd),
+    stat,
+  }))
+}
+
+/** Overwrite or exclusively create a regular file without following symlinks. */
+export function writeRegularFileNoFollow(
+  file: string,
+  content: string | Uint8Array,
+  options: { exclusive?: boolean } = {},
+): void {
+  const noFollow = fs.constants.O_NOFOLLOW ?? 0
+  const create = () => {
+    const fd = fs.openSync(
+      file,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow,
+      0o666,
+    )
+    try {
+      const opened = fs.fstatSync(fd)
+      const current = fs.lstatSync(file)
+      if (!opened.isFile() || !current.isFile() || !sameFile(opened, current)) {
+        throw new Error(`refusing non-regular or replaced file: ${file}`)
+      }
+      fs.writeFileSync(fd, content)
+    } finally {
+      fs.closeSync(fd)
+    }
+  }
+
+  if (options.exclusive) {
+    create()
+    return
+  }
+
+  let current: fs.Stats
+  try {
+    current = fs.lstatSync(file)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      create()
+      return
+    }
+    throw err
+  }
+  if (current.isSymbolicLink() || !current.isFile()) {
+    throw new Error(`refusing to overwrite non-regular file: ${file}`)
+  }
+  withRegularFileNoFollow(file, fs.constants.O_WRONLY, (fd) => {
+    // Do not truncate until the descriptor and current path are verified.
+    fs.ftruncateSync(fd, 0)
+    fs.writeFileSync(fd, content)
+  })
+}

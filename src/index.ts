@@ -7,7 +7,7 @@ import { MemoryStore } from "./store.js"
 import { runPhase1 } from "./phase1.js"
 import { runPhase2 } from "./phase2.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession } from "./llm.js"
-import { pluginOptions, recordConfigWarning, clearConfigWarnings } from "./options.js"
+import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOptions } from "./options.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import fs from "fs"
 import path from "path"
@@ -106,6 +106,7 @@ export default {
     // instances in one process — see the ARCHITECTURE known-gaps table).
     clearConfigWarnings()
     if (opts) applyPluginOptions(opts)
+    else resetPluginOptions()
     // Finish bounded reseeding before hooks can see a surviving memory
     // sub-session after a plugin reload.
     await cleanupOldSubSessions()
@@ -127,12 +128,16 @@ const KNOWN_OPTION_KEYS = new Set([
   "min_rollout_idle_hours",
   "codex_interop",
 ])
+const KNOWN_CODEX_INTEROP_KEYS = new Set(["import", "export", "codex_home"])
 
 // codex clamps numeric knobs in From<MemoriesToml> for MemoriesConfig
 // (config/src/types.rs); mirror the exact ranges. Non-finite values fall back
 // to the default.
-function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback
+function clampInt(key: string, value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    recordConfigWarning(`${key} must be a finite number; using default ${fallback}`)
+    return fallback
+  }
   return Math.min(max, Math.max(min, Math.floor(value)))
 }
 
@@ -140,6 +145,8 @@ export function applyPluginOptions(opts: PluginOptions): void {
   // Fresh pass per apply so memory_inspect never shows warnings for keys the
   // caller has since fixed. server() clears too, for boots without options.
   clearConfigWarnings()
+  resetPluginOptions()
+  const raw = opts as Record<string, unknown>
   for (const key of Object.keys(opts)) {
     if (!KNOWN_OPTION_KEYS.has(key)) {
       // codex uses deny_unknown_fields; a plugin can only warn (recorded for
@@ -148,22 +155,40 @@ export function applyPluginOptions(opts: PluginOptions): void {
       recordConfigWarning(`unknown/unsupported option '${key}' ignored`)
     }
   }
-  if (typeof opts.generate_memories === "boolean") pluginOptions.generate_memories = opts.generate_memories
-  if (typeof opts.use_memories === "boolean") pluginOptions.use_memories = opts.use_memories
-  if (typeof opts.dedicated_tools === "boolean") pluginOptions.dedicated_tools = opts.dedicated_tools
-  if (typeof opts.disable_on_external_context === "boolean") pluginOptions.disable_on_external_context = opts.disable_on_external_context
-  if (typeof opts.extract_model === "string") pluginOptions.extract_model = opts.extract_model
-  if (typeof opts.consolidation_model === "string") pluginOptions.consolidation_model = opts.consolidation_model
+  for (const key of ["generate_memories", "use_memories", "dedicated_tools", "disable_on_external_context"] as const) {
+    if (!(key in raw)) continue
+    if (typeof raw[key] === "boolean") pluginOptions[key] = raw[key]
+    else recordConfigWarning(`${key} must be a boolean; using default ${pluginOptions[key]}`)
+  }
+  for (const key of ["extract_model", "consolidation_model"] as const) {
+    if (!(key in raw)) continue
+    if (typeof raw[key] === "string") pluginOptions[key] = raw[key]
+    else recordConfigWarning(`${key} must be a string; using the opencode model default`)
+  }
   if ("max_raw_memories_for_consolidation" in opts)
-    pluginOptions.max_raw_memories_for_consolidation = clampInt(opts.max_raw_memories_for_consolidation, 1, 4096, 256)
-  if ("max_unused_days" in opts) pluginOptions.max_unused_days = clampInt(opts.max_unused_days, 0, 365, 30)
-  if ("max_rollout_age_days" in opts) pluginOptions.max_rollout_age_days = clampInt(opts.max_rollout_age_days, 0, 90, 10)
-  if ("max_rollouts_per_startup" in opts) pluginOptions.max_rollouts_per_startup = clampInt(opts.max_rollouts_per_startup, 1, 128, 2)
-  if ("min_rollout_idle_hours" in opts) pluginOptions.min_rollout_idle_hours = clampInt(opts.min_rollout_idle_hours, 1, 48, 6)
+    pluginOptions.max_raw_memories_for_consolidation = clampInt("max_raw_memories_for_consolidation", opts.max_raw_memories_for_consolidation, 1, 4096, 256)
+  if ("max_unused_days" in opts) pluginOptions.max_unused_days = clampInt("max_unused_days", opts.max_unused_days, 0, 365, 30)
+  if ("max_rollout_age_days" in opts) pluginOptions.max_rollout_age_days = clampInt("max_rollout_age_days", opts.max_rollout_age_days, 0, 90, 10)
+  if ("max_rollouts_per_startup" in opts) pluginOptions.max_rollouts_per_startup = clampInt("max_rollouts_per_startup", opts.max_rollouts_per_startup, 1, 128, 2)
+  if ("min_rollout_idle_hours" in opts) pluginOptions.min_rollout_idle_hours = clampInt("min_rollout_idle_hours", opts.min_rollout_idle_hours, 1, 48, 6)
   if ("codex_interop" in opts) {
     const raw = opts.codex_interop
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
       const o = raw as Record<string, unknown>
+      for (const key of Object.keys(o)) {
+        if (!KNOWN_CODEX_INTEROP_KEYS.has(key)) {
+          recordConfigWarning(`unknown codex_interop option '${key}' ignored`)
+        }
+      }
+      if ("import" in o && typeof o.import !== "boolean") {
+        recordConfigWarning("codex_interop.import must be a boolean; using false")
+      }
+      if ("export" in o && typeof o.export !== "boolean") {
+        recordConfigWarning("codex_interop.export must be a boolean; using false")
+      }
+      if ("codex_home" in o && (typeof o.codex_home !== "string" || o.codex_home.length === 0)) {
+        recordConfigWarning("codex_interop.codex_home must be a non-empty string; using the default Codex home")
+      }
       pluginOptions.codex_interop = {
         import: o.import === true,
         export: o.export === true,

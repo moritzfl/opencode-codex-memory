@@ -1,6 +1,11 @@
 import fs from "fs"
 import path from "path"
-import { safeResolveMemoryPath, assertMemoryRootSafe } from "../src/path-guard.js"
+import {
+  safeResolveMemoryPath,
+  assertMemoryRootSafe,
+  readRegularFileNoFollow,
+  writeRegularFileNoFollow,
+} from "../src/path-guard.js"
 import { tool } from "@opencode-ai/plugin"
 
 const MAX_READ_BYTES = 256 * 1024
@@ -21,7 +26,7 @@ export const memory_read = tool({
       if (!fs.existsSync(fullPath)) {
         return { output: `Not found: ${args.path}` }
       }
-      const stat = fs.statSync(fullPath)
+      const stat = fs.lstatSync(fullPath)
       if (stat.isDirectory()) {
         const entries = fs.readdirSync(fullPath)
         return {
@@ -32,7 +37,7 @@ export const memory_read = tool({
       // Read the whole file and apply the line window FIRST; the byte cap
       // applies to the WINDOWED output. Capping the raw read used to make
       // lines beyond the first 256 KiB unreachable regardless of line_offset.
-      const text = fs.readFileSync(fullPath, "utf8")
+      const text = readRegularFileNoFollow(fullPath).content.toString("utf8")
       // Line windowing mirrors codex memories/read: 1-indexed offset, bounded
       // line count, and the start line reported so file:line citations work.
       const startLine = args.line_offset ?? 1
@@ -331,7 +336,7 @@ export const memory_search = tool({
         const start = safeResolveMemoryPath(args.path)
         let st: fs.Stats
         try {
-          st = fs.statSync(start)
+          st = fs.lstatSync(start)
         } catch {
           return { output: `Not found: ${args.path}` }
         }
@@ -354,7 +359,7 @@ export const memory_search = tool({
         const listing = files.slice(0, args.max_results).map((f) => {
           let content = ""
           try {
-            content = fs.readFileSync(f.abs, "utf8")
+            content = readRegularFileNoFollow(f.abs).content.toString("utf8")
           } catch {
           }
           return `${new Date(f.ts!).toISOString()} ${f.rel} — ${firstContentLine(content)}`
@@ -378,7 +383,7 @@ export const memory_search = tool({
       for (const f of files) {
         let content: string
         try {
-          content = fs.readFileSync(f.abs, "utf8")
+          content = readRegularFileNoFollow(f.abs).content.toString("utf8")
         } catch {
           continue
         }
@@ -466,7 +471,7 @@ export const memory_add_note = tool({
       let file = safeResolveMemoryPath(path.join(NOTES_DIR, `${stem}.md`))
       for (let i = 2; ; i++) {
         try {
-          fs.writeFileSync(file, header + args.note + "\n", { flag: "wx" })
+          writeRegularFileNoFollow(file, header + args.note + "\n", { exclusive: true })
           break
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "EEXIST" || i > 20) throw err

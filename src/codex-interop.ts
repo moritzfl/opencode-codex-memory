@@ -2,7 +2,7 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 import { memoryRoot } from "./paths.js"
-import { safeResolveUnderRoot } from "./path-guard.js"
+import { readRegularFileNoFollow, safeResolveUnderRoot, writeRegularFileNoFollow } from "./path-guard.js"
 
 /**
  * Codex interop: memory exchange with an upstream Codex CLI installation on
@@ -218,9 +218,7 @@ export function resolveCodexInterop(opts: CodexInteropOptions): ResolvedCodexInt
 
 function readIfFile(file: string): Buffer | null {
   try {
-    const st = fs.lstatSync(file)
-    if (!st.isFile()) return null
-    return fs.readFileSync(file)
+    return readRegularFileNoFollow(file).content
   } catch {
     return null
   }
@@ -238,7 +236,7 @@ function writeIfChanged(file: string, content: Buffer | string): boolean {
     if (!fs.lstatSync(file).isFile()) fs.rmSync(file, { recursive: true, force: true })
   } catch {}
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, next, { flag: "w" })
+  writeRegularFileNoFollow(file, next)
   return true
 }
 

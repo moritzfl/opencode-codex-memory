@@ -3,6 +3,7 @@ import path from "path"
 import { memoryRoot } from "./paths.js"
 import * as isogit from "isomorphic-git"
 import { createPatch } from "diff"
+import { readRegularFileNoFollow, safeResolveUnderRoot } from "./path-guard.js"
 
 const AUTHOR = { name: "opencode-codex-memory", email: "memory@opencode.local" }
 
@@ -127,11 +128,8 @@ async function readBaselineText(dir: string, headOid: string, filepath: string):
 }
 
 function readWorkdirText(dir: string, filepath: string): string {
-  try {
-    return fs.readFileSync(path.join(dir, filepath), "utf8")
-  } catch {
-    return ""
-  }
+  const file = safeResolveUnderRoot(dir, filepath)
+  return readRegularFileNoFollow(file).content.toString("utf8")
 }
 
 // Throws on failure: codex fails the phase-2 job on workspace-status errors

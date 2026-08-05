@@ -1,7 +1,7 @@
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
-import { assertMemoryRootSafe, safeResolveMemoryPath } from "./path-guard.js"
+import { assertMemoryRootSafe, safeResolveMemoryPath, withRegularFileNoFollow } from "./path-guard.js"
 import { truncateToTokens } from "./token.js"
 import { fillTemplate } from "./llm.js"
 
@@ -44,32 +44,27 @@ function readTemplate(): string {
 }
 
 function readMemorySummary(): string | null {
-  let summaryPath: string
-  let fd: number | undefined
   try {
     // Use the same component-by-component symlink refusal as the memory tools:
     // neither the root nor memory_summary.md may redirect outside the workspace.
-    summaryPath = safeResolveMemoryPath("memory_summary.md")
-    fd = fs.openSync(summaryPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
-    const stat = fs.fstatSync(fd)
-    if (!stat.isFile()) return null
-    if (cached && cached.mtime === stat.mtimeMs) {
-      return cached.content
-    }
+    const summaryPath = safeResolveMemoryPath("memory_summary.md")
+    return withRegularFileNoFollow(summaryPath, fs.constants.O_RDONLY, (fd, stat) => {
+      if (cached && cached.mtime === stat.mtimeMs) {
+        return cached.content
+      }
 
-    const raw = fs.readFileSync(fd, "utf8").trim()
-    if (!raw) return null
+      const raw = fs.readFileSync(fd, "utf8").trim()
+      if (!raw) return null
 
-    const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
-    cached = {
-      content: truncated,
-      mtime: stat.mtimeMs,
-    }
-    return truncated
+      const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
+      cached = {
+        content: truncated,
+        mtime: stat.mtimeMs,
+      }
+      return truncated
+    })
   } catch {
     return null
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd)
   }
 }
 

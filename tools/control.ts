@@ -5,7 +5,7 @@ import { memoryRoot, memorySummaryPath } from "../src/paths.js"
 import { MemoryStore } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
-import { assertMemoryRootSafe } from "../src/path-guard.js"
+import { assertMemoryRootSafe, readRegularFileNoFollow } from "../src/path-guard.js"
 import { isPhase2InFlight } from "../src/phase2.js"
 import { pluginOptions, getConfigWarnings } from "../src/options.js"
 import { resolveCodexInterop } from "../src/codex-interop.js"
@@ -165,14 +165,18 @@ export const memory_inspect = tool({
       let summaryChars = 0
       let summaryTokens = 0
       if (fs.existsSync(summaryPath)) {
-        const text = fs.readFileSync(summaryPath, "utf8")
+        const text = readRegularFileNoFollow(summaryPath).content.toString("utf8")
         summaryChars = text.length
         summaryTokens = estimateTokens(text)
       }
       const listing = listMemoriesDir()
       // The tool description promises the last Phase 2 success watermark.
       const phase2 = store.phase2LastSuccess()
-      const watermark = phase2?.last_success_watermark ? new Date(phase2.last_success_watermark).toISOString() : "none"
+      const watermark = phase2?.last_success_watermark === 0
+        ? "0 (no consumed inputs)"
+        : phase2?.last_success_watermark !== null && phase2?.last_success_watermark !== undefined
+          ? new Date(phase2.last_success_watermark).toISOString()
+          : "none"
       const finishedAt = phase2?.finished_at ? new Date(phase2.finished_at * 1000).toISOString() : "none"
       const out = [
         `stage1_outputs: ${outputs.length}`,
@@ -208,7 +212,7 @@ export const memory_inspect = tool({
 
 export const memory_mode = tool({
   description:
-    "Set the memory mode for the current session. 'enabled' allows Phase 1 extraction. " +
+    "Set the memory mode for the target session (current session by default). 'enabled' allows Phase 1 extraction. " +
     "'disabled' excludes this session from extraction. 'polluted' marks it as having external context " +
     "(websearch/webfetch) that should not be trusted for memory.",
   args: {
