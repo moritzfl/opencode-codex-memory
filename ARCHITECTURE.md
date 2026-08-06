@@ -175,18 +175,16 @@ authenticated client (`input.client`), which shares auth with the host:
   sessions from other projects. Errors propagate so the job fails and retries.
   A first-time empty transcript finalizes as no-output; an empty transcript for
   a session with an existing extraction retries instead of deleting that row.
-- Discovery: `session.list` is project-scoped, so the plugin enumerates
-  `project.list()` and lists each project with `scope=project&roots=true`
-  (scope widens the filter from the session directory to the whole project).
-  Per-project failures skip that project; a failed project.list skips the
-  pass — discovery is fail-safe because it never finalizes anything. Instance
-  contexts the host creates for listed directories are cached per process, and
-  the pass is rate-limited (30s min interval).
+- Discovery: `GET /experimental/session?roots=true` (`Session.listGlobal`) —
+   one call across all projects. The V1 plugin client has no `experimental`
+   namespace, so the call goes through the host client's hey-api transport
+   (`client._client.get`) which already carries baseUrl + auth. Fail-safe:
+   any error skips the pass and never finalizes a job. The pass is also
+   rate-limited (30s min interval).
 
-Trade-off accepted: discovery is N+1 requests instead of one SQL query, in
-exchange for zero coupling to opencode's storage schema. The only SQLite the
-plugin touches is its own `memory.db` (D5) — plugin-owned state with no API
-equivalent.
+Trade-off accepted: discovery rides an experimental route (stable since
+1.17.x) rather than reading `opencode.db`. The only SQLite the plugin touches
+is its own `memory.db` (D5) — plugin-owned state with no API equivalent.
 
 ### D5 — Separate plugin DB (`src/db.ts`)
 
@@ -251,7 +249,7 @@ root" invariant. The extension approach is pure content.
 | Token counting | tiktoken | chars/4 estimate | Sufficient for the 2500-token cap |
 | Cache-stable injection | V2 `SystemContext.Source` | V1 hook + byte-identical append | Content-addressed provider caches (D1) |
 | LLM call API | Internal model client | HTTP API → subagent sessions | Reuses opencode auth/usage (D3) |
-| Transcript access | Direct rollout files (own format) | `session.messages` + `project.list`/`session.list` APIs; `opencode.db` never read | Official surfaces only (D4) |
+| Transcript access | Direct rollout files (own format) | `session.messages` + `experimental.session.list`; `opencode.db` never read | Official surfaces only (D4) |
 | Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
 | Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
 | Rate-limit awareness | Provider rate-limit info | Time-based heuristic stub | See `src/ratelimit.ts`; wire when opencode exposes it |

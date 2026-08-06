@@ -210,10 +210,11 @@ mappings:
       rollout .jsonl files directly); the port uses opencode's official API
       exclusively — session.messages for transcripts (session-scoped routing
       covers cross-project sessions; errors propagate so the job retries
-      instead of finalizing a false no-output) and project.list +
-      per-project session.list(scope=project, roots=true) for global
-      discovery (fail-safe: failures skip, never finalize). opencode.db is
-      never read; the only SQLite is the plugin's own memory.db (D5).
+      instead of finalizing a false no-output) and GET /experimental/session
+      (Session.listGlobal, roots=true) for global discovery via the host
+      client's hey-api transport (V1 SDK has no experimental namespace;
+      fail-safe: failures skip, never finalize). opencode.db is never read;
+      the only SQLite is the plugin's own memory.db (D5).
       Codex now extracts from legacy and paginated threads alike; the port was
       already history-mode agnostic because these APIs expose the session
       transcript independently of Codex's rollout storage mode.

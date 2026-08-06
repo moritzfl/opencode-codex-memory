@@ -27,11 +27,15 @@ function installClient(messageRows: unknown[]): number {
   const updatedAt = Date.now() - 7 * 60 * 60 * 1000
   setPluginInput({
     client: {
-      project: { list: async () => ({ data: [{ worktree: "/project" }] }) },
+      _client: {
+        get: async ({ url }: { url: string }) => {
+          if (url !== "/experimental/session") throw new Error(`unexpected url ${url}`)
+          return {
+            data: [{ id: SESSION_ID, directory: "/project", time: { updated: updatedAt } }],
+          }
+        },
+      },
       session: {
-        list: async () => ({
-          data: [{ id: SESSION_ID, directory: "/project", time: { updated: updatedAt } }],
-        }),
         messages: async () => ({ data: messageRows }),
       },
     },

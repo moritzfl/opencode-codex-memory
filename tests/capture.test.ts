@@ -118,32 +118,30 @@ describe("loadTranscript", () => {
   })
 })
 
-const PROJECTS = [{ worktree: "/proj/a" }, { worktree: "/proj/b" }]
-
-function discoveryClient(perProject: Record<string, unknown[] | Error>) {
+function discoveryClient(rows: unknown[] | Error, capture?: { query?: unknown; url?: string }) {
   return {
-    project: { list: async () => ({ data: PROJECTS }) },
-    session: {
-      list: async ({ query }: { query: { directory: string } }) => {
-        const rows = perProject[query.directory]
+    _client: {
+      get: async (opts: { url: string; query?: unknown }) => {
+        if (capture) {
+          capture.url = opts.url
+          capture.query = opts.query
+        }
         if (rows instanceof Error) throw rows
-        return { data: rows ?? [] }
+        return { data: rows }
       },
     },
   }
 }
 
 describe("listRecentSessions", () => {
-  it("merges projects, filters children and plugin sub-sessions, sorts by recency", async () => {
+  it("filters children and plugin sub-sessions, sorts by recency", async () => {
     setClient(
-      discoveryClient({
-        "/proj/a": [
-          { id: "ses_old", directory: "/proj/a", title: "old work", time: { updated: 1000 } },
-          { id: "ses_child", parentID: "ses_old", title: "child", time: { updated: 5000 } },
-          { id: "ses_sub", title: "codex-memory-extract-x", time: { updated: 6000 } },
-        ],
-        "/proj/b": [{ id: "ses_new", directory: "/proj/b", title: "new work", time: { updated: 2000 } }],
-      }),
+      discoveryClient([
+        { id: "ses_new", directory: "/proj/b", title: "new work", time: { updated: 2000 } },
+        { id: "ses_old", directory: "/proj/a", title: "old work", time: { updated: 1000 } },
+        { id: "ses_child", parentID: "ses_old", title: "child", time: { updated: 5000 } },
+        { id: "ses_sub", title: "codex-memory-extract-x", time: { updated: 6000 } },
+      ]),
     )
     const { listRecentSessions } = require("../src/capture.js")
     const rows = await listRecentSessions()
@@ -152,39 +150,26 @@ describe("listRecentSessions", () => {
     expect(rows[0].updated_at).toBe(2000)
   })
 
-  it("skips a failing project but keeps the others", async () => {
-    setClient(
-      discoveryClient({
-        "/proj/a": new Error("stale directory"),
-        "/proj/b": [{ id: "ses_b", directory: "/proj/b", title: "w", time: { updated: 42 } }],
-      }),
-    )
-    const { listRecentSessions } = require("../src/capture.js")
-    const rows = await listRecentSessions()
-    expect(rows.map((r: any) => r.id)).toEqual(["ses_b"])
-  })
-
-  it("is fail-safe: returns [] when project discovery fails or no client exists", async () => {
+  it("is fail-safe: returns [] when discovery fails or no client exists", async () => {
     const { listRecentSessions } = require("../src/capture.js")
     expect(await listRecentSessions()).toEqual([])
-    setClient({ project: { list: async () => ({ error: { status: 500 } }) }, session: { list: async () => ({ data: [] }) } })
+    setClient(discoveryClient(new Error("stale")))
     expect(await listRecentSessions()).toEqual([])
-  })
-
-  it("requests project scope with root sessions only", async () => {
-    let seenQuery: any = null
     setClient({
-      project: { list: async () => ({ data: [{ worktree: "/proj/a" }] }) },
-      session: {
-        list: async ({ query }: { query: unknown }) => {
-          seenQuery = query
-          return { data: [] }
-        },
+      _client: {
+        get: async () => ({ error: { status: 500 } }),
       },
     })
+    expect(await listRecentSessions()).toEqual([])
+  })
+
+  it("calls experimental.session.list with roots and limit", async () => {
+    const seen: { query?: unknown; url?: string } = {}
+    setClient(discoveryClient([], seen))
     const { listRecentSessions } = require("../src/capture.js")
-    await listRecentSessions()
-    expect(seenQuery).toEqual({ directory: "/proj/a", scope: "project", roots: true, limit: 5000 })
+    await listRecentSessions(42)
+    expect(seen.url).toBe("/experimental/session")
+    expect(seen.query).toEqual({ roots: true, limit: 42 })
   })
 })
 

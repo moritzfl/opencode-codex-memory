@@ -176,8 +176,19 @@ async function main() {
         note(schemaHasProperty(t, "updated"), "Session.time.updated present (eligibility watermark)")
       }
 
-      // project.list used by discovery
-      note(!!getPathOp(doc, "/project", "get"), "GET /project present (discovery)")
+      // global discovery used by Phase 1 (D4)
+      const expSess = getPathOp(doc, "/experimental/session", "get")
+      note(!!expSess, "GET /experimental/session present (global discovery)")
+      if (expSess) {
+        const params = Array.isArray(expSess.parameters) ? expSess.parameters : []
+        const names = new Set(
+          params
+            .map((p) => asRecord(p)?.name)
+            .filter((n): n is string => typeof n === "string"),
+        )
+        note(names.has("roots"), "experimental.session.list query param 'roots'")
+        note(names.has("limit"), "experimental.session.list query param 'limit'")
+      }
     }
   } finally {
     if (serve) await serve.stop()

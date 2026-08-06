@@ -33,61 +33,57 @@ interface ApiSession {
 }
 
 /**
- * Global session discovery through the official API: opencode's session.list
- * is project-scoped, so enumerate projects (project.list) and list each one
- * with scope=project (routes the request to that project's instance AND
- * widens the filter from the session directory to the whole project).
- * Instance contexts created this way are cached by the host for the process
- * lifetime, and the whole pass is rate-limited (30s min interval).
- *
- * Fail-safe at two levels: a failed project.list skips the pass ([]), a
- * failed per-project session.list skips that project — neither claims or
- * finalizes any job. Transcript loading must NOT be fail-safe — see
- * loadTranscript.
+ * Hey-api transport on PluginInput.client. The V1 SDK has no
+ * `experimental.*` namespace, but the host-built client already carries
+ * baseUrl + auth headers; `_client.get` is the supported escape hatch for
+ * routes the generated surface lags on (same pattern as the scope/roots casts
+ * we used to need on session.list).
+ */
+function pluginHttp(): { get: (opts: Record<string, unknown>) => Promise<{ error?: unknown; data?: unknown }> } | null {
+  const http = (getPluginInput()?.client as { _client?: { get?: unknown } } | null | undefined)?._client
+  if (!http || typeof http.get !== "function") return null
+  return http as { get: (opts: Record<string, unknown>) => Promise<{ error?: unknown; data?: unknown }> }
+}
+
+/**
+ * Global session discovery through the official API:
+ * `GET /experimental/session?roots=true` (Session.listGlobal) — one call across
+ * all projects, sorted by most-recently-updated. Available since opencode
+ * 1.17.x. Fail-safe: any error skips the pass ([]); never finalizes a job.
+ * Transcript loading must NOT be fail-safe — see loadTranscript.
  */
 export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<SessionRow[]> {
-  const client = getPluginInput()?.client as any
-  if (!client?.project?.list || !client?.session?.list) return []
-  let projects: { worktree?: string }[]
+  const http = pluginHttp()
+  if (!http) return []
   try {
-    const res = await withTimeout<{ error?: unknown; data?: unknown }>(client.project.list(), API_TIMEOUT_MS, "project.list")
-    if (!res || res.error || !Array.isArray(res.data)) throw new Error(`project.list failed: ${JSON.stringify(res?.error ?? {})}`)
-    projects = res.data as { worktree?: string }[]
+    const res = await withTimeout(
+      http.get({
+        url: "/experimental/session",
+        query: { roots: true, limit },
+      }),
+      API_TIMEOUT_MS,
+      "experimental.session.list",
+    )
+    if (!res || res.error || !Array.isArray(res.data)) {
+      throw new Error(`experimental.session.list failed: ${JSON.stringify(res?.error ?? {})}`)
+    }
+    const all: SessionRow[] = []
+    for (const s of res.data as ApiSession[]) {
+      // Top-level sessions only: task-tool children are summarized into their
+      // parent, and the plugin's own sub-sessions must never be memorized
+      // (roots=true drops children server-side; keep both belts).
+      if (!s?.id || s.parentID) continue
+      if (s.title && s.title.startsWith("codex-memory-")) continue
+      all.push({ id: s.id, updated_at: s.time?.updated ?? 0, directory: s.directory ?? null })
+    }
+    // Server already orders by time_updated DESC; re-sort so a lagging host
+    // cannot invert eligibility order.
+    all.sort((a, b) => b.updated_at - a.updated_at)
+    return all.slice(0, limit)
   } catch (err) {
-    console.warn("[opencode-codex-memory] project discovery failed; skipping pass:", err)
+    console.warn("[opencode-codex-memory] session discovery failed; skipping pass:", err)
     return []
   }
-
-  const all: SessionRow[] = []
-  for (const project of projects) {
-    if (!project?.worktree) continue
-    try {
-      const res = await withTimeout<{ error?: unknown; data?: unknown }>(
-        client.session.list({
-          // scope/roots/limit are in the server's ListQuery (accepted since
-          // opencode 1.14.30, well under our 1.18 floor); the pinned SDK types
-          // still omit them (SessionListData.query is just { directory } as of
-          // 1.18.1), hence the cast at the call site.
-          query: { directory: project.worktree, scope: "project", roots: true, limit },
-        }),
-        API_TIMEOUT_MS,
-        "session.list",
-      )
-      if (!res || res.error || !Array.isArray(res.data)) throw new Error(JSON.stringify(res?.error ?? {}))
-      for (const s of res.data as ApiSession[]) {
-        // Top-level sessions only: task-tool children are summarized into
-        // their parent, and the plugin's own sub-sessions must never be
-        // memorized (roots=true drops children server-side; keep both belts).
-        if (!s?.id || s.parentID) continue
-        if (s.title && s.title.startsWith("codex-memory-")) continue
-        all.push({ id: s.id, updated_at: s.time?.updated ?? 0, directory: s.directory ?? null })
-      }
-    } catch (err) {
-      console.warn(`[opencode-codex-memory] session.list failed for ${project.worktree}; skipping project:`, err)
-    }
-  }
-  all.sort((a, b) => b.updated_at - a.updated_at)
-  return all.slice(0, limit)
 }
 
 export interface TranscriptMessage {
