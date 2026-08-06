@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-08-06
+
+### Changed
+
+- Memory extraction finds past sessions with one host-wide lookup instead of
+  scanning each project separately — faster and less brittle when many projects
+  are open.
+
+### Added
+
+- Automated live checks against the official OpenCode binary
+  (`bun run contract`, `bun run live:read`, `bun run live:e2e`) for release
+  verification.
+
 ## [0.4.6] - 2026-08-05
 
 ### Fixed
@@ -458,7 +472,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.3...v0.4.4

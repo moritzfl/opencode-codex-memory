@@ -52,7 +52,7 @@ If you want the mental model before the details, jump to
 
 ```json
 {
-  "plugin": ["opencode-codex-memory@0.4.6"]
+  "plugin": ["opencode-codex-memory@0.4.7"]
 }
 ```
 
@@ -239,7 +239,7 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.4.6", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory@0.4.7", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
@@ -298,7 +298,7 @@ directions:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.4.6", { "codex_interop": { "import": true, "export": true } }]
+    ["opencode-codex-memory@0.4.7", { "codex_interop": { "import": true, "export": true } }]
   ]
 }
 ```
