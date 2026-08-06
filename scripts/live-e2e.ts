@@ -129,6 +129,12 @@ async function main() {
     keep: args.keep,
     model: models.model,
     smallModel: models.smallModel,
+    // Extraction/consolidation quality is the point of this suite — pin both
+    // to the main model so a tiny small_model cannot no-op every stage1 job.
+    pluginOptions: {
+      extract_model: models.model,
+      consolidation_model: models.model,
+    },
   })
   let serve: ServeHandle | null = null
   let failures = 0
@@ -202,12 +208,22 @@ async function main() {
         "phase1 outputs",
         () => {
           const rows = stage1Rows(sandbox)
-          const jobs = stage1Jobs(sandbox)
           if (rows.length > 0) return true
-          const failed = jobs.filter((j) => j.status === "failed" || j.last_error)
+          const jobs = stage1Jobs(sandbox)
+          const failed = jobs.filter((j) => j.status === "failed" || (j.last_error && j.status !== "done"))
           if (failed.length >= FACTS.length) {
             throw new Error(
               `all stage1 jobs failed: ${failed.map((j) => `${j.job_key}:${j.last_error}`).join("; ")}`,
+            )
+          }
+          // Work sessions finished as selective no-output — fail fast (do not
+          // burn the full phase1 timeout waiting for rows that will never come).
+          const workDone = workIds.filter((id) =>
+            jobs.some((j) => j.job_key === id && j.status === "done"),
+          )
+          if (workDone.length >= workIds.length && rows.length === 0) {
+            throw new Error(
+              `all ${workIds.length} work sessions extracted as no-output (model too selective or transcripts empty)`,
             )
           }
           return false
@@ -242,30 +258,42 @@ async function main() {
     }
 
     // ----- Step 5: Phase 2 -----
-    // First wipe always proceeds; still clear + re-trigger for determinism.
-    clearPhase2Job(sandbox)
-    await sleep(1000)
-    await triggerIdle(serve, sandbox)
+    // Phase 1 already schedules phase 2 after successful extractions. Do NOT
+    // clear the job row first — that races a running consolidator and the
+    // in-process 5min phase2 rate gate then blocks the re-trigger.
+    // If nothing has started after a grace window, nudge with another idle.
     log("phase2", `waiting up to ${args.phase2TimeoutMs}ms for consolidate`)
+    const phase2Started = Date.now()
+    let nudged = false
     try {
       await waitFor(
         "phase2 done",
         () => {
           const job = phase2Job(sandbox)
-          if (!job) return false
-          if (job.status === "failed") {
+          if (job?.status === "failed") {
             throw new Error(`phase2 failed: ${job.last_error ?? "unknown"}`)
           }
-          if (job.status === "done") return true
-          // Artifacts may land slightly before job flips; accept either signal.
+          if (job?.status === "done") return true
+
           const mem = path.join(sandbox.memories, "MEMORY.md")
           const sum = path.join(sandbox.memories, "memory_summary.md")
-          if (fs.existsSync(mem) && fs.existsSync(sum)) {
+          const rollouts = path.join(sandbox.memories, "rollout_summaries")
+          const hasRollouts =
+            fs.existsSync(rollouts) && fs.readdirSync(rollouts).some((f) => f.endsWith(".md"))
+          // Artifacts are the ground truth: job row can lag or be mid-reset.
+          if (fs.existsSync(mem) && hasRollouts) return true
+          if (fs.existsSync(sum)) {
             const summary = fs.readFileSync(sum, "utf8")
-            if (summary.length > MARKER_LINE.length + 20 && job.status === "running") {
-              // still running — keep waiting for done
-              return false
-            }
+            // Baseline was MARKER_LINE only; consolidation rewrites the summary.
+            if (!summary.includes(MARKER) && summary.trim().length > 40 && hasRollouts) return true
+          }
+
+          // Nudge once after 90s if no job row appeared (phase1→phase2 chain missed).
+          if (!nudged && !job && Date.now() - phase2Started > 90_000) {
+            nudged = true
+            log("phase2", "no job yet — clearing row + idle nudge (may wait out 5min rate gate)")
+            clearPhase2Job(sandbox)
+            void triggerIdle(serve!, sandbox).catch(() => {})
           }
           return false
         },
@@ -273,7 +301,7 @@ async function main() {
       )
     } catch (e) {
       console.error("phase2 job:", phase2Job(sandbox))
-      console.error("memories dir:", fs.readdirSync(sandbox.memories))
+      console.error("memories dir:", fs.existsSync(sandbox.memories) ? fs.readdirSync(sandbox.memories) : [])
       console.error("serve log tail:\n", tail(serve.logPath, 60))
       throw new Error(`phase2: ${e instanceof Error ? e.message : String(e)}`)
     }
