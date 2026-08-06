@@ -44,6 +44,15 @@ runtime. Those are fine **only** when they are deliberate and recorded as a
 bun install
 bun test
 bun run typecheck
+bun run build && bun run smoke && bun run contract
+```
+
+Live checks against the **official** opencode binary (XDG-sandboxed; needs
+provider auth + a configured model — never touches your real memory home):
+
+```bash
+bun run live:read    # system-prompt injection only
+bun run live:e2e     # full write pipeline (Phase 1 + 2 + closed loop)
 ```
 
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
@@ -55,6 +64,8 @@ bun run typecheck
   `"*": "deny"` and allow only the built-in opencode file tools it needs.
   Shell, network, task delegation, IDE, and MCP tools must remain denied;
   `tests/agents.test.ts` enforces this sandbox.
+- On each opencode release: `bun run contract` (OpenAPI + hook surface), then
+  prefer `bun run live:e2e` before bumping `@opencode-ai/plugin`.
 
 ## Commits
 

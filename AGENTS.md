@@ -40,7 +40,9 @@ via the drift script before proposing structural changes.
 ## Conventions
 
 - `./gradlew` is not used here. Dev commands: `bun install`, `bun test`,
-  `bun run typecheck`, `bun run build`, `bun run smoke`.
+  `bun run typecheck`, `bun run build`, `bun run smoke`, `bun run contract`.
+  Live host checks (need auth + model, XDG-sandboxed): `bun run live:read`,
+  `bun run live:e2e`.
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
 - Templates in `src/templates/*.md` are ported from codex with deliberate
   platform adaptations (citation tags, memory-tool guidance, session metadata,

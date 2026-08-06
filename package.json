@@ -31,6 +31,9 @@
     "dev": "bun --watch src/index.ts",
     "build": "tsc && rm -rf dist/src/templates && cp -R src/templates dist/src/templates && cp opencode.json dist/opencode.json",
     "smoke": "bun scripts/smoke.ts",
+    "contract": "bun scripts/check-opencode-contract.ts",
+    "live:read": "bun scripts/live-readpath.ts",
+    "live:e2e": "bun scripts/live-e2e.ts",
     "prepack": "npm run build && npm run smoke",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
