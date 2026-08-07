@@ -8,7 +8,13 @@ import { estimateTokens } from "../src/token.js"
 import { assertMemoryRootSafe, readRegularFileNoFollow } from "../src/path-guard.js"
 import { isPhase2InFlight } from "../src/phase2.js"
 import { pluginOptions, getConfigWarnings } from "../src/options.js"
-import { resolveCodexInterop } from "../src/codex-interop.js"
+import { codexInteropMtimes, resolveCodexInterop } from "../src/codex-interop.js"
+import {
+  formatDiagnosticLine,
+  getDiscoveryStatus,
+  getRecentDiagnostics,
+} from "../src/diagnostics.js"
+import { isPluginShuttingDown } from "../src/lifecycle.js"
 
 function isSymlinkedRoot(): boolean {
   try {
@@ -75,6 +81,14 @@ function renderEffectiveConfig(): string[] {
         `  codex_interop: import=${ci.import} export=${ci.export}`,
         `    codex memories: ${resolved.codexMemoryRoot}${reachable ? "" : " (not found yet — nothing is imported/exported until Codex's memory feature creates it)"}`,
       )
+      if (reachable) {
+        const mt = codexInteropMtimes(resolved.codexMemoryRoot)
+        const fmt = (ms: number | null) => (ms == null ? "none" : new Date(ms).toISOString())
+        lines.push(
+          `    last import mtimes: MEMORY.md=${fmt(mt.importMemoryMd)} summary=${fmt(mt.importSummary)}`,
+          `    last export mtimes: MEMORY.md=${fmt(mt.exportMemoryMd)} summary=${fmt(mt.exportSummary)}`,
+        )
+      }
     }
   }
   const warnings = getConfigWarnings()
@@ -160,11 +174,12 @@ function fmtWatermarkMs(ms: number | null | undefined): string {
 
 export const memory_inspect = tool({
   description:
-    "Inspect the current memory state. Returns: stage1_outputs count, Phase 2 job status " +
-    "(including last error / retry time when failed), last Phase 2 success watermark, " +
-    "memory_summary token estimate (on-disk; injection caps at ~2500), a listing of the " +
-    "memories directory, the effective plugin options, and any configuration warnings " +
-    "(unknown/malformed options). Use it to verify the plugin configuration took effect. Read-only.",
+    "Inspect the current memory state. Returns: stage1_outputs count, stage-1 job status " +
+    "breakdown and recent errors, Phase 2 job status (including last error / retry time), " +
+    "last discovery outcome, pipeline diagnostics, memory_summary token estimate " +
+    "(on-disk; injection caps at ~2500), a listing of the memories directory, the " +
+    "effective plugin options, and any configuration warnings. Use it to verify " +
+    "configuration and debug why memory is not building. Read-only.",
   args: {},
   async execute() {
     try {
@@ -172,6 +187,7 @@ export const memory_inspect = tool({
       assertMemoryRootSafe()
       const store = new MemoryStore()
       const outputs = store.stage1Outputs()
+      const stage1Jobs = store.stage1JobSnapshot()
       const summaryPath = memorySummaryPath()
       let summaryChars = 0
       let summaryTokens = 0
@@ -200,14 +216,48 @@ export const memory_inspect = tool({
             "phase2_last_success_watermark: none",
             "phase2_last_success_finished_at: none",
           ]
+      const stage1StatusParts = Object.entries(stage1Jobs.by_status)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([s, c]) => `${s}=${c}`)
+      const stage1Lines = [
+        `stage1_jobs: ${stage1StatusParts.length > 0 ? stage1StatusParts.join(" ") : "none"}`,
+        ...stage1Jobs.recent_errors.map(
+          (e) =>
+            `  stage1_error ${e.session_id} (${e.status}): ${e.last_error.slice(0, 200)}${e.retry_at ? ` retry_at=${fmtUnixSec(e.retry_at)}` : ""}`,
+        ),
+      ]
+      const discovery = getDiscoveryStatus()
+      const discoveryLine = discovery
+        ? `discovery: ${discovery.ok ? "ok" : "failed"} count=${discovery.count} at=${new Date(discovery.at).toISOString()}${discovery.error ? ` error=${discovery.error}` : ""}`
+        : "discovery: never ran (no phase-1 pass yet this process)"
+      const idleHours = pluginOptions.min_rollout_idle_hours
+      const eligibilityHint =
+        `eligibility: sessions must be idle ≥ ${idleHours}h and younger than ${pluginOptions.max_rollout_age_days}d ` +
+        `(generate_memories=${pluginOptions.generate_memories}). ` +
+        `For faster local testing, set min_rollout_idle_hours to 1 (clamp floor).`
+      const processLines = [
+        `phase2_in_flight: ${isPhase2InFlight()}`,
+        `plugin_shutting_down: ${isPluginShuttingDown()}`,
+      ]
+      const diagnostics = getRecentDiagnostics(12)
+      const diagnosticLines =
+        diagnostics.length > 0
+          ? ["recent_events:", ...diagnostics.map((e) => `  ${formatDiagnosticLine(e)}`)]
+          : ["recent_events: none"]
       const out = [
         `stage1_outputs: ${outputs.length}`,
+        ...stage1Lines,
         ...phase2Lines,
+        discoveryLine,
+        eligibilityHint,
+        ...processLines,
         `memory_summary_chars: ${summaryChars}`,
         `memory_summary_tokens_est: ${summaryTokens} (on disk; injection caps at ~2500)`,
         `memories_dir_entries: ${listing.length}`,
         "",
         ...renderEffectiveConfig(),
+        "",
+        ...diagnosticLines,
         "",
         "Files:",
         listing.length > 0 ? listing.join("\n") : "(empty)",
@@ -216,6 +266,8 @@ export const memory_inspect = tool({
         output: out,
         metadata: {
           stage1_count: outputs.length,
+          stage1_jobs: stage1Jobs.by_status,
+          stage1_recent_errors: stage1Jobs.recent_errors,
           phase2_status: phase2?.status ?? null,
           phase2_last_error: phase2?.last_error ?? null,
           phase2_retry_at: phase2?.retry_at ?? null,
@@ -224,11 +276,13 @@ export const memory_inspect = tool({
           phase2_last_success_finished_at: phase2?.success_finished_at ?? null,
           // Back-compat aliases used by earlier inspect consumers.
           phase2_last_finished_at: phase2?.success_finished_at ?? null,
+          discovery,
           summary_chars: summaryChars,
           summary_tokens_est: summaryTokens,
           files: listing,
           effective_options: { ...pluginOptions, codex_interop: { ...pluginOptions.codex_interop } },
           config_warnings: [...getConfigWarnings()],
+          recent_events: diagnostics,
         },
       }
     } catch (err) {

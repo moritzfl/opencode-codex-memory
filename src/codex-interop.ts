@@ -320,3 +320,32 @@ export function exportToCodexMemory(codexMemoryRoot: string): boolean {
   if (summary === null || summary.toString("utf8").split(/\r?\n/, 1)[0] !== "v1") return false
   return syncExtension(memoryRoot(), codexMemoryRoot, EXPORT_EXTENSION, "opencode", EXPORT_INSTRUCTIONS)
 }
+
+export interface CodexInteropMtimes {
+  importMemoryMd: number | null
+  importSummary: number | null
+  exportMemoryMd: number | null
+  exportSummary: number | null
+}
+
+function mtimeMs(file: string): number | null {
+  try {
+    const st = fs.lstatSync(file)
+    if (!st.isFile()) return null
+    return st.mtimeMs
+  } catch {
+    return null
+  }
+}
+
+/** Last mtimes of interop resource copies (for memory_inspect). */
+export function codexInteropMtimes(codexMemoryRoot: string): CodexInteropMtimes {
+  const importRes = path.join(memoryRoot(), "extensions", IMPORT_EXTENSION, "resources", "codex")
+  const exportRes = path.join(codexMemoryRoot, "extensions", EXPORT_EXTENSION, "resources", "opencode")
+  return {
+    importMemoryMd: mtimeMs(path.join(importRes, "MEMORY.md")),
+    importSummary: mtimeMs(path.join(importRes, "memory_summary.md")),
+    exportMemoryMd: mtimeMs(path.join(exportRes, "MEMORY.md")),
+    exportSummary: mtimeMs(path.join(exportRes, "memory_summary.md")),
+  }
+}

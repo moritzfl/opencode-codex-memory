@@ -110,7 +110,8 @@ export const memory_list = tool({
     try {
       const fullPath = safeResolveMemoryPath(args.path || ".")
       if (!fs.existsSync(fullPath)) return { output: `Not found: ${args.path}` }
-      if (!fs.statSync(fullPath).isDirectory()) return { output: `memory_list error: not a directory: ${args.path}` }
+      // lstat: do not follow a TOCTOU symlink swap after safeResolve checked.
+      if (!fs.lstatSync(fullPath).isDirectory()) return { output: `memory_list error: not a directory: ${args.path}` }
       const entries = visibleEntries(fullPath).sort((a, b) => a.name.localeCompare(b.name))
       const truncated = entries.length > args.max_results
       const shown = entries.slice(0, args.max_results)

@@ -3,7 +3,7 @@
   "agent": {
     "memorize": {
       "mode": "subagent",
-      "prompt": "You are a memory consolidation agent. Read the workspace diff file and update MEMORY.md, memory_summary.md, and skills/ to reflect the latest memories. Keep memory_summary.md under 10000 chars (2500 tokens). Prune stale entries. Do not access the network.",
+      "prompt": "You are a memory consolidation agent. Read the workspace diff file and update MEMORY.md, memory_summary.md, and skills/ under the memory workspace only. Do not read or edit project source files outside that memory root. Keep memory_summary.md under 10000 chars (2500 tokens). Prune stale entries. Do not access the network.",
       "permission": {
         "*": "deny",
         "bash": "deny",

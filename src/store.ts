@@ -580,4 +580,28 @@ export class MemoryStore {
       .get(sessionId) as { p: number } | null
     return row?.p === 1
   }
+
+  /**
+   * Stage-1 job counts + recent failures for memory_inspect. Helps diagnose
+   * "nothing is learning" without reading the raw jobs table.
+   */
+  stage1JobSnapshot(): {
+    by_status: Record<string, number>
+    recent_errors: { session_id: string; last_error: string; retry_at: number | null; status: string }[]
+  } {
+    const rows = this.db
+      .prepare("SELECT status, COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' GROUP BY status")
+      .all() as { status: string; c: number }[]
+    const by_status: Record<string, number> = {}
+    for (const r of rows) by_status[r.status] = r.c
+    const recent_errors = this.db
+      .prepare(
+        `SELECT job_key AS session_id, last_error, retry_at, status FROM memory_jobs
+         WHERE kind='memory_stage1' AND last_error IS NOT NULL
+         ORDER BY COALESCE(finished_at, started_at, 0) DESC
+         LIMIT 5`,
+      )
+      .all() as { session_id: string; last_error: string; retry_at: number | null; status: string }[]
+    return { by_status, recent_errors }
+  }
 }
