@@ -6,8 +6,11 @@ import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
 import { runPhase1 } from "./phase1.js"
 import { runPhase2 } from "./phase2.js"
-import { setPluginInput, cleanupOldSubSessions, isMemorySubSession } from "./llm.js"
+import { setPluginInput, cleanupOldSubSessions, isMemorySubSession, abortActiveSubSessions } from "./llm.js"
 import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOptions } from "./options.js"
+import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "./lifecycle.js"
+import { hostMcpStatus } from "./host-client.js"
+import { recordDiagnostic } from "./diagnostics.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import fs from "fs"
 import path from "path"
@@ -98,6 +101,8 @@ export function handleSessionDeleted(
 export default {
   id: "opencode-codex-memory",
   async server(input: PluginInput, opts?: PluginOptions) {
+    // A reload after dispose must be able to run the pipeline again.
+    resetPluginLifecycle()
     setPluginInput(input)
     pluginClient = input.client
     mcpStatusInFlight = null
@@ -223,7 +228,7 @@ async function mcpToolPrefixes(): Promise<string[] | null> {
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         const res = await Promise.race([
-          (pluginClient as any).mcp.status({ signal: controller.signal }),
+          hostMcpStatus(pluginClient, controller.signal),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
               controller.abort()
@@ -231,12 +236,12 @@ async function mcpToolPrefixes(): Promise<string[] | null> {
             }, MCP_STATUS_TIMEOUT_MS)
           }),
         ])
-        if ((res as any)?.error) return null
-        const servers = (res as any)?.data
+        if (!res || res.error) return null
+        const servers = res.data
         if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
         const prefixes: string[] = []
-        for (const [server, status] of Object.entries(servers)) {
-          if (!status || typeof status !== "object" || typeof (status as any).status !== "string") continue
+        for (const [server, status] of Object.entries(servers as Record<string, unknown>)) {
+          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string") continue
           // Mirrors OpenCode's McpCatalog.sanitize when constructing tool names.
           prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
         }
@@ -501,6 +506,14 @@ function buildHooks() {
   },
 
   async dispose(): Promise<void> {
+    // Stop new pumps, abort the consolidator helper if it is mid-write, and
+    // best-effort abort extract sessions so a reload cannot leave two writers.
+    beginPluginShutdown()
+    try {
+      await abortActiveSubSessions()
+    } catch (err) {
+      console.warn("[opencode-codex-memory] dispose abort of sub-sessions failed:", err)
+    }
     invalidateCache()
   },
   }
@@ -544,7 +557,7 @@ function buildHooks() {
 }
 
 async function triggerPhase1(currentSessionId: string): Promise<void> {
-  if (phase1InFlight || !pluginOptions.generate_memories) return
+  if (phase1InFlight || !pluginOptions.generate_memories || isPluginShuttingDown()) return
   phase1InFlight = true
   try {
     await runPhase1(getStore(), {
@@ -557,6 +570,7 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
     })
   } catch (err) {
     console.error("[opencode-codex-memory] phase1 error:", err)
+    recordDiagnostic("error", "phase1", err instanceof Error ? err.message : String(err))
   } finally {
     phase1InFlight = false
   }
@@ -564,16 +578,25 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
 }
 
 async function triggerPhase2(): Promise<void> {
+  if (isPluginShuttingDown()) return
   try {
     // runPhase2 has its own in-flight guard
-    await runPhase2(getStore(), {
+    const result = await runPhase2(getStore(), {
       maxRaw: pluginOptions.max_raw_memories_for_consolidation,
       maxUnusedDays: pluginOptions.max_unused_days,
       extensionRetentionDays: 7,
       consolidationModel: pluginOptions.consolidation_model,
       codexInterop: pluginOptions.codex_interop,
     })
+    if (result.status !== "already_running" && result.status !== "skipped_cooldown" && result.status !== "skipped_running") {
+      recordDiagnostic(
+        result.status === "succeeded" || result.status === "no_workspace_changes" ? "info" : "warn",
+        "phase2",
+        result.status,
+      )
+    }
   } catch (err) {
     console.error("[opencode-codex-memory] phase2 error:", err)
+    recordDiagnostic("error", "phase2", err instanceof Error ? err.message : String(err))
   }
 }

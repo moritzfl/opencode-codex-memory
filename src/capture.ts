@@ -1,6 +1,8 @@
 import { SCAN_LIMIT } from "./store.js"
 import type { MemoryStore } from "./store.js"
 import { getPluginInput } from "./llm.js"
+import { recordDiscoveryStatus } from "./diagnostics.js"
+import { hostPartType, hostSessionMessages, pluginHttpGet } from "./host-client.js"
 
 export interface SessionRow {
   id: string
@@ -33,19 +35,6 @@ interface ApiSession {
 }
 
 /**
- * Hey-api transport on PluginInput.client. The V1 SDK has no
- * `experimental.*` namespace, but the host-built client already carries
- * baseUrl + auth headers; `_client.get` is the supported escape hatch for
- * routes the generated surface lags on (same pattern as the scope/roots casts
- * we used to need on session.list).
- */
-function pluginHttp(): { get: (opts: Record<string, unknown>) => Promise<{ error?: unknown; data?: unknown }> } | null {
-  const http = (getPluginInput()?.client as { _client?: { get?: unknown } } | null | undefined)?._client
-  if (!http || typeof http.get !== "function") return null
-  return http as { get: (opts: Record<string, unknown>) => Promise<{ error?: unknown; data?: unknown }> }
-}
-
-/**
  * Global session discovery through the official API:
  * `GET /experimental/session?roots=true` (Session.listGlobal) — one call across
  * all projects, sorted by most-recently-updated. Available since opencode
@@ -53,11 +42,14 @@ function pluginHttp(): { get: (opts: Record<string, unknown>) => Promise<{ error
  * Transcript loading must NOT be fail-safe — see loadTranscript.
  */
 export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<SessionRow[]> {
-  const http = pluginHttp()
-  if (!http) return []
+  const get = pluginHttpGet(getPluginInput()?.client)
+  if (!get) {
+    recordDiscoveryStatus({ ok: false, count: 0, error: "plugin HTTP client unavailable" })
+    return []
+  }
   try {
     const res = await withTimeout(
-      http.get({
+      get({
         url: "/experimental/session",
         query: { roots: true, limit },
       }),
@@ -79,9 +71,13 @@ export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<Se
     // Server already orders by time_updated DESC; re-sort so a lagging host
     // cannot invert eligibility order.
     all.sort((a, b) => b.updated_at - a.updated_at)
-    return all.slice(0, limit)
+    const out = all.slice(0, limit)
+    recordDiscoveryStatus({ ok: true, count: out.length })
+    return out
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     console.warn("[opencode-codex-memory] session discovery failed; skipping pass:", err)
+    recordDiscoveryStatus({ ok: false, count: 0, error: message })
     return []
   }
 }
@@ -94,12 +90,8 @@ export interface TranscriptMessage {
 
 /** Official transcript surface: GET /session/{id}/message via the plugin's authenticated client. */
 async function fetchMessagesViaApi(sessionId: string): Promise<{ info?: { role?: string }; parts?: unknown[] }[]> {
-  const client = getPluginInput()?.client as any
-  if (typeof client?.session?.messages !== "function") {
-    throw new Error("plugin client unavailable; cannot load transcript")
-  }
-  const res = await withTimeout<{ error?: unknown; data?: unknown }>(
-    client.session.messages({ path: { id: sessionId } }),
+  const res = await withTimeout(
+    hostSessionMessages(getPluginInput()?.client, sessionId),
     API_TIMEOUT_MS,
     "session.messages",
   )
@@ -133,7 +125,7 @@ export async function loadTranscript(sessionId: string): Promise<TranscriptMessa
     const role = row?.info?.role
     for (const part of row?.parts ?? []) {
       out.push({
-        type: (part as any)?.type ?? "unknown",
+        type: hostPartType(part),
         role,
         text: extractText(part),
       })

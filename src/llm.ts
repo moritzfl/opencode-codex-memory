@@ -2,6 +2,12 @@ import fs from "fs"
 import path from "path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { memoryRoot } from "./paths.js"
+import {
+  hostSessionCreate,
+  hostSessionDeletionConfirmed,
+  hostSessionPrompt,
+  hostStructuredOutput,
+} from "./host-client.js"
 
 export interface ExtractionResult {
   raw_memory: string
@@ -51,15 +57,15 @@ async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
   const directory = resolveSubSessionDirectory()
-  const res = await input.client.session.create({
-    // directory is a query param (not body); without it the client inherits
-    // PluginInput.directory, which may be a deleted project path.
-    query: { directory },
+  // directory is a query param (not body); without it the client inherits
+  // PluginInput.directory, which may be a deleted project path.
+  const res = await hostSessionCreate(input.client, {
+    directory,
     body: {
       title: title ?? `codex-memory-${agent}`,
       metadata: { [SUBSESSION_METADATA_KEY]: true },
-    } as any,
-  } as any)
+    },
+  })
   if (!res.data) throw new Error(`session create failed: ${JSON.stringify(res.error ?? {})}`)
   const body = res.data as { id?: string }
   const id = body.id
@@ -178,17 +184,15 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
     throw new SubagentCancelledError()
   }
   const model = opts.model ? parseModelRef(opts.model) : null
-  const promptPromise = input.client.session.prompt({
-    path: { id: sessionId },
-    // `format` lives in the server's PromptInput but not the generated SDK body
-    // type yet (same OpenAPI lag as session.list scope/roots), hence the cast.
+  const promptPromise = hostSessionPrompt(input.client, {
+    sessionId,
     body: {
       agent,
       ...(opts.system ? { system: opts.system } : {}),
       ...(model ? { model } : {}),
       ...(opts.format ? { format: opts.format } : {}),
-      parts: [{ type: "text", text: prompt } as any],
-    } as any,
+      parts: [{ type: "text", text: prompt }],
+    },
   })
   let timer: ReturnType<typeof setTimeout> | undefined
   let onAbort: (() => void) | undefined
@@ -289,11 +293,11 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
       format: { type: "json_schema", schema: EXTRACTION_SCHEMA },
     })
     // The captured JSON lands on AssistantMessage.structured (schema
-    // v1/session.ts; absent from the generated SDK type, so read it untyped).
+    // v1/session.ts; absent from the generated SDK type — see host-client.ts).
     // Fall back to text parsing when structured output is unavailable (a host
     // without the feature, or a model that emitted JSON as plain text).
-    const structured = (data as any)?.info?.structured
-    if (structured && typeof structured === "object") {
+    const structured = hostStructuredOutput(data)
+    if (structured) {
       return validateExtraction(structured as Partial<ExtractionResult>)
     }
     return parseExtraction(extractAssistantText(data))
@@ -425,7 +429,7 @@ async function deleteSession(id: string): Promise<boolean> {
     // session is gone; otherwise retain ownership so hooks keep skipping it.
     // codex runtime.rs drops the thread from its manager the same way: only
     // after shutdown succeeded.
-    if (await sessionDeletionConfirmed(input.client as any, id)) {
+    if (await hostSessionDeletionConfirmed(input.client, id, SUBSESSION_CONFIRM_TIMEOUT_MS)) {
       activeSubSessions.delete(id)
     }
     return true
@@ -437,30 +441,10 @@ async function deleteSession(id: string): Promise<boolean> {
   }
 }
 
-async function sessionDeletionConfirmed(
-  client: { session?: { get?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<any> } },
-  id: string,
-): Promise<boolean> {
-  const session = client.session
-  if (typeof session?.get !== "function") return false
-  const controller = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    const res = await Promise.race([
-      session.get({ path: { id }, signal: controller.signal }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort()
-          reject(new Error(`session.get timed out after ${SUBSESSION_CONFIRM_TIMEOUT_MS}ms`))
-        }, SUBSESSION_CONFIRM_TIMEOUT_MS)
-      }),
-    ])
-    return res?.response?.status === 404
-  } catch {
-    return false
-  } finally {
-    clearTimeout(timer)
-  }
+/** Best-effort abort of every memory sub-session (plugin dispose / reload). */
+export async function abortActiveSubSessions(): Promise<void> {
+  const ids = [...activeSubSessions]
+  await Promise.all(ids.map((id) => abortSession(id)))
 }
 
 // Substitute with a function so `$&`/`$'` sequences in the value are not
