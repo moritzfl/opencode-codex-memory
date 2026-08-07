@@ -219,6 +219,32 @@ describe("MemoryStore stage1", () => {
     expect(job.lease_until).toBeNull()
   })
 
+  it("releaseStage1OnShutdown clears the lease without burning a retry", () => {
+    const { MemoryStore, DEFAULT_RETRY_REMAINING } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const token = claimOne(store, "s1")
+    store.releaseStage1OnShutdown("s1", token)
+    const job = openDb()
+      .prepare(
+        "SELECT status, retry_remaining, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'",
+      )
+      .get() as {
+        status: string
+        retry_remaining: number
+        lease_until: number | null
+        retry_at: number | null
+        last_error: string
+      }
+    expect(job.status).toBe("pending")
+    expect(job.retry_remaining).toBe(DEFAULT_RETRY_REMAINING)
+    expect(job.lease_until).toBeNull()
+    expect(job.retry_at).toBeNull()
+    expect(job.last_error).toContain("shutting down")
+    // Immediately reclaimable after reload.
+    expect(claimedIds(store.claimStage1Jobs([{ id: "s1", updated_at: 1 }]))).toEqual(["s1"])
+  })
+
   it("finalizes a failed job even when the rejection was not an Error", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")
@@ -361,6 +387,26 @@ describe("MemoryStore phase2", () => {
       generated_at: 1,
     })
     expect(store.phase2LastSuccess()).toEqual(success)
+  })
+
+  it("releasePhase2OnShutdown leaves the job immediately reclaimable", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    store.releasePhase2OnShutdown(claim.ownershipToken)
+    const job = openDb()
+      .prepare(
+        "SELECT status, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_consolidate_global'",
+      )
+      .get() as { status: string; lease_until: number | null; retry_at: number | null; last_error: string }
+    expect(job.status).toBe("pending")
+    expect(job.lease_until).toBeNull()
+    expect(job.retry_at).toBeNull()
+    expect(job.last_error).toContain("shutting down")
+    const again = store.claimGlobalPhase2Job()
+    expect(again.type).toBe("claimed")
   })
 
   it("failure enters retry backoff but never exhausts (codex phase-2 semantics)", () => {

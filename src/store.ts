@@ -250,6 +250,25 @@ export class MemoryStore {
   }
 
   /**
+   * Plugin dispose/reload: release a claimed stage-1 job without burning a retry
+   * or imposing the 1h backoff. Leaves status=pending so the next process can
+   * reclaim immediately (unlike markStage1Failed). Ownership-token guarded.
+   */
+  releaseStage1OnShutdown(sessionId: string, ownershipToken: string): void {
+    this.db
+      .prepare(
+        `UPDATE memory_jobs SET
+           status = 'pending',
+           last_error = ?,
+           retry_at = NULL,
+           finished_at = ?,
+           lease_until = NULL
+         WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
+      )
+      .run("plugin shutting down", nowSec(), sessionId, ownershipToken)
+  }
+
+  /**
    * Enqueues global consolidation after stage-1 state changes. If phase 2 is
    * already running, preserve its lease and advance only the input watermark.
    */
@@ -473,6 +492,24 @@ export class MemoryStore {
          WHERE kind='memory_consolidate_global' AND job_key='global' AND status='running' AND ownership_token IS NULL`,
       )
       .run(message.slice(0, 4000), nowSec() + PHASE2_RETRY_DELAY_SECONDS, nowSec())
+  }
+
+  /**
+   * Plugin dispose/reload: release the global phase-2 job without retry backoff
+   * so the next process can reclaim immediately. Ownership-token guarded.
+   */
+  releasePhase2OnShutdown(ownershipToken: string): void {
+    this.db
+      .prepare(
+        `UPDATE memory_jobs SET
+           status = 'pending',
+           last_error = ?,
+           retry_at = NULL,
+           finished_at = ?,
+           lease_until = NULL
+         WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
+      )
+      .run("plugin shutting down", nowSec(), ownershipToken)
   }
 
   /**

@@ -53,6 +53,13 @@ export function isPhase2InFlight(): boolean {
   return phase2InFlight
 }
 
+/** Release the claim when dispose raced the prep path; return true if released. */
+function releaseIfShuttingDown(store: MemoryStore, ownershipToken: string): boolean {
+  if (!isPluginShuttingDown()) return false
+  store.releasePhase2OnShutdown(ownershipToken)
+  return true
+}
+
 export async function runPhase2(
   store: MemoryStore,
   opts: Phase2Options = DEFAULT_PHASE2_OPTIONS,
@@ -68,7 +75,14 @@ export async function runPhase2(
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") return { status: claim.type }
 
+    // Abort scope covers prep + consolidator so dispose during baseline/diff
+    // sets the flag that releaseIfShuttingDown / consolidator cancel observe.
+    const consolidationSignal = beginPhase2AbortScope()
     try {
+      if (releaseIfShuttingDown(store, claim.ownershipToken)) {
+        return { status: "shutting_down" }
+      }
+
       // Resolved once per claimed job (not per attempt): resolution warns on
       // misconfiguration, and warning on every skipped attempt would be noise.
       // Keep this inside the claimed-job try so resolution failures release
@@ -84,6 +98,9 @@ export async function runPhase2(
       if (!await ensureBaseline()) {
         store.markPhase2Failed(claim.ownershipToken, "git baseline failed")
         return { status: "baseline_failed" }
+      }
+      if (releaseIfShuttingDown(store, claim.ownershipToken)) {
+        return { status: "shutting_down" }
       }
 
       const outputs = store.getPhase2InputSelection(opts.maxRaw, opts.maxUnusedDays)
@@ -108,6 +125,10 @@ export async function runPhase2(
       }
 
       const diff = await captureWorkspaceDiff()
+      if (releaseIfShuttingDown(store, claim.ownershipToken)) {
+        return { status: "shutting_down" }
+      }
+
       // codex: early succeed only when there are no changes AND artifacts are
       // already valid. Invalid/empty summary (e.g. ensureLayout's empty file)
       // falls through so the consolidator can INIT/repair.
@@ -125,104 +146,110 @@ export async function runPhase2(
 
       let heartbeatLost = false
       let heartbeatFailure: unknown = "ownership lost"
-      // Shared with dispose(): plugin reload aborts the same signal as a
-      // lost heartbeat so the consolidator stops writing mid-run.
-      const consolidationSignal = beginPhase2AbortScope()
-      try {
-        const heartbeatOnce = (): boolean => {
-          if (heartbeatLost) return false
-          try {
-            if (!store.heartbeatPhase2Job(claim.ownershipToken)) {
-              heartbeatLost = true
-              abortPhase2Consolidation()
-              return false
-            }
-          } catch (err) {
-            console.warn("[opencode-codex-memory] phase2 heartbeat error:", err)
-            // Codex stops the consolidation agent on heartbeat Ok(false) OR Err.
-            // Fail closed: without a refreshed lease, another process may reclaim
-            // the job while this helper still has live write access.
+      const heartbeatOnce = (): boolean => {
+        if (heartbeatLost) return false
+        try {
+          if (!store.heartbeatPhase2Job(claim.ownershipToken)) {
             heartbeatLost = true
-            heartbeatFailure = err
             abortPhase2Consolidation()
             return false
           }
-          return true
-        }
-
-        // Workspace preparation can itself be slow. Confirm ownership before
-        // granting a new helper write access, then keep the lease alive while it
-        // runs. This also mirrors tokio::time::interval's immediate first tick.
-        if (!heartbeatOnce()) {
-          store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
-          return { status: "heartbeat_lost" }
-        }
-        const heartbeat = setInterval(heartbeatOnce, opts.heartbeatIntervalMs ?? 90_000)
-
-        try {
-          await consolidateViaSubagent(
-            memoryRoot(),
-            DIFF_ARTIFACT,
-            opts.consolidationModel,
-            consolidationSignal,
-          )
         } catch (err) {
-          // codex phase2.rs: when the consolidation agent's shutdown fails, keep
-          // the existing lease until it expires so another worker cannot race a
-          // consolidator whose shutdown has not completed. Neither succeed nor
-          // fail the job — marking it failed would release the lease immediately.
-          if (err instanceof SubagentShutdownError) {
-            console.warn(`[opencode-codex-memory] ${err.message}; holding the phase2 lease until it expires`)
-            return { status: "shutdown_failed" }
-          }
-          if (heartbeatLost) {
-            store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
-            return { status: "heartbeat_lost" }
-          }
-          // dispose() / beginPluginShutdown aborted the consolidator.
-          if (err instanceof SubagentCancelledError || isPluginShuttingDown()) {
-            store.markPhase2Failed(claim.ownershipToken, "plugin shutting down")
-            return { status: "shutting_down" }
-          }
-          throw err
-        } finally {
-          clearInterval(heartbeat)
+          console.warn("[opencode-codex-memory] phase2 heartbeat error:", err)
+          // Codex stops the consolidation agent on heartbeat Ok(false) OR Err.
+          // Fail closed: without a refreshed lease, another process may reclaim
+          // the job while this helper still has live write access.
+          heartbeatLost = true
+          heartbeatFailure = err
+          abortPhase2Consolidation()
+          return false
         }
+        return true
+      }
 
-        // Final synchronous ownership confirmation before the destructive
-        // baseline reset (codex phase2.rs does the same): the periodic flag can
-        // be up to 90s stale, and a stale worker resetting the baseline would
-        // swallow the diff a re-claiming worker is about to consume. The
-        // heartbeat is token+status guarded, so it fails once ownership is lost;
-        // markPhase2Failed is equally guarded and becomes a no-op then.
-        if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
+      // Workspace preparation can itself be slow. Confirm ownership before
+      // granting a new helper write access, then keep the lease alive while it
+      // runs. This also mirrors tokio::time::interval's immediate first tick.
+      if (!heartbeatOnce()) {
+        store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
+        return { status: "heartbeat_lost" }
+      }
+      if (releaseIfShuttingDown(store, claim.ownershipToken)) {
+        return { status: "shutting_down" }
+      }
+      const heartbeat = setInterval(heartbeatOnce, opts.heartbeatIntervalMs ?? 90_000)
+
+      try {
+        await consolidateViaSubagent(
+          memoryRoot(),
+          DIFF_ARTIFACT,
+          opts.consolidationModel,
+          consolidationSignal,
+        )
+      } catch (err) {
+        // codex phase2.rs: when the consolidation agent's shutdown fails, keep
+        // the existing lease until it expires so another worker cannot race a
+        // consolidator whose shutdown has not completed. Neither succeed nor
+        // fail the job — marking it failed would release the lease immediately.
+        if (err instanceof SubagentShutdownError) {
+          console.warn(`[opencode-codex-memory] ${err.message}; holding the phase2 lease until it expires`)
+          return { status: "shutdown_failed" }
+        }
+        if (heartbeatLost) {
           store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
           return { status: "heartbeat_lost" }
         }
-
-        // codex failed_invalid_artifacts: do not reset baseline on bad output so
-        // the next run still sees a diff / can re-INIT.
-        const artifacts = validateConsolidationArtifacts()
-        if (!artifacts.ok) {
-          store.markPhase2Failed(claim.ownershipToken, `failed_invalid_artifacts: ${artifacts.reason}`)
-          return { status: "failed_invalid_artifacts" }
+        // dispose() / beginPluginShutdown aborted the consolidator: release
+        // without the 1h failure backoff so the next boot can reclaim.
+        if (err instanceof SubagentCancelledError || isPluginShuttingDown()) {
+          store.releasePhase2OnShutdown(claim.ownershipToken)
+          return { status: "shutting_down" }
         }
-
-        if (!await resetBaseline()) {
-          store.markPhase2Failed(claim.ownershipToken, "baseline reset failed")
-          return { status: "baseline_reset_failed" }
-        }
-
-        store.markPhase2Succeeded(claim.ownershipToken, outputs)
-        invalidateCache()
-        maybeExportToCodex(interop)
-        return { status: "succeeded" }
+        throw err
       } finally {
-        endPhase2AbortScope()
+        clearInterval(heartbeat)
       }
+
+      // Final synchronous ownership confirmation before the destructive
+      // baseline reset (codex phase2.rs does the same): the periodic flag can
+      // be up to 90s stale, and a stale worker resetting the baseline would
+      // swallow the diff a re-claiming worker is about to consume. The
+      // heartbeat is token+status guarded, so it fails once ownership is lost;
+      // markPhase2Failed is equally guarded and becomes a no-op then.
+      if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
+        store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
+        return { status: "heartbeat_lost" }
+      }
+      if (releaseIfShuttingDown(store, claim.ownershipToken)) {
+        return { status: "shutting_down" }
+      }
+
+      // codex failed_invalid_artifacts: do not reset baseline on bad output so
+      // the next run still sees a diff / can re-INIT.
+      const artifacts = validateConsolidationArtifacts()
+      if (!artifacts.ok) {
+        store.markPhase2Failed(claim.ownershipToken, `failed_invalid_artifacts: ${artifacts.reason}`)
+        return { status: "failed_invalid_artifacts" }
+      }
+
+      if (!await resetBaseline()) {
+        store.markPhase2Failed(claim.ownershipToken, "baseline reset failed")
+        return { status: "baseline_reset_failed" }
+      }
+
+      store.markPhase2Succeeded(claim.ownershipToken, outputs)
+      invalidateCache()
+      maybeExportToCodex(interop)
+      return { status: "succeeded" }
     } catch (err) {
+      if (isPluginShuttingDown()) {
+        store.releasePhase2OnShutdown(claim.ownershipToken)
+        return { status: "shutting_down" }
+      }
       store.markPhase2Failed(claim.ownershipToken, err)
       return { status: "failed" }
+    } finally {
+      endPhase2AbortScope()
     }
   } finally {
     phase2InFlight = false

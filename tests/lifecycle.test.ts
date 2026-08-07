@@ -3,6 +3,12 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { handleSessionDeleted, shouldHandleIdle } from "../src/index.js"
+import {
+  beginPhase2AbortScope,
+  beginPluginShutdown,
+  isPluginShuttingDown,
+  resetPluginLifecycle,
+} from "../src/lifecycle.js"
 import plugin from "../src/index.js"
 
 describe("hook wiring", () => {
@@ -291,5 +297,26 @@ describe("session deletion lifecycle", () => {
       () => { scheduled++ },
     )
     expect(scheduled).toBe(0)
+  })
+})
+
+describe("plugin lifecycle reset", () => {
+  afterEach(() => {
+    resetPluginLifecycle()
+  })
+
+  it("aborts an in-scope consolidator signal before clearing on reset", () => {
+    const signal = beginPhase2AbortScope()
+    expect(signal.aborted).toBe(false)
+    beginPluginShutdown()
+    expect(isPluginShuttingDown()).toBe(true)
+    expect(signal.aborted).toBe(true)
+
+    // Re-boot without an explicit dispose of a second scope must still abort.
+    const signal2 = beginPhase2AbortScope()
+    expect(signal2.aborted).toBe(false)
+    resetPluginLifecycle()
+    expect(signal2.aborted).toBe(true)
+    expect(isPluginShuttingDown()).toBe(false)
   })
 })

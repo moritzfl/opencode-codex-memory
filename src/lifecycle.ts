@@ -21,10 +21,15 @@ export function beginPluginShutdown(): void {
   phase2Abort?.abort()
 }
 
-/** Test / re-boot seam: a fresh server() call clears the previous dispose. */
+/**
+ * Test / re-boot seam: a fresh server() call clears the previous dispose.
+ * Abort any live consolidator controller before dropping the reference so a
+ * glitched boot order cannot orphan a still-running phase-2 prompt.
+ */
 export function resetPluginLifecycle(): void {
-  shuttingDown = false
+  phase2Abort?.abort()
   phase2Abort = null
+  shuttingDown = false
 }
 
 /**

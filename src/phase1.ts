@@ -63,12 +63,21 @@ export async function runPhase1(
   const sessionById = new Map(eligible.map((s) => [s.id, s]))
 
   await runPool(claimed, STAGE1_CONCURRENCY, async (claim) => {
-    if (isPluginShuttingDown()) return
     const sid = claim.sessionId
+    // dispose mid-pass: release the claim without burning a retry or waiting
+    // for the 1h lease — otherwise jobs stay `running` until lease expiry.
+    if (isPluginShuttingDown()) {
+      store.releaseStage1OnShutdown(sid, claim.ownershipToken)
+      return
+    }
     try {
       const session = sessionById.get(sid)
       const sourceUpdatedAt = session?.updated_at ?? Date.now()
       const transcript = await buildTranscript(sid)
+      if (isPluginShuttingDown()) {
+        store.releaseStage1OnShutdown(sid, claim.ownershipToken)
+        return
+      }
       if (!transcript.trim()) {
         // A newly empty chat is a legitimate no-output result. An existing
         // extraction plus an empty API success is anomalous: retry instead of
@@ -83,6 +92,8 @@ export async function runPhase1(
         cwd: session?.directory ?? undefined,
         model: opts.extractModel,
       })
+      // Always finalize after a completed model call — even if dispose raced —
+      // so we do not drop paid work or leave the claim running until lease expiry.
       if (!result) {
         // Extractor judged the session not worth remembering.
         store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
@@ -99,7 +110,13 @@ export async function runPhase1(
         generated_at: Date.now(),
       })
     } catch (err) {
-      store.markStage1Failed(sid, claim.ownershipToken, err)
+      // Aborted mid-extract on dispose: release for immediate reclaim, do not
+      // burn a retry or impose the 1h failure backoff.
+      if (isPluginShuttingDown()) {
+        store.releaseStage1OnShutdown(sid, claim.ownershipToken)
+      } else {
+        store.markStage1Failed(sid, claim.ownershipToken, err)
+      }
     }
   })
 }

@@ -111,7 +111,13 @@ export const memory_list = tool({
       const fullPath = safeResolveMemoryPath(args.path || ".")
       if (!fs.existsSync(fullPath)) return { output: `Not found: ${args.path}` }
       // lstat: do not follow a TOCTOU symlink swap after safeResolve checked.
-      if (!fs.lstatSync(fullPath).isDirectory()) return { output: `memory_list error: not a directory: ${args.path}` }
+      // Symlinked dirs are rejected by design (same as path-guard / codex), not
+      // a regression from the TOCTOU fix — report that explicitly.
+      const st = fs.lstatSync(fullPath)
+      if (st.isSymbolicLink()) {
+        return { output: `memory_list error: symlinks are not allowed in the memory workspace: ${args.path}` }
+      }
+      if (!st.isDirectory()) return { output: `memory_list error: not a directory: ${args.path}` }
       const entries = visibleEntries(fullPath).sort((a, b) => a.name.localeCompare(b.name))
       const truncated = entries.length > args.max_results
       const shown = entries.slice(0, args.max_results)

@@ -1,11 +1,17 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 // Transcript loading and session discovery go through the plugin's
 // authenticated client (official API); tests install stub clients.
 function setClient(client: unknown) {
   require("../src/llm.js").setPluginInput({ client } as any)
 }
-afterEach(() => setClient(undefined))
+beforeEach(() => {
+  require("../src/capture.js").resetDiscoveryCacheForTest()
+})
+afterEach(() => {
+  setClient(undefined)
+  require("../src/capture.js").resetDiscoveryCacheForTest()
+})
 
 const API_ROWS = [
   {
@@ -170,6 +176,26 @@ describe("listRecentSessions", () => {
     await listRecentSessions(42)
     expect(seen.url).toBe("/experimental/session")
     expect(seen.query).toEqual({ roots: true, limit: 42 })
+  })
+
+  it("coalesces repeated discovery calls within the cache window", async () => {
+    let hits = 0
+    setClient({
+      _client: {
+        get: async () => {
+          hits++
+          return {
+            data: [{ id: "ses_a", directory: "/p", time: { updated: 1 } }],
+          }
+        },
+      },
+    })
+    const { listRecentSessions } = require("../src/capture.js")
+    const a = await listRecentSessions()
+    const b = await listRecentSessions()
+    expect(hits).toBe(1)
+    expect(a).toEqual(b)
+    expect(a[0].id).toBe("ses_a")
   })
 })
 

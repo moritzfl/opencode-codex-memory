@@ -4,20 +4,26 @@ import os from "os"
 import path from "path"
 import { closeDb, openDb } from "../src/db.js"
 import { setPluginInput } from "../src/llm.js"
+import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { DEFAULT_PHASE1_OPTIONS, runPhase1 } from "../src/phase1.js"
 import { MemoryStore } from "../src/store.js"
+import { resetDiscoveryCacheForTest } from "../src/capture.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase1-${process.pid}-${Date.now()}`)
 const SESSION_ID = "ses_phase1_empty"
 
 beforeEach(() => {
   closeDb()
+  resetPluginLifecycle()
+  resetDiscoveryCacheForTest()
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
 
 afterEach(() => {
   closeDb()
+  resetPluginLifecycle()
+  resetDiscoveryCacheForTest()
   setPluginInput({ client: undefined } as any)
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -99,5 +105,48 @@ describe("phase 1 empty transcript handling", () => {
       .prepare("SELECT status FROM memory_jobs WHERE kind='memory_stage1' AND job_key=?")
       .get(SESSION_ID) as { status: string }
     expect(job.status).toBe("pending")
+  })
+})
+
+describe("phase 1 dispose mid-pass", () => {
+  it("releases claimed jobs without leaving them running until lease expiry", async () => {
+    let messagesCalls = 0
+    const updatedAt = Date.now() - 7 * 60 * 60 * 1000
+    setPluginInput({
+      client: {
+        _client: {
+          get: async () => ({
+            data: [{ id: SESSION_ID, directory: "/project", time: { updated: updatedAt } }],
+          }),
+        },
+        session: {
+          messages: async () => {
+            messagesCalls++
+            // Dispose races the claimed job before transcript work finishes.
+            beginPluginShutdown()
+            return { data: [{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }] }
+          },
+        },
+      },
+    } as any)
+
+    const store = new MemoryStore()
+    await runPhase1(store, DEFAULT_PHASE1_OPTIONS, async () => ({ ok: true }))
+
+    expect(messagesCalls).toBe(1)
+    const job = openDb()
+      .prepare(
+        "SELECT status, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key=?",
+      )
+      .get(SESSION_ID) as {
+        status: string
+        lease_until: number | null
+        retry_at: number | null
+        last_error: string | null
+      }
+    expect(job.status).toBe("pending")
+    expect(job.lease_until).toBeNull()
+    expect(job.retry_at).toBeNull()
+    expect(job.last_error).toContain("shutting down")
   })
 })

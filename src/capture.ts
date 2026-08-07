@@ -41,7 +41,28 @@ interface ApiSession {
  * 1.17.x. Fail-safe: any error skips the pass ([]); never finalizes a job.
  * Transcript loading must NOT be fail-safe — see loadTranscript.
  */
+// Empty phase-1 passes no longer stamp the process rate-limit timer, so idle/
+// chat.message can re-enter often. Coalesce discovery API calls to avoid
+// hammering the host on every no-claim pass (load only; eligibility still
+// uses a fresh filter over this short-lived snapshot).
+const DISCOVERY_CACHE_MS = 30_000
+let discoveryCache: { at: number; limit: number; rows: SessionRow[] } | null = null
+
+/** Test seam. */
+export function resetDiscoveryCacheForTest(): void {
+  discoveryCache = null
+}
+
 export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<SessionRow[]> {
+  const now = Date.now()
+  if (
+    discoveryCache &&
+    discoveryCache.limit >= limit &&
+    now - discoveryCache.at < DISCOVERY_CACHE_MS
+  ) {
+    return discoveryCache.rows.slice(0, limit)
+  }
+
   const get = pluginHttpGet(getPluginInput()?.client)
   if (!get) {
     recordDiscoveryStatus({ ok: false, count: 0, error: "plugin HTTP client unavailable" })
@@ -72,12 +93,14 @@ export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<Se
     // cannot invert eligibility order.
     all.sort((a, b) => b.updated_at - a.updated_at)
     const out = all.slice(0, limit)
+    discoveryCache = { at: now, limit, rows: out }
     recordDiscoveryStatus({ ok: true, count: out.length })
     return out
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.warn("[opencode-codex-memory] session discovery failed; skipping pass:", err)
     recordDiscoveryStatus({ ok: false, count: 0, error: message })
+    // Do not cache failures — next pass should retry the host.
     return []
   }
 }

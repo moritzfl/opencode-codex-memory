@@ -14,8 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uses a process-local timer (DB claim/cooldown only).
 - Plugin `dispose` aborts in-flight consolidation and memory sub-sessions so a
   reload cannot leave two writers on the memory workspace.
+- Dispose mid phase-1/2 now **releases** claimed jobs as pending without the 1h
+  failure backoff or burned retries, so reload does not stall behind lease
+  expiry. Phase 2 also checks shutdown during prep (after claim, baseline, and
+  diff), not only at entry / consolidator time.
+- `resetPluginLifecycle` aborts any live consolidator controller before clearing
+  it (avoids orphaning a run on glitched boot order).
+- Session discovery is coalesced for 30s so empty phase-1 passes do not hammer
+  the host API on every idle/turn.
 - `memory_list` uses `lstat` for the directory check to avoid following a
-  TOCTOU symlink swap.
+  TOCTOU symlink swap; symlinked dirs report as disallowed (intentional).
 
 ### Added
 
