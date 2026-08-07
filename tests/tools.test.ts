@@ -275,14 +275,42 @@ describe("memory_reset", () => {
 
   it("refuses while a consolidation is in flight in this process", async () => {
     const phase2 = require("../src/phase2.js")
+    const { MemoryStore } = require("../src/store.js")
+    const { setPluginInput } = require("../src/llm.js")
     const { memory_reset } = require("../tools/control.js")
-    // runPhase2 sets its in-flight flag synchronously before the first await;
-    // the stub store makes it exit right after.
-    const stubStore = { claimGlobalPhase2Job: () => ({ type: "skipped_running" }) }
-    const running = phase2.runPhase2(stubStore)
+    // Stall the consolidator so phase2 stays in-flight (claim alone is too fast
+    // without an await after setting the flag — there is no process rate gate).
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-reset-guard" } }),
+          prompt: async () => {
+            await gate
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
+          abort: async () => ({ data: {} }),
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    })
+    // Empty DB still claims the global job (first-run insert).
+    const running = phase2.runPhase2(new MemoryStore(), {
+      ...phase2.DEFAULT_PHASE2_OPTIONS,
+      heartbeatIntervalMs: 60_000,
+    })
+    for (let i = 0; i < 100 && !phase2.isPhase2InFlight(); i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(phase2.isPhase2InFlight()).toBe(true)
     const r = await memory_reset.execute({ confirm: true }, CTX)
-    await running
     expect(r.output).toContain("Reset refused: memory consolidation is currently running")
+    release()
+    await running
     expect(phase2.isPhase2InFlight()).toBe(false)
   })
 })

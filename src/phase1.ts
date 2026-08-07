@@ -3,7 +3,9 @@ import { loadTranscript, selectEligibleSessions } from "./capture.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
 import { extractViaSubagent } from "./llm.js"
-import { checkRateLimit } from "./ratelimit.js"
+import { checkRateLimit, markRateLimitUsed } from "./ratelimit.js"
+import { isPluginShuttingDown } from "./lifecycle.js"
+import { recordDiagnostic } from "./diagnostics.js"
 
 export interface Phase1Options {
   maxAgeDays: number
@@ -39,6 +41,8 @@ export async function runPhase1(
   opts: Phase1Options = DEFAULT_PHASE1_OPTIONS,
   rateLimitCheck: typeof checkRateLimit = checkRateLimit,
 ): Promise<void> {
+  if (isPluginShuttingDown()) return
+  // Prune first (no tokens), matching codex start.rs ordering before the gate.
   store.pruneStage1Outputs(opts.maxUnusedDays ?? 30)
   const rl = await rateLimitCheck("phase1")
   if (!rl.ok) {
@@ -48,10 +52,18 @@ export async function runPhase1(
   const eligible = await selectEligibleSessions(store, opts)
   if (eligible.length === 0) return
   const claimed = store.claimStage1Jobs(eligible, opts.excludeSession, opts.maxClaimed)
-  if (claimed.length === 0) return
+  // Empty claim: do not stamp the process timer (codex only metrics
+  // skipped_no_candidates and leaves the next startup free to try again).
+  if (claimed.length === 0) {
+    recordDiagnostic("info", "phase1", `no claims (eligible=${eligible.length})`)
+    return
+  }
+  markRateLimitUsed("phase1")
+  recordDiagnostic("info", "phase1", `claimed ${claimed.length} session(s)`)
   const sessionById = new Map(eligible.map((s) => [s.id, s]))
 
   await runPool(claimed, STAGE1_CONCURRENCY, async (claim) => {
+    if (isPluginShuttingDown()) return
     const sid = claim.sessionId
     try {
       const session = sessionById.get(sid)

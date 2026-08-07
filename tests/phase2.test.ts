@@ -58,7 +58,7 @@ describe("phase 2 orchestration", () => {
       },
     } as any)
 
-    const result = await runPhase2(new MemoryStore(), undefined, async () => ({ ok: true }))
+    const result = await runPhase2(new MemoryStore())
     expect(result.status).toBe("failed")
 
     const job = openDb()
@@ -84,7 +84,7 @@ describe("phase 2 orchestration", () => {
       },
     } as any)
 
-    const result = await runPhase2(new MemoryStore(), undefined, async () => ({ ok: true }))
+    const result = await runPhase2(new MemoryStore())
     expect(result.status).toBe("shutdown_failed")
 
     // codex phase2.rs: neither succeed nor fail — the lease must survive so no
@@ -116,11 +116,7 @@ describe("phase 2 orchestration", () => {
       return false
     }
 
-    const result = await runPhase2(
-      store,
-      { ...DEFAULT_PHASE2_OPTIONS, heartbeatIntervalMs: 5 },
-      async () => ({ ok: true }),
-    )
+    const result = await runPhase2(store, { ...DEFAULT_PHASE2_OPTIONS, heartbeatIntervalMs: 5 })
     expect(result.status).toBe("heartbeat_lost")
     expect(aborted).toEqual(["sub-phase2-heartbeat"])
     expect(deleted).toEqual(["sub-phase2-heartbeat"])
@@ -144,11 +140,7 @@ describe("phase 2 orchestration", () => {
       throw new Error("heartbeat database unavailable")
     }
 
-    const result = await runPhase2(
-      store,
-      { ...DEFAULT_PHASE2_OPTIONS, heartbeatIntervalMs: 5 },
-      async () => ({ ok: true }),
-    )
+    const result = await runPhase2(store, { ...DEFAULT_PHASE2_OPTIONS, heartbeatIntervalMs: 5 })
     expect(result.status).toBe("heartbeat_lost")
     expect(aborted).toEqual(["sub-phase2-heartbeat"])
     expect(deleted).toEqual(["sub-phase2-heartbeat"])
