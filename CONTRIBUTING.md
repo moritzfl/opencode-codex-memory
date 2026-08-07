@@ -47,6 +47,9 @@ bun run typecheck
 bun run build && bun run smoke && bun run contract
 ```
 
+GitHub Actions runs `bun test`, typecheck, build, and smoke on every PR to
+`main`. Live host checks (`contract`, `live:*`) stay manual.
+
 Live checks against the **official** opencode binary (XDG-sandboxed; needs
 provider auth + a configured model — never touches your real memory home):
 

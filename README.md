@@ -351,6 +351,30 @@ The cost is real: with one store, an unrelated project's details can surface in
 the summary. Codex judged that cheaper than the alternative, and this port
 mirrors that decision rather than layering scoping back on top.
 
+## Troubleshooting
+
+When memory does not seem to build, ask the agent to run **`memory_inspect`**.
+It reports:
+
+- stage-1 job counts and recent extraction errors
+- phase-2 status / last error / cooldown
+- last session-discovery outcome
+- effective options (after clamping) and config warnings
+- a short eligibility reminder (`min_rollout_idle_hours`, default **6h**)
+
+Common causes:
+
+| Symptom | Likely cause |
+|---|---|
+| No stage-1 outputs yet | Sessions must stay idle ≥ `min_rollout_idle_hours` (default 6). For a quick local check, set `"min_rollout_idle_hours": 1`. |
+| Discovery failed | Host API/`experimental/session` unavailable; inspect shows the error. Retry after restarting OpenCode. |
+| Pin stuck on old version | OpenCode freezes bare package specs; pin an explicit version and bump it (see Install). |
+| Consolidation never runs | Check `phase2_status` and `phase2_last_error` in inspect; failed artifacts keep the workspace diff for the next run. |
+
+Install target: this package runs **inside OpenCode** (Bun). You do not need to
+install it as a standalone Node app; OpenCode resolves the plugin into its own
+package cache.
+
 ## Contributing
 
 The port follows Codex closely: same two-phase pipeline, same on-disk artifacts,
@@ -359,6 +383,8 @@ and the trade-offs, see [`ARCHITECTURE.md`](./ARCHITECTURE.md); contributor
 guidance lives in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and
 [`AGENTS.md`](./AGENTS.md) — in short: this repo exists to port Codex's memory
 system to OpenCode, and PRs that break that parity will be rejected.
+
+CI runs `bun test`, typecheck, build, and the packaging smoke test on every PR.
 
 ## License
 

@@ -64,12 +64,14 @@ WRITE PATH
   Phase 1 — per-session extraction
     pumped at first chat.message of a session and on idle
     (session.status {type:"idle"} + deprecated session.idle, deduped)
+    process-local 30s anti-stampede stamps only after a claim (empty passes free)
     load transcript via session.messages API → filter instructions → redact
     → memorize-extract subagent (json_schema output; only StructuredOutput tool, transcript inline)
     → store raw_memory + rollout_summary in memory.db
-  Phase 2 — global consolidation (singleton, 6h cooldown, lease)
+  Phase 2 — global consolidation (singleton, 6h DB cooldown, lease; no process timer)
     git baseline diff of memories/ → memorize subagent updates MEMORY.md,
     memory_summary.md, skills/ → reset baseline → invalidate read-path cache
+    dispose() aborts the consolidator signal so reload cannot leave two writers
 
 STORAGE
   ~/.local/share/opencode/memory.db        plugin SQLite (stage1 outputs + jobs + session meta)
@@ -252,7 +254,8 @@ root" invariant. The extension approach is pure content.
 | Transcript access | Direct rollout files (own format) | `session.messages` + `experimental.session.list`; `opencode.db` never read | Official surfaces only (D4) |
 | Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
 | Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
-| Rate-limit awareness | Provider rate-limit info | Time-based heuristic stub | See `src/ratelimit.ts`; wire when opencode exposes it |
+| Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 process anti-stampede (30s, stamps only after a claim); phase 2 uses DB claim/cooldown only | See `src/ratelimit.ts`; wire provider quota when opencode exposes it |
+| Plugin dispose / reload | N/A (in-process core) | `dispose` aborts consolidator + sub-sessions via `src/lifecycle.ts` | Host can still leave a cross-process lease until expiry |
 | Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
 
 ---

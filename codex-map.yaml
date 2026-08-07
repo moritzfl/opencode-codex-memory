@@ -476,8 +476,18 @@ mappings:
     note: >
       DELIBERATE DIVERGENCE: codex gates on real provider rate-limit windows
       (guard.rs, min_rate_limit_remaining_percent, fails open; called from
-      start.rs); the port uses a simple time-based heuristic stub. Revisit if
-      codex's gating is exposed to opencode plugins.
+      start.rs once per startup — a pure read with no process-local stamp).
+      Opencode does not expose provider rate limits, so the port keeps a phase-1
+      process-local anti-stampede (30s) that stamps only AFTER a stage-1 claim
+      succeeds; empty/no-claim passes do not burn the interval (matches codex
+      skipped_no_candidates free retry). Phase 2 has no process timer — DB
+      claim/cooldown only, like codex. Wire min_rate_limit_remaining_percent
+      when the host exposes provider quota.
+  # Platform-only modules (no codex theirs path — do not map with theirs: null,
+  # the drift script existence-checks every theirs value):
+  #   src/lifecycle.ts — dispose/reload abort for consolidator + sub-sessions
+  #   src/host-client.ts — OpenAPI type-lag cast adapters
+  #   src/diagnostics.ts — inspect ring buffer (codex has OTEL metrics instead)
 
   # --- Extensions (ad-hoc notes) ---
   - ours: src/workspace.ts

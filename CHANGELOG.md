@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Phase-1 process rate limit no longer stamps on empty discovery/claim passes,
+  matching codex's free retry after `skipped_no_candidates`. Phase 2 no longer
+  uses a process-local timer (DB claim/cooldown only).
+- Plugin `dispose` aborts in-flight consolidation and memory sub-sessions so a
+  reload cannot leave two writers on the memory workspace.
+- `memory_list` uses `lstat` for the directory check to avoid following a
+  TOCTOU symlink swap.
+
+### Added
+
+- `memory_inspect` reports stage-1 job status, recent extraction errors, last
+  session discovery outcome, eligibility hints, pipeline event ring buffer, and
+  codex-interop resource mtimes.
+- GitHub Actions CI (`test`, typecheck, build, smoke).
+- Host SDK cast adapters in `src/host-client.ts` (OpenAPI type lag).
+
+### Changed
+
+- Consolidation agent prompt: stay inside the memory workspace (instruction-
+  level residual FS-scope mitigation until opencode offers rooted agents).
+
 ## [0.4.7] - 2026-08-06
 
 ### Changed
