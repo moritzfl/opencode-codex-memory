@@ -9,34 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Phase-1 process rate limit no longer stamps on empty discovery/claim passes,
-  matching codex's free retry after `skipped_no_candidates`. Phase 2 no longer
-  uses a process-local timer (DB claim/cooldown only).
-- Plugin `dispose` aborts in-flight consolidation and memory sub-sessions so a
-  reload cannot leave two writers on the memory workspace.
-- Dispose mid phase-1/2 now **releases** claimed jobs as pending without the 1h
-  failure backoff or burned retries, so reload does not stall behind lease
-  expiry. Phase 2 also checks shutdown during prep (after claim, baseline, and
-  diff), not only at entry / consolidator time.
-- `resetPluginLifecycle` aborts any live consolidator controller before clearing
-  it (avoids orphaning a run on glitched boot order).
-- Session discovery is coalesced for 30s so empty phase-1 passes do not hammer
-  the host API on every idle/turn.
-- `memory_list` uses `lstat` for the directory check to avoid following a
-  TOCTOU symlink swap; symlinked dirs report as disallowed (intentional).
+- Reloading or restarting OpenCode no longer leaves memory learning stuck for
+  up to an hour, or allows two background helpers to edit memory files at once.
+- Background learning is less likely to skip sessions that just became eligible
+  or to spam OpenCode with session lookups when nothing is ready to extract.
+- Memory tools refuse to follow symlinks that could redirect reads or writes
+  outside the memory folder.
 
 ### Added
 
-- `memory_inspect` reports stage-1 job status, recent extraction errors, last
-  session discovery outcome, eligibility hints, pipeline event ring buffer, and
-  codex-interop resource mtimes.
-- GitHub Actions CI (`test`, typecheck, build, smoke).
-- Host SDK cast adapters in `src/host-client.ts` (OpenAPI type lag).
+- `memory_inspect` shows more of why memory is (or is not) building: extraction
+  job status and recent errors, last session discovery, when sessions become
+  eligible, recent pipeline events, and (if enabled) last Codex import/export
+  file times.
 
 ### Changed
 
-- Consolidation agent prompt: stay inside the memory workspace (instruction-
-  level residual FS-scope mitigation until opencode offers rooted agents).
+- The consolidation helper is instructed to only edit files under the memory
+  workspace, not your project source tree.
 
 ## [0.4.7] - 2026-08-06
 
