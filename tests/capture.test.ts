@@ -169,13 +169,15 @@ describe("listRecentSessions", () => {
     expect(await listRecentSessions()).toEqual([])
   })
 
-  it("calls experimental.session.list with roots and limit", async () => {
+  it("calls experimental.session.list with roots, limit, and empty directory (global)", async () => {
     const seen: { query?: unknown; url?: string } = {}
     setClient(discoveryClient([], seen))
     const { listRecentSessions } = require("../src/capture.js")
     await listRecentSessions(42)
     expect(seen.url).toBe("/experimental/session")
-    expect(seen.query).toEqual({ roots: true, limit: 42 })
+    // directory:"" suppresses the SDK client's project-scope injection so
+    // listGlobal is host-wide (memory is global).
+    expect(seen.query).toEqual({ roots: true, limit: 42, directory: "" })
   })
 
   it("coalesces repeated discovery calls within the cache window", async () => {

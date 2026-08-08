@@ -55,7 +55,13 @@ export async function runPhase1(
   // Empty claim: do not stamp the process timer (codex only metrics
   // skipped_no_candidates and leaves the next startup free to try again).
   if (claimed.length === 0) {
-    recordDiagnostic("info", "phase1", `no claims (eligible=${eligible.length})`)
+    // eligible ≠ claimable: already done at this watermark, exhausted retries,
+    // or lease held. Surface that so inspect is not "memory stuck".
+    recordDiagnostic(
+      "info",
+      "phase1",
+      `no claims (eligible=${eligible.length}; already extracted, in backoff, or at claim cap)`,
+    )
     return
   }
   markRateLimitUsed("phase1")

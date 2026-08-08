@@ -69,10 +69,16 @@ export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<Se
     return []
   }
   try {
+    // Opencode's SDK client injects `directory` from x-opencode-directory on
+    // every GET (sdk client rewrite). The experimental session handler treats
+    // any present directory query as "filter to this instance's project",
+    // which would hide every other project's idle sessions — memory is global.
+    // Pass an empty directory so rewrite does not re-inject, and the handler
+    // sees a falsy value → listGlobal without a directory filter.
     const res = await withTimeout(
       get({
         url: "/experimental/session",
-        query: { roots: true, limit },
+        query: { roots: true, limit, directory: "" },
       }),
       API_TIMEOUT_MS,
       "experimental.session.list",

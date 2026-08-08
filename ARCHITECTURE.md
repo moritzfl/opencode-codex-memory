@@ -178,9 +178,11 @@ authenticated client (`input.client`), which shares auth with the host:
 - Discovery: `GET /experimental/session?roots=true` (`Session.listGlobal`) —
    one call across all projects. The V1 plugin client has no `experimental`
    namespace, so the call goes through the host client's hey-api transport
-   (`client._client.get`) which already carries baseUrl + auth. Fail-safe:
-   any error skips the pass and never finalizes a job. The pass is also
-   rate-limited (30s min interval).
+   (`client._client.get`) which already carries baseUrl + auth. The SDK also
+   auto-injects `directory` on GETs (project scope); we pass `directory=""` so
+   the handler runs listGlobal without a directory filter — required because
+   memory is global. Fail-safe: any error skips the pass and never finalizes a
+   job. The pass is also rate-limited (30s min interval).
 
 Trade-off accepted: discovery rides an experimental route (stable since
 1.17.x) rather than reading `opencode.db`. The only SQLite the plugin touches

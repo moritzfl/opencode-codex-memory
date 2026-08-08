@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Session discovery no longer filters to the current project only. The host SDK
+  injects a directory query on every GET; that made extraction miss idle
+  sessions from other projects (memory is global).
+
 ## [0.4.10] - 2026-08-08
 
 ### Fixed
