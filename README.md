@@ -322,6 +322,35 @@ Both sides mark imported content with a provenance tag (`[from codex]` /
 don't ping-pong between the two systems. This follows the same extension
 mechanism Codex itself uses to import Claude memories.
 
+### Importing Claude Code project memories
+
+If you also use Claude Code, the plugin can mirror Claude's per-project memory
+files into the same extension slot Codex uses (`extensions/external_agent_import/`),
+then merge them on the next consolidation pass:
+
+```json
+{
+  "plugin": [
+    ["opencode-codex-memory@0.4.11", { "claude_import": { "enabled": true } }]
+  ]
+}
+```
+
+- Reads `~/.claude/projects/<key>/memory/**/*.md` (override home with
+  `claude_home`).
+- Resolves each project's working directory from its newest session `*.jsonl`
+  (same approach as Codex). Projects without a reliable cwd are skipped.
+- Copies into `extensions/external_agent_import/resources/<key>/` with a
+  `scope.json` (`{ "cwd": "..." }`) and seeds consolidator instructions.
+- Optional `projects: ["key-a", "key-b"]` allowlist; omit to import every
+  project that has a cwd. Tightening the allowlist prunes previously imported
+  projects that are no longer selected.
+- One-way and default-off. Never writes back to Claude. Source project removed
+  → imported resources removed so consolidation can forget them.
+- Compatible with `codex_interop` (separate extension names). Prefer **one**
+  writer for long-term memory if you also run a third-party Claude-memory
+  OpenCode plugin.
+
 ## Why one global memory?
 
 There's a single store for everything you do, not one per project — and that's

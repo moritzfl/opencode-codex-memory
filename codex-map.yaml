@@ -273,12 +273,26 @@ mappings:
       rollout_path/git_branch (metadata the port does not have); ensureLayout
       pre-seeds placeholder MEMORY.md + empty memory_summary.md (codex: the
       consolidator INITs them; outcome-equivalent, first diff shows M not A).
-      DELIBERATE DIVERGENCE: codex also has a default-off, under-development
-      external-agent migration flow that explicitly synchronizes selected
-      Claude project memories into extensions/external_agent_import and queues
-      consolidation. The port has no host migration-selection surface for
-      Claude memories; its adaptation of that import pattern for Codex itself
-      lives in src/codex-interop.ts (see that mapping).
+      Claude project memory import is no longer a divergence: see
+      src/claude-import.ts. Codex-CLI consolidated-memory exchange remains in
+      src/codex-interop.ts.
+  - ours: src/claude-import.ts
+    theirs: codex-rs/external-agent-migration/src/memory_import.rs
+    note: >
+      Port of codex's Claude (external-agent) memory import into
+      extensions/external_agent_import/. Also tracks memory.rs for discovery.
+      Discover ~/.claude/projects/<key>/memory markdown (skip symlinks), resolve
+      project cwd from newest session *.jsonl with an absolute existing cwd
+      (project_cwd_from_sessions), whole-project replace with scope.json +
+      EXTENSION_INSTRUCTIONS (byte-equality change detection, source-gone
+      removes resources). DIVERGENCES: no migration UI / selected_memory list —
+      continuous phase-2 sync when claude_import.enabled (optional projects
+      allowlist; omit = all with cwd); unreachable Claude home is a quiet no-op
+      (not fatal); no state-DB enqueue (sync runs inside the claimed phase-2 job
+      after baseline, before diff, same ordering as codex-interop import);
+      project keys rejected if path-unsafe or hidden (path-guard); instructions
+      add optional [from claude] provenance tag. Default-off via claude_import
+      plugin option (codex: migration feature / include_memory detect gate).
   - ours: src/codex-interop.ts
     theirs: codex-rs/external-agent-migration/src/memory_import.rs
     note: >
@@ -291,27 +305,25 @@ mappings:
       through), and the source is Codex's own GLOBAL consolidated memory
       (MEMORY.md + memory_summary.md), not per-project Claude memories — so
       no scope.json, no project selection surface, no state-DB gating.
-      An unreachable codex home is NOT a deletion signal (only an existing
-      memories root with missing artifacts is), diverging from codex's
-      fatal-on-missing-home because the plugin must degrade quietly. Codex syncs out-of-band and enqueues
-      consolidation; the port syncs inside the claimed phase-2 job (after
-      baseline, before diff capture) because its claim is time-gated and
-      pre-claim workspace writes could race a running consolidator's lease.
-      Also adds an export direction with no codex equivalent: our consolidated
-      artifacts are written into $CODEX_HOME/memories/extensions/
-      opencode_import/ for codex's consolidator to merge via its generic
-      extensions contract (additive only; codex's workspace is never
-      bootstrapped and its state DB never touched). Instructions constants
-      adapt codex's EXTENSION_INSTRUCTIONS with cross-system provenance tags
-      ([from codex]/[from opencode]) as an echo guard — needed because this
-      exchange is two-way while codex's Claude import is one-way and cannot
-      echo. The guard is deliberately instruction-level, matching codex's
-      own all-instruction content rules: a code-level line filter at the
-      sync boundary was tried and rejected (it strips the tag-carrying line
-      but leaves the rest of multi-line entries as unattributable,
-      uninterpretable fragments — see ARCHITECTURE.md D6). Default-off via
-      the opencode-specific codex_interop plugin option (codex's importer is
-      likewise default-off: Feature::ExternalAgentMemoryImport).
+      Claude per-project import lives in src/claude-import.ts (same extension
+      name/layout as upstream). An unreachable codex home is NOT a deletion
+      signal (only an existing memories root with missing artifacts is),
+      diverging from codex's fatal-on-missing-home because the plugin must
+      degrade quietly. Codex syncs out-of-band and enqueues consolidation; the
+      port syncs inside the claimed phase-2 job (after baseline, before diff
+      capture) because its claim is time-gated and pre-claim workspace writes
+      could race a running consolidator's lease. Also adds an export direction
+      with no codex equivalent: our consolidated artifacts are written into
+      $CODEX_HOME/memories/extensions/opencode_import/ for codex's consolidator
+      to merge via its generic extensions contract (additive only; codex's
+      workspace is never bootstrapped and its state DB never touched).
+      Instructions constants adapt codex's EXTENSION_INSTRUCTIONS with
+      cross-system provenance tags ([from codex]/[from opencode]) as an echo
+      guard — needed because this exchange is two-way while codex's Claude
+      import is one-way and cannot echo. The guard is deliberately
+      instruction-level, matching codex's own all-instruction content rules
+      (see ARCHITECTURE.md D6). Default-off via the opencode-specific
+      codex_interop plugin option.
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >

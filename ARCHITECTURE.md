@@ -195,16 +195,18 @@ database is never opened — not even read-only (see D4). No migration
 conflicts, no risk to opencode's data. Same isolation codex uses with its
 dedicated memories SQLite.
 
-### D6 — Codex interop via extensions (`src/codex-interop.ts`)
+### D6 — External-agent import via extensions
 
-Default-off two-way memory exchange with a local Codex CLI, built on the
-generic extensions contract instead of a second memory root. Both memory
-systems already render extension prompt blocks into their consolidation prompt
+Default-off exchange with foreign agent memory stores, built on the generic
+extensions contract instead of a second memory root. Both this plugin and
+Codex already render extension prompt blocks into their consolidation prompt
 whenever `extensions/` exists and instruct the consolidator to read every
 extension's `instructions.md` — so sharing is pure content, no read-path or
-schema change on either side. This is the same mechanism codex itself uses to
-import Claude memories (`external_agent_import` in
-codex-rs/external-agent-migration).
+schema change.
+
+#### Codex CLI (`src/codex-interop.ts`)
+
+Two-way exchange of *consolidated* global memory:
 
 - **Import** (`codex_interop.import`): inside each claimed phase-2 job —
   after the baseline, before the diff capture — Codex's consolidated
@@ -232,10 +234,30 @@ codex-rs/external-agent-migration).
   so it must see the tags, not their absence. Untagged leakage degrades to
   duplication, never to unsafe behavior (the consolidator's tool allowlist is
   the safety boundary, D2).
-- Resource files are nested and untimestamped, so extension-resource pruning
-  never touches them. Overlapping memory roots fail closed.
+- Overlapping Codex/plugin memory roots fail closed.
 
-The alternative — mounting Codex's workspace as a second, read-only memory
+#### Claude Code (`src/claude-import.ts`)
+
+One-way port of codex's Claude memory importer
+(`external-agent-migration` `memory.rs` + `memory_import.rs`), continuous on
+phase 2 instead of a migration UI:
+
+- Reads `~/.claude/projects/<key>/memory/**/*.md` (optional `claude_home` /
+  `projects` allowlist).
+- Resolves `cwd` from newest project `*.jsonl` with an absolute existing cwd
+  (codex `project_cwd_from_sessions`); no-cwd projects are skipped.
+- Whole-project replace into
+  `extensions/external_agent_import/resources/<key>/` plus `scope.json`
+  (`{ "cwd": "..." }`) and codex-aligned `instructions.md`.
+- Source gone / dropped from allowlist → remove resources (forgetting signal).
+- Unreachable Claude home is a no-op, never a mass-delete.
+- Same extension name and layout as Codex, so a consolidator trained on either
+  system can merge the files. No write-back to Claude; no second memory root.
+
+Resource files for both importers are nested and untimestamped, so
+extension-resource pruning never touches them.
+
+The alternative — mounting a foreign workspace as a second, read-only memory
 root — was rejected: it would need source-aware tools, a split summary
 budget, and read-path changes, and it would strain the "memory is global, one
 root" invariant. The extension approach is pure content.
