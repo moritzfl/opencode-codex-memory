@@ -75,23 +75,20 @@ export const memory_read = tool({
 
 /** Skip hidden entries and symlinks, mirroring codex local/list.rs + local/search.rs walkers. */
 function visibleEntries(dir: string): { name: string; isDir: boolean }[] {
-  let names: string[]
+  // Dirent file types (readdir withFileTypes) — codex read_sorted_dir_entries
+  // uses entry.file_type() so listing never follows symlinks.
+  let ents: fs.Dirent[]
   try {
-    names = fs.readdirSync(dir)
+    ents = fs.readdirSync(dir, { withFileTypes: true })
   } catch {
     return []
   }
   const out: { name: string; isDir: boolean }[] = []
-  for (const name of names) {
-    if (name.startsWith(".")) continue
-    let st: fs.Stats
-    try {
-      st = fs.lstatSync(path.join(dir, name))
-    } catch {
-      continue
-    }
-    if (st.isSymbolicLink()) continue
-    out.push({ name, isDir: st.isDirectory() })
+  for (const ent of ents) {
+    if (ent.name.startsWith(".")) continue
+    if (ent.isSymbolicLink()) continue
+    if (ent.isDirectory()) out.push({ name: ent.name, isDir: true })
+    else if (ent.isFile()) out.push({ name: ent.name, isDir: false })
   }
   return out
 }

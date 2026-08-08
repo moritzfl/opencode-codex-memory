@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bearer-token redaction matches current codex: word boundary, space/tab only
+  (no newline match), trailing base64 padding, and runs before API-key patterns
+  so `Bearer sk-…` is one redaction.
+
 ## [0.4.8] - 2026-08-08
 
 ### Fixed

@@ -20,7 +20,28 @@ describe("redact", () => {
   })
 
   it("redacts Bearer tokens", () => {
-    expect(redact("Authorization: Bearer abc123" + "x".repeat(30))).toContain("Bearer [REDACTED]")
+    expect(redact("Authorization: Bearer abc123" + "x".repeat(30))).toBe(
+      "Authorization: Bearer [REDACTED]",
+    )
+    expect(redact("Bearer abcde+fghijklmnopqrstuvwxyz012345")).toBe("Bearer [REDACTED]")
+    expect(redact("Bearer AbcdefghijklMN09._~+/-==; echo done")).toBe(
+      "Bearer [REDACTED]; echo done",
+    )
+    expect(redact("authorization: bEaReR\tabcdefghijklmnop")).toBe(
+      "authorization: Bearer [REDACTED]",
+    )
+  })
+
+  it("avoids Bearer false positives like codex", () => {
+    for (const input of [
+      "Bearer of good news",
+      "Bearer abcdefghijklmno", // 15 chars
+      "NotABearer abcdefghijklmnop",
+      "Bearerabcdefghijklmnop",
+      "Bearer\nabcdefghijklmnop",
+    ]) {
+      expect(redact(input)).toBe(input)
+    }
   })
 
   it("redacts private keys", () => {

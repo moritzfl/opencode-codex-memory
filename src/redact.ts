@@ -1,11 +1,14 @@
 const REDACTIONS: { re: RegExp; replacement: string }[] = [
+  // Bearer before key patterns (codex sanitizer order): a `Bearer sk-…` line
+  // redacts as one token instead of leaving a bare "Bearer " prefix.
+  // Word-boundary + space/tab only (not \s) avoids newline false positives;
+  // trailing =* covers base64 padding outside the 16-char body.
+  { re: /\bBearer[ \t]+[A-Za-z0-9._~+/-]{16,}=*/gi, replacement: "Bearer [REDACTED]" },
   { re: /sk-ant-[A-Za-z0-9_\-]{20,}/g, replacement: "[REDACTED:anthropic-key]" },
   { re: /sk-[A-Za-z0-9]{20,}/g, replacement: "[REDACTED:openai-key]" },
   { re: /AKIA[0-9A-Z]{16}/g, replacement: "[REDACTED:aws-key]" },
   { re: /gh[pousr]_[A-Za-z0-9]{36,}/g, replacement: "[REDACTED:github-token]" },
   { re: /xox[baprs]-[A-Za-z0-9\-]{10,}/g, replacement: "[REDACTED:slack-token]" },
-  // Case-insensitive with a 16-char floor, matching codex's sanitizer.
-  { re: /bearer\s+[A-Za-z0-9\-\._~+\/=]{16,}/gi, replacement: "Bearer [REDACTED]" },
   {
     re: /-----BEGIN [A-Z]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z]+ PRIVATE KEY-----/g,
     replacement: "[REDACTED:private-key]",

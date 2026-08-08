@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 9873cba8ce6d14e650e12cdc0dddd159ae6613d7
-codex_ref_date: 2026-08-04
+codex_ref: 3aae5d885bac39c1262491aa3fd100dfd8b3919f
+codex_ref_date: 2026-08-08
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -118,7 +118,9 @@ mappings:
       handling; port caps note<=4000/title<=120 chars and prepends a
       title/created/session header (codex: verbatim unlimited note body).
       list has no cursor (max_results cap only) and errors on file paths
-      (codex: returns the single entry).
+      (codex: returns the single entry). Listing/search walkers use Dirent
+      file types (codex read_sorted_dir_entries entry.file_type()) so
+      symlinks are skipped without following.
       Note writes reject symlinked path components, matching codex local/
       ad_hoc_note.rs ensure_notes_dir.
   - ours: src/paths.ts
@@ -460,7 +462,8 @@ mappings:
       payloads remains parseable without leaking punctuation-bearing suffixes;
       assignment-like content inside an enclosing quoted string is replaced
       without adding another quote layer.
-      The AKIA/bearer patterns omit codex's \b anchors, which only widens them.
+      Bearer matches codex (word-boundary, space/tab only, 16+ body, trailing
+      =*, applied before key patterns). AKIA still omits codex's \b anchor.
       isMemoryExcludedFragment lives here too (upstream: memories/write
       phase1.rs is_memory_excluded_contextual_user_fragment) but is INERT on
       opencode: AGENTS.md is joined into system[0] and skills are rendered as
