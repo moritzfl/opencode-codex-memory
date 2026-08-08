@@ -27,10 +27,10 @@ from there everything lives under `~/.local/share/opencode/`, so you can read it
 grep it, edit it, or delete it like anything else you own. Nothing leaves your
 machine beyond the model calls OpenCode already makes.
 
-If you *do* also use the Codex CLI: the plugin can share memory with Codex in
-both directions — what one assistant learns on your machine, the other picks
-up. Off by default, one config flag per direction; see
-[Sharing memory with the Codex CLI](#sharing-memory-with-the-codex-cli).
+If you *do* also use the Codex CLI or Claude Code on the same machine: the
+plugin can bring their memories in (and, for Codex, push ours back). Off by
+default — see [Sharing memory with the Codex CLI](#sharing-memory-with-the-codex-cli)
+and [Importing memory from Claude Code](#importing-memory-from-claude-code).
 
 ## Why
 
@@ -291,42 +291,69 @@ explicitly, so they win over an agent-level `model`.
 
 ### Sharing memory with the Codex CLI
 
-If you switch between OpenCode and OpenAI's Codex CLI on the same machine, the
-plugin can exchange consolidated memories with Codex — in either or both
-directions:
+If you use OpenCode and the Codex CLI on the same machine, turn this on so each
+side can pick up what the other already learned. **Either or both directions.**
+Off by default; no changes to Codex's own config are required.
+
+**Enable both directions:**
 
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.4.11", { "codex_interop": { "import": true, "export": true } }]
+    [
+      "opencode-codex-memory@0.4.11",
+      { "codex_interop": { "import": true, "export": true } }
+    ]
   ]
 }
 ```
 
-- `import` copies Codex's consolidated `MEMORY.md` / `memory_summary.md` into a
-  memory extension (`extensions/codex_import/`) before each consolidation pass.
-  The consolidator merges what's new, tagging it `[from codex]`.
-- `export` copies this plugin's consolidated memory into Codex's memory
-  workspace as an extension (`extensions/opencode_import/`) after each
-  successful consolidation, together with instructions for Codex's own
-  consolidator. Codex picks it up on its next consolidation — no Codex
-  configuration needed. Nothing is exported until Codex's memory feature has
-  created `$CODEX_HOME/memories`, and Codex's own files are never modified.
-  (After a `memory_reset` here, the last export stays in Codex until your
-  next successful consolidation replaces it.)
-- `codex_home` overrides where Codex lives (default: `$CODEX_HOME`, else
-  `~/.codex`).
+- **Import:** on each consolidation pass here, durable memory from Codex is
+  merged into this plugin's store (tagged so you can tell it came from Codex).
+- **Export:** after a successful consolidation here, this plugin's memory is
+  offered to Codex; Codex merges it on *its* next consolidation pass.
 
-Both sides mark imported content with a provenance tag (`[from codex]` /
-`[from opencode]`) and skip content carrying the other side's tag, so memories
-don't ping-pong between the two systems. This follows the same extension
-mechanism Codex itself uses to import Claude memories.
+**Options** (all under `codex_interop`):
 
-### Importing Claude Code project memories
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `import` | `false` | Bring Codex's consolidated memory into OpenCode. |
+| `export` | `false` | Offer this plugin's consolidated memory to Codex. |
+| `codex_home` | `$CODEX_HOME`, else `~/.codex` | Where the Codex CLI keeps its data. Set this if you use a non-default location. |
 
-If you also use Claude Code, the plugin can mirror Claude's per-project memory
-files into the same extension slot Codex uses (`extensions/external_agent_import/`),
-then merge them on the next consolidation pass:
+**Notes**
+
+- Export only runs once Codex has created its own memory workspace
+  (`$CODEX_HOME/memories`). Until then, import/export quietly do nothing for
+  the missing side.
+- Codex's own files are never rewritten in place — export only adds a side
+  channel Codex already knows how to read.
+- Both sides tag origin (`[from codex]` / `[from opencode]`) and skip the other
+  tag on re-import, so the same facts don't bounce back and forth.
+- Safe to combine with `claude_import`. Check status with `memory_inspect`
+  (`codex_interop:` section).
+
+**Turning it off**
+
+Setting `import` / `export` back to `false` (or removing `codex_interop`) only
+stops further sync. Already merged memory stays in this plugin's store, and any
+staging copies stay on disk (harmless while import is off). The last export left
+in Codex stays until Codex consolidates it away or you remove it there.
+
+To drop the local staging copies too: turn import off first, then delete
+`extensions/codex_import/` under the plugin memory directory (see
+[Where your data lives](#where-your-data-lives)). Leave import off — if you turn
+it back on, the next pass will recreate them from Codex. After a deletion, the
+next consolidation can treat the missing files as a signal to drop entries that
+only came from that import.
+
+### Importing memory from Claude Code
+
+If you use Claude Code as well as OpenCode, turn this on so OpenCode can learn
+from the project memories Claude already keeps on your machine. **One-way only**
+(Claude → OpenCode); nothing is written back into Claude. Off by default.
+
+**Enable everything Claude has:**
 
 ```json
 {
@@ -336,20 +363,78 @@ then merge them on the next consolidation pass:
 }
 ```
 
-- Reads `~/.claude/projects/<key>/memory/**/*.md` (override home with
-  `claude_home`).
-- Resolves each project's working directory from its newest session `*.jsonl`
-  (same approach as Codex). Projects without a reliable cwd are skipped.
-- Copies into `extensions/external_agent_import/resources/<key>/` with a
-  `scope.json` (`{ "cwd": "..." }`) and seeds consolidator instructions.
-- Optional `projects: ["key-a", "key-b"]` allowlist; omit to import every
-  project that has a cwd. Tightening the allowlist prunes previously imported
-  projects that are no longer selected.
-- One-way and default-off. Never writes back to Claude. Source project removed
-  → imported resources removed so consolidation can forget them.
-- Compatible with `codex_interop` (separate extension names). Prefer **one**
-  writer for long-term memory if you also run a third-party Claude-memory
-  OpenCode plugin.
+After the next consolidation pass, durable facts from Claude's memories show up
+in this plugin's memory the same way OpenCode's own extractions do. Project-specific
+detail stays labeled by project; broadly useful preferences can land in the
+global summary.
+
+**Options** (all under `claude_import`):
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the importer on. |
+| `claude_home` | `~/.claude` | Where Claude Code stores its data. Set this if you use a non-default location. |
+| `projects` | all projects | Optional allowlist of Claude project ids to import (see below). |
+
+**Limit to specific projects:**
+
+Claude names each project with an opaque id (a folder under
+`~/.claude/projects/`), not the path you work in. List those folder names:
+
+```json
+{
+  "plugin": [
+    [
+      "opencode-codex-memory@0.4.11",
+      {
+        "claude_import": {
+          "enabled": true,
+          "projects": ["-Users-you-Desktop-git-my-app"]
+        }
+      }
+    ]
+  ]
+}
+```
+
+Find the ids on your machine:
+
+```bash
+ls ~/.claude/projects
+```
+
+- Omit `projects` (or leave it empty) to import every Claude project the plugin
+  can place on disk.
+- Add or remove ids anytime while import is **on**. Dropping an id (or deleting
+  that project's memory in Claude) stops syncing it and removes the staging
+  copy on the next pass so consolidation can drop derived entries. Memory
+  already merged into the main store is not instantly deleted; the consolidator
+  cleans it up when it next runs.
+- Turning `enabled` off (see below) does **not** prune anything.
+
+**Turning it off**
+
+Setting `enabled` to `false` (or removing `claude_import`) only stops further
+import. Already merged memory stays in this plugin's store, and staging copies
+stay on disk (harmless while import is off).
+
+To drop the local staging copies too: turn import off first, then delete
+`extensions/external_agent_import/` under the plugin memory directory (see
+[Where your data lives](#where-your-data-lives)). Leave import off — if you turn
+it back on, the next pass will recreate them from Claude. After a deletion, the
+next consolidation can treat the missing files as a signal to drop entries that
+only came from that import.
+
+To stop importing *some* projects without turning the feature off: shrink
+`projects` (or delete that memory in Claude) and let the next pass run. That
+only affects the Claude import channel.
+
+**Notes**
+
+- Safe to combine with `codex_interop` (Codex sharing uses a separate channel).
+- If you also run another OpenCode plugin that *writes* Claude-style memory,
+  pick one writer — two systems updating the same long-term store will fight.
+- Check status anytime with `memory_inspect` (`claude_import:` section).
 
 ## Why one global memory?
 
