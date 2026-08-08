@@ -52,7 +52,7 @@ If you want the mental model before the details, jump to
 
 ```json
 {
-  "plugin": ["opencode-codex-memory@0.4.11"]
+  "plugin": ["opencode-codex-memory@0.5.0"]
 }
 ```
 
@@ -233,13 +233,14 @@ Codex's `[memories]` config so the two stay easy to compare:
 | `max_rollouts_per_startup` | `2` | Max sessions extracted per pass |
 | `max_unused_days` | `30` | Prune memories unused for this long |
 | `codex_interop` | `{ "import": false, "export": false }` | Two-way memory exchange with a local Codex CLI (see below) |
+| `claude_import` | `{ "enabled": false }` | One-way import of Claude Code project memories (see below) |
 
 To set options, turn the plugin entry into a `[name, options]` pair:
 
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.4.11", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory@0.5.0", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
@@ -301,7 +302,7 @@ Off by default; no changes to Codex's own config are required.
 {
   "plugin": [
     [
-      "opencode-codex-memory@0.4.11",
+      "opencode-codex-memory@0.5.0",
       { "codex_interop": { "import": true, "export": true } }
     ]
   ]
@@ -358,7 +359,7 @@ from the project memories Claude already keeps on your machine. **One-way only**
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.4.11", { "claude_import": { "enabled": true } }]
+    ["opencode-codex-memory@0.5.0", { "claude_import": { "enabled": true } }]
   ]
 }
 ```
@@ -385,7 +386,7 @@ Claude names each project with an opaque id (a folder under
 {
   "plugin": [
     [
-      "opencode-codex-memory@0.4.11",
+      "opencode-codex-memory@0.5.0",
       {
         "claude_import": {
           "enabled": true,

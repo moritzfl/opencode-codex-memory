@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-08
+
+### Added
+
+- **Import memory from Claude Code** (off by default). If you also use Claude
+  Code on the same machine, enable `claude_import: { "enabled": true }` so
+  OpenCode can pick up Claude's project memories on the next consolidation
+  pass. Optional `projects` allowlist and `claude_home` override. One-way only
+  (nothing is written back to Claude). Turning it off stops further import
+  without erasing what already merged; see the README for staging cleanup.
+
+### Changed
+
+- README configuration for Codex CLI and Claude Code sharing is clearer:
+  options tables, turn-off behavior, and how to remove local staging copies.
+
 ## [0.4.11] - 2026-08-08
 
 ### Fixed
@@ -522,7 +538,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.11...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.4.8...v0.4.9
