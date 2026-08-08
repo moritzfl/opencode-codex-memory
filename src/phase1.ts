@@ -92,8 +92,10 @@ export async function runPhase1(
         cwd: session?.directory ?? undefined,
         model: opts.extractModel,
       })
-      // Always finalize after a completed model call — even if dispose raced —
-      // so we do not drop paid work or leave the claim running until lease expiry.
+      // Finalize after a completed model call even if dispose raced, so the
+      // claim does not sit `running` until lease expiry. The mark is token +
+      // status guarded: if shutdown already released the job and a new process
+      // reclaimed it, this becomes a no-op (paid work dropped, never double-written).
       if (!result) {
         // Extractor judged the session not worth remembering.
         store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)

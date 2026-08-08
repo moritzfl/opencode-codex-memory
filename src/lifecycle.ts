@@ -46,10 +46,6 @@ export function endPhase2AbortScope(): void {
   phase2Abort = null
 }
 
-export function phase2AbortSignal(): AbortSignal | undefined {
-  return phase2Abort?.signal
-}
-
 /** Abort the current consolidator from outside phase2 (dispose). */
 export function abortPhase2Consolidation(): void {
   phase2Abort?.abort()
