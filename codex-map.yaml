@@ -428,10 +428,13 @@ mappings:
       timeouts mirror the 1h job leases (codex relies on the lease alone);
       timed-out or ownership-cancelled prompts call the bound session.abort SDK
       method with a 1s bound before session deletion; deletion is bounded to
-      codex's 10s shutdown timeout. Cleanup is awaited for consolidation because the phase-2 lease
+      codex's 10s shutdown timeout.       Cleanup is awaited for consolidation because the phase-2 lease
       depends on it (see the src/phase2.ts note), fire-and-forget for
       extraction, which has no codex agent-shutdown counterpart and no write
-      tools; plugin-created sessions carry a
+      tools. Dispose: extractViaSubagent defaults to pluginShutdownSignal();
+      consolidateViaSubagent takes the phase-2 AbortSignal (heartbeat can cancel
+      consolidator without full plugin shutdown). Both also session.abort for
+      host cleanup. plugin-created sessions carry a
       durable metadata ownership marker, and startup cleanup requires both that
       marker and an exact generated title because OpenCode copies metadata to
       user forks. Exact legacy titles are temporarily reseeded but never

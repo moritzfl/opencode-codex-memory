@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Plugin reload while consolidation is running no longer races past an already
+  aborted cancel signal (could leave the job hanging until timeout).
+- Extraction also listens for plugin dispose (same cancel path as consolidation),
+  so a reload mid-extract does not wait up to an hour for the host prompt.
+
 ## [0.4.9] - 2026-08-08
 
 ### Changed

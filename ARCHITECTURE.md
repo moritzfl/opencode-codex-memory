@@ -141,21 +141,19 @@ poisoned transcript still cannot induce file reads or any side effect. This also
 blocks IDE and MCP tools that could otherwise bypass a narrower `bash` deny.
 Tool-permission-level, not process-level — accepted trade-off.
 
-The allowlist is not a memory-root-only filesystem sandbox. The helper session
-retains `read`/`edit`/`write` access to its originating project, while the
-`external_directory` grant below adds access to the global memory root. It has
-no shell or network tools, but a poisoned consolidation input could still cause
-project-file reads or edits. This residual FS-scope gap remains until opencode
-offers per-agent workspace roots or a process sandbox equivalent to Seatbelt.
+Helper sessions are created with `directory` = the memory workspace
+(`resolveSubSessionDirectory` in `src/llm.ts`), not the user's project. OpenCode
+treats that path as the session project boundary (`containsPath` /
+`external_directory`): in-bounds file tools freely touch the memory root only.
+Paths under the user's real project are outside that boundary and hit
+`external_directory`, which the wildcard deny blocks. So the consolidator is
+effectively memory-root-scoped without Seatbelt — residual is still
+tool-permission-level (not process-level), not "can edit the originating repo."
 
-One required carve-out: opencode additionally gates file tools outside the
-session's project behind the `external_directory` permission, and the memory
-workspace is global — outside every project — so the wildcard deny would match
-that ask and block consolidation entirely. `injectAgentDefinitions` therefore
-appends `external_directory: { "<memory root>/*": "allow" }` to the `memorize`
-definition at injection time (dynamic because the root is homedir/env-dependent;
-opencode's `*` glob crosses `/`, so one pattern covers nested dirs). The
-extractor gets no grant — it works on an inline transcript.
+`injectAgentDefinitions` still appends
+`external_directory: { "<memory root>/*": "allow" }` as a belt-and-suspenders
+grant (homedir/env-dependent path; covers edge cases if a tool path is
+classified external). The extractor gets no grant — inline transcript only.
 
 ### D3 — LLM calls for extraction/consolidation (`src/llm.ts`)
 
@@ -247,7 +245,7 @@ root" invariant. The extension approach is pure content.
 | Gap | Codex | This plugin | Mitigation |
 |---|---|---|---|
 | Network sandbox | Seatbelt | Tool-permission deny on subagents | `memorize*` deny `bash`/`webfetch`/`websearch`/`task` |
-| Consolidator FS scope | `WorkspaceWrite` limited to memory root | Built-in file tools can also access the originating project | No shell/network; explicit residual gap until opencode exposes rooted agent workspaces |
+| Consolidator FS scope | `WorkspaceWrite` limited to memory root | Sub-session `directory` = memory root → project-bound tools only see that tree; user projects need `external_directory` (denied) | No shell/network; tool-permission sandbox, not process Seatbelt |
 | Token counting | tiktoken | chars/4 estimate | Sufficient for the 2500-token cap |
 | Cache-stable injection | V2 `SystemContext.Source` | V1 hook + byte-identical append | Content-addressed provider caches (D1) |
 | LLM call API | Internal model client | HTTP API → subagent sessions | Reuses opencode auth/usage (D3) |
@@ -255,7 +253,7 @@ root" invariant. The extension approach is pure content.
 | Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
 | Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
 | Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 process anti-stampede (30s, stamps only after a claim); phase 2 uses DB claim/cooldown only | See `src/ratelimit.ts`; wire provider quota when opencode exposes it |
-| Plugin dispose / reload | N/A (in-process core) | `dispose` aborts consolidator + sub-sessions via `src/lifecycle.ts` | Host can still leave a cross-process lease until expiry |
+| Plugin dispose / reload | N/A (in-process core) | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry |
 | Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
 
 ---
