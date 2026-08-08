@@ -18,6 +18,7 @@ import {
   isPluginShuttingDown,
 } from "./lifecycle.js"
 import { resolveCodexInterop, syncCodexImport, exportToCodexMemory, type CodexInteropOptions } from "./codex-interop.js"
+import { syncClaudeImport, type ClaudeImportOptions } from "./claude-import.js"
 
 export interface Phase2Options {
   maxRaw: number
@@ -25,6 +26,7 @@ export interface Phase2Options {
   extensionRetentionDays: number
   consolidationModel?: string
   codexInterop?: CodexInteropOptions
+  claudeImport?: ClaudeImportOptions
   /** Override the 90s heartbeat interval (tests / advanced). */
   heartbeatIntervalMs?: number
 }
@@ -108,7 +110,8 @@ export async function runPhase2(
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)
 
-      // Codex-interop import: inside the claimed job (workspace mutations are
+      // External-agent imports (Codex consolidated memory + Claude project
+      // memories): inside the claimed job (workspace mutations are
       // lease-protected — pre-claim writes could race a running consolidator),
       // after the baseline (copies must show up as diff, not be swallowed by a
       // first-run baseline init; codex memory_import.rs orders prepare-then-
@@ -121,6 +124,16 @@ export async function runPhase2(
           syncCodexImport(interop.codexMemoryRoot)
         } catch (err) {
           console.warn("[opencode-codex-memory] codex import sync failed:", err)
+        }
+      }
+      if (opts.claudeImport?.enabled) {
+        try {
+          const result = syncClaudeImport(opts.claudeImport)
+          for (const f of result.failures) {
+            console.warn(`[opencode-codex-memory] claude import: ${f.message}`)
+          }
+        } catch (err) {
+          console.warn("[opencode-codex-memory] claude import sync failed:", err)
         }
       }
 

@@ -132,8 +132,10 @@ const KNOWN_OPTION_KEYS = new Set([
   "max_rollouts_per_startup",
   "min_rollout_idle_hours",
   "codex_interop",
+  "claude_import",
 ])
 const KNOWN_CODEX_INTEROP_KEYS = new Set(["import", "export", "codex_home"])
+const KNOWN_CLAUDE_IMPORT_KEYS = new Set(["enabled", "claude_home", "projects"])
 
 // codex clamps numeric knobs in From<MemoriesToml> for MemoriesConfig
 // (config/src/types.rs); mirror the exact ranges. Non-finite values fall back
@@ -201,6 +203,38 @@ export function applyPluginOptions(opts: PluginOptions): void {
       }
     } else {
       recordConfigWarning("codex_interop must be an object like { import, export, codex_home }; ignored")
+    }
+  }
+  if ("claude_import" in opts) {
+    const raw = opts.claude_import
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const o = raw as Record<string, unknown>
+      for (const key of Object.keys(o)) {
+        if (!KNOWN_CLAUDE_IMPORT_KEYS.has(key)) {
+          recordConfigWarning(`unknown claude_import option '${key}' ignored`)
+        }
+      }
+      if ("enabled" in o && typeof o.enabled !== "boolean") {
+        recordConfigWarning("claude_import.enabled must be a boolean; using false")
+      }
+      if ("claude_home" in o && (typeof o.claude_home !== "string" || o.claude_home.length === 0)) {
+        recordConfigWarning("claude_import.claude_home must be a non-empty string; using ~/.claude")
+      }
+      let projects: string[] | undefined
+      if ("projects" in o) {
+        if (Array.isArray(o.projects) && o.projects.every((p) => typeof p === "string")) {
+          projects = (o.projects as string[]).filter((p) => p.length > 0)
+        } else {
+          recordConfigWarning("claude_import.projects must be an array of strings; ignoring allowlist")
+        }
+      }
+      pluginOptions.claude_import = {
+        enabled: o.enabled === true,
+        ...(typeof o.claude_home === "string" && o.claude_home.length > 0 ? { claude_home: o.claude_home } : {}),
+        ...(projects && projects.length > 0 ? { projects } : {}),
+      }
+    } else {
+      recordConfigWarning("claude_import must be an object like { enabled, claude_home, projects }; ignored")
     }
   }
 }
@@ -582,6 +616,7 @@ async function triggerPhase2(): Promise<void> {
       extensionRetentionDays: 7,
       consolidationModel: pluginOptions.consolidation_model,
       codexInterop: pluginOptions.codex_interop,
+      claudeImport: pluginOptions.claude_import,
     })
     if (result.status !== "already_running" && result.status !== "skipped_cooldown" && result.status !== "skipped_running") {
       recordDiagnostic(

@@ -9,6 +9,7 @@ import { assertMemoryRootSafe, readRegularFileNoFollow } from "../src/path-guard
 import { isPhase2InFlight } from "../src/phase2.js"
 import { pluginOptions, getConfigWarnings } from "../src/options.js"
 import { codexInteropMtimes, resolveCodexInterop } from "../src/codex-interop.js"
+import { claudeImportStatus, resolveClaudeHome } from "../src/claude-import.js"
 import {
   formatDiagnosticLine,
   getDiscoveryStatus,
@@ -89,6 +90,27 @@ function renderEffectiveConfig(): string[] {
           `    last export mtimes: MEMORY.md=${fmt(mt.exportMemoryMd)} summary=${fmt(mt.exportSummary)}`,
         )
       }
+    }
+  }
+  const cl = o.claude_import
+  if (!cl.enabled) {
+    lines.push("  claude_import: off")
+  } else {
+    const home = resolveClaudeHome(cl)
+    const reachable = fs.existsSync(home)
+    const allow =
+      cl.projects && cl.projects.length > 0 ? ` projects=[${cl.projects.join(", ")}]` : " projects=all"
+    lines.push(
+      `  claude_import: enabled${allow}`,
+      `    claude home: ${home}${reachable ? "" : " (not found — nothing imported until Claude Code creates it)"}`,
+    )
+    const st = claudeImportStatus()
+    if (st.extensionPresent) {
+      const fmt = (ms: number | null) => (ms == null ? "none" : new Date(ms).toISOString())
+      lines.push(
+        `    imported projects (${st.projects.length}): ${st.projects.length > 0 ? st.projects.join(", ") : "(none)"}`,
+        `    instructions mtime: ${fmt(st.instructionsMtimeMs)}`,
+      )
     }
   }
   const warnings = getConfigWarnings()
@@ -282,7 +304,16 @@ export const memory_inspect = tool({
           summary_chars: summaryChars,
           summary_tokens_est: summaryTokens,
           files: listing,
-          effective_options: { ...pluginOptions, codex_interop: { ...pluginOptions.codex_interop } },
+          effective_options: {
+            ...pluginOptions,
+            codex_interop: { ...pluginOptions.codex_interop },
+            claude_import: {
+              ...pluginOptions.claude_import,
+              ...(pluginOptions.claude_import.projects
+                ? { projects: [...pluginOptions.claude_import.projects] }
+                : {}),
+            },
+          },
           config_warnings: [...getConfigWarnings()],
           recent_events: diagnostics,
         },

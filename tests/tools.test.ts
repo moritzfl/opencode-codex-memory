@@ -428,6 +428,7 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("Effective options:")
     expect(r.output).toContain("generate_memories: true")
     expect(r.output).toContain("codex_interop: off")
+    expect(r.output).toContain("claude_import: off")
     expect(r.output).toContain("config_warnings: none")
     expect(r.metadata.effective_options.dedicated_tools).toBe(true)
   })
@@ -452,6 +453,7 @@ describe("memory_inspect", () => {
     } finally {
       resetConfigWarningsForTest()
       pluginOptions.codex_interop = { import: false, export: false }
+      pluginOptions.claude_import = { enabled: false }
     }
   })
 
@@ -463,6 +465,7 @@ describe("memory_inspect", () => {
       generate_memories: "yes",
       max_raw_memories_for_consolidation: "many",
       codex_interop: { import: "yes", mystery: true },
+      claude_import: { enabled: "yes", mystery: true, projects: "all" },
     } as any)
 
     const r = await memory_inspect.execute({}, CTX)
@@ -470,9 +473,13 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("max_raw_memories_for_consolidation must be a finite number")
     expect(r.output).toContain("codex_interop.import must be a boolean")
     expect(r.output).toContain("unknown codex_interop option 'mystery'")
+    expect(r.output).toContain("claude_import.enabled must be a boolean")
+    expect(r.output).toContain("unknown claude_import option 'mystery'")
+    expect(r.output).toContain("claude_import.projects must be an array of strings")
     expect(pluginOptions.generate_memories).toBe(true)
     expect(pluginOptions.max_raw_memories_for_consolidation).toBe(256)
     expect(pluginOptions.codex_interop.import).toBe(false)
+    expect(pluginOptions.claude_import.enabled).toBe(false)
   })
 
   it("reports the resolved codex memories root when interop is enabled", async () => {
@@ -486,6 +493,21 @@ describe("memory_inspect", () => {
       expect(r.output).toContain("not found yet")
     } finally {
       pluginOptions.codex_interop = { import: false, export: false }
+    }
+  })
+
+  it("reports claude_import home when enabled", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { pluginOptions } = require("../src/options.js")
+    const claudeHome = path.join(TEST_ROOT, "claude-home")
+    pluginOptions.claude_import = { enabled: true, claude_home: claudeHome }
+    try {
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain("claude_import: enabled projects=all")
+      expect(r.output).toContain(claudeHome)
+      expect(r.output).toContain("not found")
+    } finally {
+      pluginOptions.claude_import = { enabled: false }
     }
   })
 })

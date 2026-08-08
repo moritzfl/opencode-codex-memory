@@ -1,4 +1,5 @@
 import type { CodexInteropOptions } from "./codex-interop.js"
+import type { ClaudeImportOptions } from "./claude-import.js"
 
 /**
  * Effective plugin options + configuration diagnostics, owned by a leaf
@@ -7,8 +8,9 @@ import type { CodexInteropOptions } from "./codex-interop.js"
  *
  * Option names and defaults mirror codex's MemoriesToml/MemoriesConfig
  * (codex-rs/config/src/types.rs). Keep them 1:1 so the drift script and
- * manual syncing stay trivial; do not rename for taste. codex_interop is the
- * one opencode-specific addition (no codex equivalent).
+ * manual syncing stay trivial; do not rename for taste. codex_interop and
+ * claude_import are opencode-facing knobs for external-agent exchange
+ * (codex's Claude importer is migration-UI gated / default-off).
  */
 export interface PluginOptionsState {
   generate_memories: boolean
@@ -23,6 +25,7 @@ export interface PluginOptionsState {
   max_rollouts_per_startup: number
   min_rollout_idle_hours: number
   codex_interop: CodexInteropOptions
+  claude_import: ClaudeImportOptions
 }
 
 const DEFAULT_PLUGIN_OPTIONS: PluginOptionsState = {
@@ -36,11 +39,13 @@ const DEFAULT_PLUGIN_OPTIONS: PluginOptionsState = {
   max_rollouts_per_startup: 2,
   min_rollout_idle_hours: 6,
   codex_interop: { import: false, export: false },
+  claude_import: { enabled: false },
 }
 
 export const pluginOptions: PluginOptionsState = {
   ...DEFAULT_PLUGIN_OPTIONS,
   codex_interop: { ...DEFAULT_PLUGIN_OPTIONS.codex_interop },
+  claude_import: { ...DEFAULT_PLUGIN_OPTIONS.claude_import },
 }
 
 export function resetPluginOptions(): void {
@@ -48,6 +53,7 @@ export function resetPluginOptions(): void {
   delete pluginOptions.consolidation_model
   Object.assign(pluginOptions, DEFAULT_PLUGIN_OPTIONS, {
     codex_interop: { ...DEFAULT_PLUGIN_OPTIONS.codex_interop },
+    claude_import: { ...DEFAULT_PLUGIN_OPTIONS.claude_import },
   })
 }
 
