@@ -1,4 +1,5 @@
 import { afterEach, describe, it, expect } from "bun:test"
+import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import {
   parseExtraction,
   validateExtraction,
@@ -270,6 +271,37 @@ describe("extractViaSubagent (structured output)", () => {
     expect(abortSignal?.aborted).toBe(true)
     await Promise.resolve()
     expect(deleted).toEqual(["sub-stalled-abort"])
+  })
+
+  it("cancels extract on plugin dispose via pluginShutdownSignal", async () => {
+    resetPluginLifecycle()
+    const aborted: string[] = []
+    const deleted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-extract-dispose" } }),
+          prompt: async () => {
+            beginPluginShutdown()
+            return new Promise(() => {})
+          },
+          abort: async (req: { path: { id: string } }) => {
+            aborted.push(req.path.id)
+            return { data: {} }
+          },
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: {} }
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    await expect(extractViaSubagent("ses_dispose", "transcript")).rejects.toBeInstanceOf(SubagentCancelledError)
+    expect(aborted).toEqual(["sub-extract-dispose"])
+    expect(deleted).toEqual(["sub-extract-dispose"])
+    resetPluginLifecycle()
   })
 })
 

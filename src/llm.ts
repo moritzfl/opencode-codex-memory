@@ -8,6 +8,7 @@ import {
   hostSessionPrompt,
   hostStructuredOutput,
 } from "./host-client.js"
+import { pluginShutdownSignal } from "./lifecycle.js"
 
 export interface ExtractionResult {
   raw_memory: string
@@ -260,6 +261,11 @@ export interface ExtractOptions {
   model?: string
   /** Override the default 1h extract timeout (tests / advanced). */
   timeoutMs?: number
+  /**
+   * Cancel in-flight extract. Defaults to pluginShutdownSignal() so dispose
+   * unblocks phase1 without waiting on the host to reject session.prompt.
+   */
+  signal?: AbortSignal
 }
 
 // JSON Schema for structured stage-1 output. Mirrors the deliverables in
@@ -276,7 +282,14 @@ const EXTRACTION_SCHEMA = {
   required: ["raw_memory", "rollout_summary", "rollout_slug"],
 } as const
 
-/** Returns null when the extractor reported a no-op (nothing worth remembering). */
+/**
+ * Returns null when the extractor reported a no-op (nothing worth remembering).
+ *
+ * Defaults to pluginShutdownSignal so dispose cancels the in-flight prompt
+ * race the same way as consolidateViaSubagent (phase-2 scope). dispose still
+ * session.aborts the sub-session for host-side cleanup; extractor has no FS
+ * write tools (D2) so a lingering server turn cannot dual-write the memory root.
+ */
 export async function extractViaSubagent(sessionId: string, transcript: string, opts: ExtractOptions = {}): Promise<ExtractionResult | null> {
   const agent = "memorize-extract"
   const subId = await createSession(agent, `codex-memory-extract-${sessionId}`)
@@ -291,6 +304,7 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
       timeoutMs: opts.timeoutMs ?? 3600_000,
       system: readTemplate("stage_one_system.md"),
       model,
+      signal: opts.signal ?? pluginShutdownSignal(),
       // opencode enforces json_schema output via a forced StructuredOutput tool
       // call (toolChoice: required) — which is why memorize-extract must allow
       // that one otherwise-denied tool.

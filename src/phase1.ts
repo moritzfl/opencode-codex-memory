@@ -2,7 +2,7 @@ import { MemoryStore, STAGE1_CONCURRENCY } from "./store.js"
 import { loadTranscript, selectEligibleSessions } from "./capture.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
-import { extractViaSubagent } from "./llm.js"
+import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
 import { checkRateLimit, markRateLimitUsed } from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
@@ -112,9 +112,9 @@ export async function runPhase1(
         generated_at: Date.now(),
       })
     } catch (err) {
-      // Aborted mid-extract on dispose: release for immediate reclaim, do not
-      // burn a retry or impose the 1h failure backoff.
-      if (isPluginShuttingDown()) {
+      // Aborted mid-extract on dispose (shutdown signal / flag): release for
+      // immediate reclaim, do not burn a retry or impose the 1h failure backoff.
+      if (err instanceof SubagentCancelledError || isPluginShuttingDown()) {
         store.releaseStage1OnShutdown(sid, claim.ownershipToken)
       } else {
         store.markStage1Failed(sid, claim.ownershipToken, err)

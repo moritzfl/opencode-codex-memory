@@ -319,4 +319,16 @@ describe("plugin lifecycle reset", () => {
     expect(signal2.aborted).toBe(true)
     expect(isPluginShuttingDown()).toBe(false)
   })
+
+  it("aborts pluginShutdownSignal on dispose and issues a fresh one on reset", () => {
+    const { pluginShutdownSignal } = require("../src/lifecycle.js")
+    const before = pluginShutdownSignal()
+    expect(before.aborted).toBe(false)
+    beginPluginShutdown()
+    expect(before.aborted).toBe(true)
+    resetPluginLifecycle()
+    const after = pluginShutdownSignal()
+    expect(after.aborted).toBe(false)
+    expect(after).not.toBe(before)
+  })
 })
