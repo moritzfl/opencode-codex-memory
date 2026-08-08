@@ -259,12 +259,14 @@ async function main() {
 
     // ----- Step 5: Phase 2 -----
     // Phase 1 already schedules phase 2 after successful extractions. Do NOT
-    // clear the job row first — that races a running consolidator and the
-    // in-process 5min phase2 rate gate then blocks the re-trigger.
-    // If nothing has started after a grace window, nudge with another idle.
+    // clear the job row first — that races a running consolidator.
+    // Completion = job status done (not merely artifacts on disk): the
+    // consolidator writes MEMORY.md before markPhase2Succeeded, and
+    // memory_reset refuses while isPhase2InFlight() is true.
     log("phase2", `waiting up to ${args.phase2TimeoutMs}ms for consolidate`)
     const phase2Started = Date.now()
     let nudged = false
+    let loggedArtifacts = false
     try {
       await waitFor(
         "phase2 done",
@@ -280,18 +282,22 @@ async function main() {
           const rollouts = path.join(sandbox.memories, "rollout_summaries")
           const hasRollouts =
             fs.existsSync(rollouts) && fs.readdirSync(rollouts).some((f) => f.endsWith(".md"))
-          // Artifacts are the ground truth: job row can lag or be mid-reset.
-          if (fs.existsSync(mem) && hasRollouts) return true
-          if (fs.existsSync(sum)) {
+          // Progress only — keep waiting for job done so reset is not refused.
+          if (!loggedArtifacts && fs.existsSync(mem) && hasRollouts) {
+            loggedArtifacts = true
+            log("phase2", "artifacts present; waiting for job status=done")
+          } else if (!loggedArtifacts && fs.existsSync(sum)) {
             const summary = fs.readFileSync(sum, "utf8")
-            // Baseline was MARKER_LINE only; consolidation rewrites the summary.
-            if (!summary.includes(MARKER) && summary.trim().length > 40 && hasRollouts) return true
+            if (!summary.includes(MARKER) && summary.trim().length > 40 && hasRollouts) {
+              loggedArtifacts = true
+              log("phase2", "summary rewritten; waiting for job status=done")
+            }
           }
 
           // Nudge once after 90s if no job row appeared (phase1→phase2 chain missed).
           if (!nudged && !job && Date.now() - phase2Started > 90_000) {
             nudged = true
-            log("phase2", "no job yet — clearing row + idle nudge (may wait out 5min rate gate)")
+            log("phase2", "no job yet — clearing row + idle nudge")
             clearPhase2Job(sandbox)
             void triggerIdle(serve!, sandbox).catch(() => {})
           }
@@ -364,14 +370,39 @@ async function main() {
 
     // ----- Step 9: reset -----
     if (!args.skipReset) {
+      // Belt-and-suspenders: wait out any late consolidator so memory_reset
+      // is not refused with "consolidation is currently running".
+      await waitFor(
+        "phase2 idle before reset",
+        () => {
+          const job = phase2Job(sandbox)
+          return !job || job.status === "done" || job.status === "failed" || job.status === "pending"
+        },
+        { timeoutMs: 120_000, intervalMs: 2000 },
+      ).catch(() => {
+        log("reset", `warning: phase2 still ${phase2Job(sandbox)?.status ?? "missing"} before reset attempt`)
+      })
+
       const sid = await createSession(serve, sandbox, "e2e-reset")
-      await promptSession(
+      const resetReply = await promptSession(
         serve,
         sandbox,
         sid,
         "Call the memory_reset tool now with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
         { timeoutMs: 180_000 },
       )
+      // One retry if the model hit the in-flight refusal (or never called the tool).
+      if (/consolidation is currently running|Reset refused|Reset aborted/i.test(resetReply)) {
+        log("reset", "tool refused or aborted — waiting and retrying once")
+        await sleep(15_000)
+        await promptSession(
+          serve,
+          sandbox,
+          sid,
+          "Call the memory_reset tool again with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
+          { timeoutMs: 180_000 },
+        )
+      }
       await sleep(1000)
       const left = fs.existsSync(sandbox.memories)
         ? fs.readdirSync(sandbox.memories).filter((n) => n !== "." && n !== "..")
@@ -379,6 +410,9 @@ async function main() {
       const stage1Left = stage1Rows(sandbox).length
       check(left.length === 0, "reset", `memories/ empty (entries: ${left.join(",") || "none"})`)
       check(stage1Left === 0, "reset", `stage1_outputs empty (count=${stage1Left})`)
+      if (left.length > 0 || stage1Left > 0) {
+        console.error("reset reply:", resetReply.slice(0, 800))
+      }
     } else {
       log("reset", "skipped (--skip-reset)")
     }

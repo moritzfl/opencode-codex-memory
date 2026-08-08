@@ -661,13 +661,48 @@ describe("MemoryStore session meta", () => {
 
   it("clearMemoryData wipes outputs and jobs but preserves session modes", () => {
     const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
     const store = new MemoryStore()
     const claims = store.claimStage1Jobs(sessions("s1"))
-    store.markStage1Succeeded("s1", claims[0].ownershipToken, { session_id: "s1", source_updated_at: 1, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    store.markStage1Succeeded("s1", claims[0].ownershipToken, {
+      session_id: "s1",
+      source_updated_at: 1,
+      raw_memory: "r",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1,
+    })
     store.setMemoryMode("s2", "disabled")
     store.clearMemoryData()
     expect(store.stage1Outputs().length).toBe(0)
     // codex clear_memory_data preserves memory modes: disabled stays disabled.
     expect(store.getMemoryMode("s2")).toBe("disabled")
+    // Stage-1 job rows are gone; only the post-wipe phase-2 cooldown marker remains.
+    const stage1Left = openDb()
+      .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1'")
+      .get() as { c: number }
+    expect(stage1Left.c).toBe(0)
+    // Without this marker, idle hooks first-run-claim phase 2 and ensureLayout
+    // re-seeds the wiped memory root (live e2e reset race).
+    expect(store.claimGlobalPhase2Job().type).toBe("skipped_cooldown")
+    const marker = openDb()
+      .prepare(
+        "SELECT status, last_error, finished_at FROM memory_jobs WHERE kind='memory_consolidate_global'",
+      )
+      .get() as { status: string; last_error: string | null; finished_at: number }
+    expect(marker.status).toBe("done")
+    expect(marker.last_error).toBeNull()
+    expect(marker.finished_at).toBeGreaterThan(0)
+    // Enqueue after a later stage-1 must not bypass the cooldown window.
+    const again = store.claimStage1Jobs(sessions("s3"))
+    store.markStage1Succeeded("s3", again[0].ownershipToken, {
+      session_id: "s3",
+      source_updated_at: Date.now(),
+      raw_memory: "r",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: Date.now(),
+    })
+    expect(store.claimGlobalPhase2Job().type).toBe("skipped_cooldown")
   })
 })

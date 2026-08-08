@@ -141,9 +141,11 @@ export const memory_reset = tool({
     }
     // A consolidation running in THIS process would recreate files right
     // after the wipe (the sub-agent edits live artifacts and resets the git
-    // baseline). Refuse instead of racing it. Cross-process consolidators
-    // are still ownership-guarded DB-side (the wiped job rows make their
-    // final confirmation a no-op) but may leave stray files; same window
+    // baseline). Refuse instead of racing it. clearMemoryData also leaves a
+    // phase-2 cooldown marker so the next idle/chat hook cannot first-run-claim
+    // phase 2 and re-seed the root via ensureLayout. Cross-process consolidators
+    // already in flight remain ownership-guarded (their final mark becomes a
+    // no-op once the row is replaced) but may leave stray files — same window
     // codex has between CLI clear and a running daemon.
     if (isPhase2InFlight()) {
       return { output: "Reset refused: memory consolidation is currently running. Try again in a few minutes." }

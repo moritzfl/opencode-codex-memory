@@ -561,11 +561,25 @@ export class MemoryStore {
    * codex clear_memory_data deletes extracted memories and jobs but explicitly
    * preserves per-session memory modes: a reset must not re-enable sessions
    * the user disabled or that were marked polluted.
+   *
+   * After the wipe, leave a phase-2 cooldown marker (status=done, finished_at
+   * now, last_error NULL). Without it, the next idle/chat hook first-run-claims
+   * phase 2 on an empty DB and ensureLayout re-seeds the just-wiped root —
+   * memory_reset then looks like a no-op to the caller. Codex avoids this
+   * because reset is a client RPC outside the write-pipeline pump; the plugin
+   * surface is model-invoked mid-session, so hooks can race the wipe.
    */
   clearMemoryData(): void {
     this.db.transaction(() => {
       this.db.run("DELETE FROM memory_stage1_outputs")
       this.db.run("DELETE FROM memory_jobs")
+      this.db
+        .prepare(
+          `INSERT INTO memory_jobs
+            (kind, job_key, status, finished_at, last_error, retry_remaining, last_success_watermark)
+           VALUES ('memory_consolidate_global', 'global', 'done', ?, NULL, ?, 0)`,
+        )
+        .run(nowSec(), DEFAULT_RETRY_REMAINING)
     }).immediate()
   }
 

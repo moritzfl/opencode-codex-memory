@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or to spam OpenCode with session lookups when nothing is ready to extract.
 - Memory tools refuse to follow symlinks that could redirect reads or writes
   outside the memory folder.
+- `memory_reset` no longer gets immediately undone by a background consolidation
+  pass that re-created the memory folder right after the wipe.
 
 ### Added
 
