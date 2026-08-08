@@ -199,8 +199,12 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
   try {
     const cancellation = new Promise<never>((_, reject) => {
       if (!opts.signal) return
+      // Abort may fire between the pre-check above and this setup (e.g. dispose
+      // during hostSessionPrompt construction). Already-aborted signals do not
+      // re-emit; observe current state after attaching the listener.
       onAbort = () => reject(new SubagentCancelledError())
       opts.signal.addEventListener("abort", onAbort, { once: true })
+      if (opts.signal.aborted) onAbort()
     })
     const res = await Promise.race([
       promptPromise,

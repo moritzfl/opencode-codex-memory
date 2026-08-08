@@ -4,6 +4,7 @@ import os from "os"
 import path from "path"
 import { closeDb, openDb } from "../src/db.js"
 import { captureWorkspaceDiff } from "../src/git-baseline.js"
+import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
 import { DEFAULT_PHASE2_OPTIONS, runPhase2 } from "../src/phase2.js"
 import { MemoryStore } from "../src/store.js"
@@ -12,12 +13,14 @@ const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase2-${process
 
 beforeEach(() => {
   closeDb()
+  resetPluginLifecycle()
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
 
 afterEach(() => {
   closeDb()
+  resetPluginLifecycle()
   setPluginInput({ client: undefined } as any)
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -150,5 +153,58 @@ describe("phase 2 orchestration", () => {
     expect(job.status).toBe("failed")
     expect(job.lease_until).toBeNull()
     expect(job.last_error).toContain("heartbeat database unavailable")
+  })
+
+  it("releases the claim on dispose mid-consolidator without failure backoff", async () => {
+    const aborted: string[] = []
+    const deleted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-dispose" } }),
+          // Hang after dispose so the AbortSignal path cancels the prompt
+          // (mirrors plugin reload while the consolidator is mid-write).
+          prompt: async () => {
+            beginPluginShutdown()
+            return new Promise(() => {})
+          },
+          abort: async (req: { path: { id: string } }) => {
+            aborted.push(req.path.id)
+            return { data: {} }
+          },
+          delete: async (req: { path: { id: string } }) => {
+            deleted.push(req.path.id)
+            return { data: {} }
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const store = new MemoryStore()
+    const result = await runPhase2(store)
+    expect(result.status).toBe("shutting_down")
+    expect(aborted).toEqual(["sub-phase2-dispose"])
+    expect(deleted).toEqual(["sub-phase2-dispose"])
+
+    const job = openDb()
+      .prepare(
+        "SELECT status, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_consolidate_global'",
+      )
+      .get() as {
+        status: string
+        lease_until: number | null
+        retry_at: number | null
+        last_error: string | null
+      }
+    expect(job.status).toBe("pending")
+    expect(job.lease_until).toBeNull()
+    expect(job.retry_at).toBeNull()
+    expect(job.last_error).toContain("shutting down")
+
+    // Next process can reclaim immediately (unlike markPhase2Failed's 1h backoff).
+    resetPluginLifecycle()
+    const reclaim = store.claimGlobalPhase2Job()
+    expect(reclaim.type).toBe("claimed")
   })
 })
