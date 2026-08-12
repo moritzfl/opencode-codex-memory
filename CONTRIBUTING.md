@@ -28,8 +28,9 @@ runtime. Those are fine **only** when they are deliberate and recorded as a
 ## Before you open a PR
 
 1. Read `ARCHITECTURE.md` and `AGENTS.md`.
-2. Find the upstream source of the file you're touching in `codex-map.yaml`.
-3. Run the drift check against a local codex checkout:
+2. If the change touches memory pipeline behavior or a file listed in
+   `codex-map.yaml`, find its upstream source there and run the drift check
+   against a local codex checkout:
 
    ```bash
    CODEX_REPO=/path/to/codex ./scripts/check-codex-drift.sh
@@ -37,6 +38,11 @@ runtime. Those are fine **only** when they are deliberate and recorded as a
 
    If upstream moved since `codex_ref`, port the change intentionally (or
    record a deliberate divergence), then bump `codex_ref` / `codex_ref_date`.
+
+   Skip this step for pure plugin/host fixes that have no codex counterpart
+   (opencode integration, packaging, host API adapters, tooling, docs-only,
+   and similar). Still keep any divergence from mapped behavior deliberate
+   and noted in `codex-map.yaml` if you touch those paths.
 
 ## Development
 
