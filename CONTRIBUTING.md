@@ -23,7 +23,7 @@ rejected.** That includes, concretely:
 Divergences are sometimes necessary — opencode's plugin API is not codex's
 runtime. Those are fine **only** when they are deliberate and recorded as a
 `note:` on the relevant mapping in `codex-map.yaml`. See `ARCHITECTURE.md`
-(D1–D5) for the existing load-bearing workarounds.
+(D1–D6) for the existing load-bearing workarounds.
 
 ## Before you open a PR
 

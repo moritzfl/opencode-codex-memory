@@ -83,8 +83,10 @@ STORAGE
 
 Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `capture`, `phase1`, `phase2`, `workspace`, `git-baseline`, `redact`, `token`,
-`llm`, `ratelimit`, `paths`, `path-guard`) plus `src/templates/`; `tools/` holds
-the model-facing tools (`memory.ts`, `control.ts`). Per-file upstream provenance
+`llm`, `ratelimit`, `paths`, `path-guard`, `host-client`, `lifecycle`,
+`options`, `diagnostics`, `agent-health`) plus external-agent exchange
+(`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
+model-facing tools (`memory.ts`, `control.ts`). Per-file upstream provenance
 lives in `codex-map.yaml`.
 
 ---

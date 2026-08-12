@@ -6,7 +6,7 @@ Guidance for agents working on `opencode-codex-memory`.
 
 A TypeScript port of codex's memory system, packaged as a standalone opencode
 plugin. Read `ARCHITECTURE.md` before changing memory behavior — it explains the
-design and the load-bearing workarounds (D1–D5).
+design and the load-bearing workarounds (D1–D6).
 
 ## Staying aligned with codex
 
