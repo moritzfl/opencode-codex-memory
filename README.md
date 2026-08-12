@@ -191,6 +191,20 @@ them — it's yours. (The `memories/` folder also holds a few working files and
 an internal `.git/` the plugin uses for change tracking; `memory_reset` wipes
 those too.)
 
+### Backup and restore
+
+Back up the whole OpenCode data directory while OpenCode is stopped. The
+SQLite database and `memories/` workspace are a pair: restoring only one can
+leave job state, Git baseline, and memory files out of sync. Include hidden
+files, especially `memories/.git/`, and SQLite sidecars such as `memory.db-wal`
+or `memory.db-shm` when present.
+
+The directory is `$XDG_DATA_HOME/opencode` when `XDG_DATA_HOME` is set,
+otherwise `~/.local/share/opencode`. Copy that whole directory to a dated
+backup location. To restore, stop OpenCode, replace the current `opencode/`
+data directory with the backup copy, then start OpenCode again. Do not restore
+while OpenCode is running or copy only `memory.db` or only `memories/`.
+
 ## Privacy & safety
 
 - **Local only.** There is no remote storage option to enable, by accident or
@@ -475,6 +489,7 @@ It reports:
 - phase-2 status / last error / cooldown
 - last session-discovery outcome
 - effective options (after clamping) and config warnings
+- effective memory-agent health, including user overrides and required permissions
 - a short eligibility reminder (`min_rollout_idle_hours`, default **6h**)
 
 Common causes:

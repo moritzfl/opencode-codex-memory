@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `memory_list` supports integer-cursor pagination and listing a single file
+  (Codex-aligned).
+- `memory_inspect` reports effective `memorize` / `memorize-extract` agent
+  sandbox health (shipped vs user override, permission issues).
+- README section on backing up and restoring the memory database and
+  `memories/` tree (including WAL/SHM and git history).
+
+### Fixed
+
+- Background extraction/consolidation promises are tracked so test teardown
+  can wait for them to finish.
+- Agent health treats non-denied extra tool and `external_directory`
+  permissions as unhealthy and keeps `source=shipped` across config-hook
+  re-injection.
+- `memory_list` reports an exhausted page when a cursor equals the current
+  result count instead of claiming the directory itself is empty.
+
 ## [0.5.0] - 2026-08-08
 
 ### Added
