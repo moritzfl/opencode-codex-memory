@@ -473,6 +473,19 @@ describe("memory_inspect", () => {
     expect(r.metadata.effective_options.dedicated_tools).toBe(true)
   })
 
+  it("reports effective agent health after config injection", async () => {
+    const { injectAgentDefinitions } = require("../src/index.js")
+    const config: { agent?: Record<string, unknown> } = {}
+    injectAgentDefinitions(config)
+    const { memory_inspect } = require("../tools/control.js")
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("agent_config: observed")
+    expect(r.output).toContain("agent_memorize: source=shipped status=healthy")
+    expect(r.output).toContain("agent_memorize-extract: source=shipped status=healthy")
+    expect(r.metadata.agent_health.agents.memorize.healthy).toBe(true)
+    expect(r.metadata.agent_health.agents["memorize-extract"].healthy).toBe(true)
+  })
+
   it("surfaces unknown/malformed option warnings recorded at apply time", async () => {
     const { memory_inspect } = require("../tools/control.js")
     const { applyPluginOptions } = require("../src/index.js")

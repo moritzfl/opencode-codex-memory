@@ -11,8 +11,8 @@ import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOpt
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "./lifecycle.js"
 import { hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
+import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from "./agent-health.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
-import fs from "fs"
 import path from "path"
 
 let phase1InFlight = false
@@ -105,6 +105,7 @@ export default {
     resetPluginLifecycle()
     setPluginInput(input)
     pluginClient = input.client
+    resetAgentHealth()
     mcpStatusInFlight = null
     // Unconditional, like the caches above: a boot WITHOUT options must not
     // inherit the previous boot's warnings (opencode can host several
@@ -313,8 +314,7 @@ async function classifyExternalContextTool(toolName: string): Promise<boolean | 
 export function injectAgentDefinitions(config: { agent?: Record<string, unknown> }): void {
   let defs: Record<string, unknown>
   try {
-    const raw = fs.readFileSync(path.join(import.meta.dirname, "..", "opencode.json"), "utf8")
-    defs = (JSON.parse(raw) as { agent?: Record<string, unknown> }).agent ?? {}
+    defs = loadBundledAgentDefinitions()
   } catch (err) {
     console.warn("[opencode-codex-memory] could not load bundled agent definitions:", err)
     return
@@ -330,6 +330,7 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
   for (const [name, def] of Object.entries(defs)) {
     if (!config.agent[name]) config.agent[name] = def
   }
+  recordAgentConfig(config, true, defs)
 }
 
 function buildHooks() {
@@ -338,7 +339,14 @@ function buildHooks() {
     try {
       // The write pipeline is the only consumer of the sub-agents; with
       // generation off they would just pollute the user's agent list.
-      if (!pluginOptions.generate_memories) return
+      if (!pluginOptions.generate_memories) {
+        try {
+          recordAgentConfig(input, false, loadBundledAgentDefinitions())
+        } catch (err) {
+          console.warn("[opencode-codex-memory] could not inspect bundled agent definitions:", err)
+        }
+        return
+      }
       injectAgentDefinitions(input)
     } catch (err) {
       console.error("[opencode-codex-memory] config hook error:", err)

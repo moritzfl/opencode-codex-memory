@@ -16,6 +16,7 @@ import {
   getRecentDiagnostics,
 } from "../src/diagnostics.js"
 import { isPluginShuttingDown } from "../src/lifecycle.js"
+import { getAgentHealth } from "../src/agent-health.js"
 
 function isSymlinkedRoot(): boolean {
   try {
@@ -146,6 +147,22 @@ function listMemoriesDir(): string[] {
   }
   walk(root, "")
   return out
+}
+
+function renderAgentHealth(): string[] {
+  const health = getAgentHealth()
+  const lines = [
+    `agent_config: ${health.observed ? "observed" : "not observed (config hook has not run)"}`,
+    `agent_generation_enabled: ${health.generationEnabled ?? "unknown"}`,
+  ]
+  for (const name of ["memorize", "memorize-extract"] as const) {
+    const entry = health.agents[name]
+    lines.push(
+      `  agent_${name}: source=${entry.source} status=${entry.healthy ? "healthy" : "degraded"}`,
+      ...entry.issues.map((issue) => `    issue: ${issue}`),
+    )
+  }
+  return lines
 }
 
 export const memory_reset = tool({
@@ -281,6 +298,8 @@ export const memory_inspect = tool({
         "",
         ...renderEffectiveConfig(),
         "",
+        ...renderAgentHealth(),
+        "",
         ...diagnosticLines,
         "",
         "Files:",
@@ -315,6 +334,7 @@ export const memory_inspect = tool({
             },
           },
           config_warnings: [...getConfigWarnings()],
+          agent_health: getAgentHealth(),
           recent_events: diagnostics,
         },
       }

@@ -77,6 +77,99 @@ describe("agent auto-registration", () => {
     expect(config.agent!["memorize-extract"]).toBeDefined()
   })
 
+  it("reports healthy shipped permissions and user override problems", () => {
+    const { getAgentHealth, recordAgentConfig, resetAgentHealth, loadBundledAgentDefinitions } = require("../src/agent-health.js")
+    const shipped = loadBundledAgentDefinitions()
+    try {
+      const healthy: { agent?: Record<string, any> } = {}
+      require("../src/index.js").injectAgentDefinitions(healthy)
+      expect(getAgentHealth().observed).toBe(true)
+      expect(getAgentHealth().agents.memorize).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+      expect(getAgentHealth().agents["memorize-extract"]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+
+      const override = {
+        agent: {
+          memorize: {
+            permission: {
+              "*": "allow",
+              bash: "allow",
+            },
+          },
+          "memorize-extract": {
+            permission: {
+              "*": "deny",
+              read: "allow",
+              StructuredOutput: "deny",
+              external_directory: { "/tmp/*": "allow" },
+            },
+          },
+        },
+      }
+      recordAgentConfig(override, true, shipped)
+      const health = getAgentHealth()
+      expect(health.agents.memorize.source).toBe("user_override")
+      expect(health.agents.memorize.healthy).toBe(false)
+      expect(health.agents.memorize.issues).toEqual(expect.arrayContaining([
+        "permission wildcard '*' must be 'deny'",
+        "required permission 'read: allow' is missing",
+        "unexpected permission 'bash' must be denied",
+        expect.stringContaining("consolidator must allow external_directory"),
+      ]))
+      expect(health.agents["memorize-extract"].issues).toEqual(expect.arrayContaining([
+        "required permission 'StructuredOutput: allow' is missing",
+        "unexpected permission 'external_directory' must be denied",
+      ]))
+
+      const { memoryRoot } = require("../src/paths.js")
+      const memGlob = path.join(memoryRoot(), "*")
+      recordAgentConfig(
+        {
+          agent: {
+            memorize: {
+              mode: "subagent",
+              permission: {
+                "*": "deny",
+                read: "allow",
+                edit: "allow",
+                write: "allow",
+                glob: "allow",
+                grep: "allow",
+                bash: "ask",
+                external_directory: { [memGlob]: "allow", "/tmp/*": "ask" },
+              },
+            },
+            "memorize-extract": SHIPPED_AGENTS["memorize-extract"],
+          },
+        },
+        true,
+        shipped,
+      )
+      expect(getAgentHealth().agents.memorize.healthy).toBe(false)
+      expect(getAgentHealth().agents.memorize.issues).toEqual(
+        expect.arrayContaining([
+          "unexpected permission 'bash' must be denied",
+          "consolidator must deny extra external_directory '/tmp/*'",
+        ]),
+      )
+    } finally {
+      resetAgentHealth()
+    }
+  })
+
+  it("keeps source=shipped after config-hook re-injection", () => {
+    const { injectAgentDefinitions } = require("../src/index.js")
+    const { getAgentHealth, resetAgentHealth } = require("../src/agent-health.js")
+    try {
+      const config: { agent?: Record<string, any> } = {}
+      injectAgentDefinitions(config)
+      injectAgentDefinitions(config)
+      expect(getAgentHealth().agents.memorize).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+      expect(getAgentHealth().agents["memorize-extract"]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+    } finally {
+      resetAgentHealth()
+    }
+  })
+
   it("bundled definitions stay in sync with the shipped opencode.json", () => {
     expect(Object.keys(SHIPPED_AGENTS).sort()).toEqual(["memorize", "memorize-extract"])
   })
