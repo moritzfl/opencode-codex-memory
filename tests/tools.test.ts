@@ -232,15 +232,55 @@ describe("memory_list", () => {
     expect(r.output).not.toContain(".hidden")
     expect(r.output).not.toContain("link.md")
     const names = (r.metadata.entries as Array<{ path: string }>).map((e) => e.path)
-    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names)
+    expect(names).toEqual(["MEMORY.md", "extensions", "rollout_summaries"])
   })
 
-  it("errors on files and reports missing paths", async () => {
+  it("lists files and reports missing paths", async () => {
     const { memory_list } = require("../tools/memory.js")
     const r = await memory_list.execute({ path: "MEMORY.md", max_results: 2000 }, CTX)
-    expect(r.output).toContain("not a directory")
+    expect(r.output).toBe("f MEMORY.md")
+    expect(r.metadata.entries).toEqual([{ path: "MEMORY.md", entry_type: "file" }])
     const r2 = await memory_list.execute({ path: "nope", max_results: 2000 }, CTX)
     expect(r2.output).toContain("Not found")
+  })
+
+  it("paginates directory entries with a Codex-compatible cursor", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    const paginationDir = path.join(root, "pagination")
+    fs.mkdirSync(paginationDir)
+    fs.writeFileSync(path.join(paginationDir, "aaa.md"), "a")
+    fs.writeFileSync(path.join(paginationDir, "bbb.md"), "b")
+    fs.writeFileSync(path.join(paginationDir, "ccc.md"), "c")
+    const { memory_list } = require("../tools/memory.js")
+
+    const first = await memory_list.execute({ path: "pagination", max_results: 2 }, CTX)
+    expect(first.metadata.entries).toEqual([
+      { path: "pagination/aaa.md", entry_type: "file" },
+      { path: "pagination/bbb.md", entry_type: "file" },
+    ])
+    expect(first.metadata.next_cursor).toBe("2")
+    expect(first.metadata.truncated).toBe(true)
+
+    const second = await memory_list.execute({ path: "pagination", cursor: first.metadata.next_cursor, max_results: 2 }, CTX)
+    expect(second.metadata.entries).toEqual([
+      { path: "pagination/ccc.md", entry_type: "file" },
+    ])
+    expect(second.metadata.next_cursor).toBe(null)
+    expect(second.metadata.truncated).toBe(false)
+
+    expect((await memory_list.execute({ path: "pagination", cursor: "not-an-int", max_results: 2 }, CTX)).output).toContain("invalid cursor")
+    expect((await memory_list.execute({ path: "pagination", cursor: "99", max_results: 2 }, CTX)).output).toContain("exceeds result count")
+    const exhausted = await memory_list.execute({ path: "pagination", cursor: "3", max_results: 2 }, CTX)
+    expect(exhausted.output).toContain("No entries at cursor 3")
+    expect(exhausted.metadata).toMatchObject({ entries: [], next_cursor: null, truncated: false })
+
+    // A cursor from a prior page remains valid if concurrent deletion shrinks
+    // the listing to exactly that offset.
+    fs.rmSync(path.join(paginationDir, "ccc.md"))
+    const shrunk = await memory_list.execute({ path: "pagination", cursor: first.metadata.next_cursor, max_results: 2 }, CTX)
+    expect(shrunk.output).toContain("No entries at cursor 2")
+    expect(shrunk.output).not.toContain("exceeds result count")
+    expect(shrunk.metadata.entries).toEqual([])
   })
 })
 

@@ -95,16 +95,25 @@ function visibleEntries(dir: string): { name: string; isDir: boolean }[] {
 
 const LIST_MAX_RESULTS = 2000
 
+// Codex sorts paths lexically (`Path` ordering), not with locale collation.
+// Keep ordering stable across hosts and match ASCII path ordering.
+function comparePathNames(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 export const memory_list = tool({
   description:
     "List the immediate entries of a directory in the persistent memory workspace, sorted by name, " +
-    "with entry types. Hidden files and symlinks are skipped. Use path '' (empty) for the memory root.",
+    "with entry types. Hidden files and symlinks are skipped. Supports cursor pagination and listing " +
+    "a single file. Use path '' (empty) for the memory root.",
   args: {
     path: tool.schema.string().default("").describe("Relative directory path inside the memory workspace ('' for the root)."),
+    cursor: tool.schema.string().optional().describe("Pagination cursor from a previous response's next_cursor."),
     max_results: tool.schema.number().int().min(1).max(LIST_MAX_RESULTS).default(LIST_MAX_RESULTS).describe("Maximum entries to return."),
   },
   async execute(args) {
     try {
+      const root = assertMemoryRootSafe()
       const fullPath = safeResolveMemoryPath(args.path || ".")
       if (!fs.existsSync(fullPath)) return { output: `Not found: ${args.path}` }
       // lstat: do not follow a TOCTOU symlink swap after safeResolve checked.
@@ -114,18 +123,52 @@ export const memory_list = tool({
       if (st.isSymbolicLink()) {
         return { output: `memory_list error: symlinks are not allowed in the memory workspace: ${args.path}` }
       }
-      if (!st.isDirectory()) return { output: `memory_list error: not a directory: ${args.path}` }
-      const entries = visibleEntries(fullPath).sort((a, b) => a.name.localeCompare(b.name))
-      const truncated = entries.length > args.max_results
-      const shown = entries.slice(0, args.max_results)
-      const prefix = args.path ? `${args.path.replace(/\/+$/, "")}/` : ""
-      const listing = shown.map((e) => ({ path: `${prefix}${e.name}`, entry_type: e.isDir ? "directory" : "file" }))
-      if (listing.length === 0) return { output: `Directory ${args.path || "."} is empty.` }
+      const entries = st.isFile()
+        ? [{ path: path.relative(root, fullPath).split(path.sep).join("/"), entry_type: "file" as const }]
+        : st.isDirectory()
+          ? visibleEntries(fullPath)
+              .sort((a, b) => comparePathNames(a.name, b.name))
+              .map((e) => ({
+                path: path.relative(root, path.join(fullPath, e.name)).split(path.sep).join("/"),
+                entry_type: e.isDir ? ("directory" as const) : ("file" as const),
+              }))
+          : []
+
+      let startIndex = 0
+      if (args.cursor !== undefined) {
+        if (!/^\d+$/.test(args.cursor)) {
+          return { output: `memory_list error: invalid cursor "${args.cursor}" (must be a non-negative integer).` }
+        }
+        startIndex = Number(args.cursor)
+        if (!Number.isSafeInteger(startIndex)) {
+          return { output: `memory_list error: invalid cursor "${args.cursor}" (must be a non-negative integer).` }
+        }
+      }
+      if (startIndex > entries.length) {
+        return { output: `memory_list error: cursor ${args.cursor} exceeds result count ${entries.length}.` }
+      }
+
+      const maxResults = args.max_results ?? LIST_MAX_RESULTS
+      const endIndex = Math.min(startIndex + maxResults, entries.length)
+      const nextCursor = endIndex < entries.length ? String(endIndex) : null
+      const truncated = nextCursor !== null
+      const listing = entries.slice(startIndex, endIndex)
+      if (listing.length === 0) {
+        const output = st.isDirectory()
+          ? entries.length === 0
+            ? `Directory ${args.path || "."} is empty.`
+            : `No entries at cursor ${startIndex} for directory ${args.path || "."}.`
+          : ""
+        return {
+          output,
+          metadata: { path: args.path, entries: [], next_cursor: nextCursor, truncated },
+        }
+      }
       return {
         output:
-          listing.map((e) => `${e.entry_type === "directory" ? "d" : "f"} ${e.path}`).join("\n") +
-          (truncated ? `\n[truncated: ${entries.length - args.max_results} more entries]` : ""),
-        metadata: { path: args.path, entries: listing, truncated },
+        listing.map((e) => `${e.entry_type === "directory" ? "d" : "f"} ${e.path}`).join("\n") +
+          (truncated ? `\n[truncated: ${entries.length - endIndex} more entries; pass cursor=${nextCursor}]` : ""),
+        metadata: { path: args.path, entries: listing, next_cursor: nextCursor, truncated },
       }
     } catch (err) {
       return { output: `memory_list error: ${(err as Error).message}` }

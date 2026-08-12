@@ -117,8 +117,8 @@ mappings:
       supplies it) with codex's hyphen layout and append-only collision
       handling; port caps note<=4000/title<=120 chars and prepends a
       title/created/session header (codex: verbatim unlimited note body).
-      list has no cursor (max_results cap only) and errors on file paths
-      (codex: returns the single entry). Listing/search walkers use Dirent
+      list supports integer cursor pagination and returns a single entry for
+       file paths, matching codex. Listing/search walkers use Dirent
       file types (codex read_sorted_dir_entries entry.file_type()) so
       symlinks are skipped without following.
       Note writes reject symlinked path components, matching codex local/
