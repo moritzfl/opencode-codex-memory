@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { handleSessionDeleted, shouldHandleIdle } from "../src/index.js"
+import { handleSessionDeleted, shouldHandleIdle, waitForBackgroundTasks } from "../src/index.js"
 import {
   beginPhase2AbortScope,
   beginPluginShutdown,
@@ -72,6 +72,7 @@ describe("hook wiring", () => {
       expect(new MemoryStore().getMemoryMode("ses_failed_fetch")).toBe("polluted")
     } finally {
       await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
+      await waitForBackgroundTasks()
       require("../src/db.js").closeDb()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
       else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
@@ -116,6 +117,7 @@ describe("hook wiring", () => {
       expect(new MemoryStore().getMemoryMode("ses_error")).toBeNull()
     } finally {
       await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
+      await waitForBackgroundTasks()
       require("../src/db.js").closeDb()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
       else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
@@ -151,6 +153,7 @@ describe("hook wiring", () => {
       expect(statusSignal?.aborted).toBe(true)
     } finally {
       await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
+      await waitForBackgroundTasks()
       require("../src/db.js").closeDb()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
       else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
@@ -176,6 +179,7 @@ describe("hook wiring", () => {
       await hooks["experimental.chat.system.transform"]({ sessionID: "ses_real", model: {} }, sessionOutput)
       expect(sessionOutput.system.join("\n")).toContain("remember this")
     } finally {
+      await waitForBackgroundTasks()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
       else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
       fs.rmSync(testRoot, { recursive: true, force: true })
@@ -191,10 +195,11 @@ describe("idle event handling", () => {
     // opened against its own (since-deleted) root.
     require("../src/db.js").closeDb()
   })
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
-    fs.rmSync(TEST_ROOT, { recursive: true, force: true })
+    await waitForBackgroundTasks()
     require("../src/db.js").closeDb()
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true })
   })
 
   it("dedupes the session.status/session.idle twin events per session", () => {

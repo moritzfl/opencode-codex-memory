@@ -17,6 +17,24 @@ import path from "path"
 
 let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
+const backgroundTasks = new Set<Promise<void>>()
+
+function trackBackgroundTask(task: Promise<void>): void {
+  // Hooks must remain non-blocking, but test teardown needs a way to wait until
+  // work started by a hook has released its DB handle.
+  const tracked = task.catch((err) => {
+    console.error("[opencode-codex-memory] background task error:", err)
+  })
+  backgroundTasks.add(tracked)
+  void tracked.then(() => backgroundTasks.delete(tracked))
+}
+
+/** Test seam: wait for all hook-launched work, including follow-up phase 2. */
+export async function waitForBackgroundTasks(): Promise<void> {
+  while (backgroundTasks.size > 0) {
+    await Promise.all([...backgroundTasks])
+  }
+}
 // Single-flight guard for mcp.status(); see mcpToolPrefixes below.
 let mcpStatusInFlight: Promise<string[] | null> | null = null
 const MCP_STATUS_TIMEOUT_MS = 1_000
@@ -93,7 +111,7 @@ export function handleSessionDeleted(
   // attempt could only fail; the row deletion above still happens, and the
   // enqueued job runs when generation is re-enabled (codex: delete only
   // enqueues; the pipeline itself is gated elsewhere).
-  schedulePhase2: () => void = () => { if (pluginOptions.generate_memories) void triggerPhase2() },
+  schedulePhase2: () => void = () => { if (pluginOptions.generate_memories) trackBackgroundTask(triggerPhase2()) },
 ): void {
   if (store.deleteSessionMemory(sessionId)) schedulePhase2()
 }
@@ -448,7 +466,7 @@ function buildHooks() {
       } catch (e) {
         console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
       }
-      void triggerPhase1(sid)
+      trackBackgroundTask(triggerPhase1(sid))
     } catch (err) {
       console.error("[opencode-codex-memory] chat.message error:", err)
     }
@@ -566,7 +584,7 @@ function buildHooks() {
     } catch (e) {
       console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
     }
-    void triggerPhase1(sid)
+    trackBackgroundTask(triggerPhase1(sid))
   }
 
   // Control tools (reset/inspect/mode) are always available. The memory
@@ -611,7 +629,7 @@ async function triggerPhase1(currentSessionId: string): Promise<void> {
   } finally {
     phase1InFlight = false
   }
-  void triggerPhase2()
+  trackBackgroundTask(triggerPhase2())
 }
 
 async function triggerPhase2(): Promise<void> {

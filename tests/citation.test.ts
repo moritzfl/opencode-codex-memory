@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { parseCitations, extractCitedSessionIds, stripCitations } from "../src/citation.js"
-import { takeNewCitations } from "../src/index.js"
+import { takeNewCitations, waitForBackgroundTasks } from "../src/index.js"
 
 describe("takeNewCitations", () => {
   it("records each session id once per part across repeated streaming updates", () => {
@@ -115,10 +115,11 @@ describe("experimental.text.complete hook", () => {
     // Module-singleton DB handle: drop any handle from another test file.
     require("../src/db.js").closeDb()
   })
-  afterEach(() => {
+  afterEach(async () => {
+    await waitForBackgroundTasks()
+    require("../src/db.js").closeDb()
     delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-    require("../src/db.js").closeDb()
   })
 
   it("strips citations and records usage before the part is persisted", async () => {
