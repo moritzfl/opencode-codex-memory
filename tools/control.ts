@@ -216,7 +216,8 @@ function fmtWatermarkMs(ms: number | null | undefined): string {
 export const memory_inspect = tool({
   description:
     "Inspect the current memory state. Returns: stage1_outputs count, stage-1 job status " +
-    "breakdown and recent errors, Phase 2 job status (including last error / retry time), " +
+    "breakdown, failure classes (backoff / provider_capacity / other_exhausted), recent errors, " +
+    "Phase 2 job status (including last error / retry time), " +
     "last discovery outcome, pipeline diagnostics, memory_summary token estimate " +
     "(on-disk; injection caps at ~2500), a listing of the memories directory, the " +
     "effective plugin options, and any configuration warnings. Use it to verify " +
@@ -260,12 +261,20 @@ export const memory_inspect = tool({
       const stage1StatusParts = Object.entries(stage1Jobs.by_status)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([s, c]) => `${s}=${c}`)
+      const fc = stage1Jobs.by_failure_class
+      const failureParts = [
+        fc.backoff > 0 ? `backoff=${fc.backoff}` : "",
+        fc.provider_capacity > 0 ? `provider_capacity=${fc.provider_capacity}` : "",
+        fc.other_exhausted > 0 ? `other_exhausted=${fc.other_exhausted}` : "",
+      ].filter(Boolean)
       const stage1Lines = [
         `stage1_jobs: ${stage1StatusParts.length > 0 ? stage1StatusParts.join(" ") : "none"}`,
-        ...stage1Jobs.recent_errors.map(
-          (e) =>
-            `  stage1_error ${e.session_id} (${e.status}): ${e.last_error.slice(0, 200)}${e.retry_at ? ` retry_at=${fmtUnixSec(e.retry_at)}` : ""}`,
-        ),
+        `stage1_failures: ${failureParts.length > 0 ? failureParts.join(" ") : "none"}`,
+        ...stage1Jobs.recent_errors.map((e) => {
+          const klass = e.failure_class ? `, ${e.failure_class}` : ""
+          const retry = e.retry_at ? ` retry_at=${fmtUnixSec(e.retry_at)}` : ""
+          return `  stage1_error ${e.session_id} (${e.status}${klass}): ${e.last_error.slice(0, 200)}${retry}`
+        }),
       ]
       const discovery = getDiscoveryStatus()
       const discoveryLine = discovery
@@ -310,6 +319,7 @@ export const memory_inspect = tool({
         metadata: {
           stage1_count: outputs.length,
           stage1_jobs: stage1Jobs.by_status,
+          stage1_failures: stage1Jobs.by_failure_class,
           stage1_recent_errors: stage1Jobs.recent_errors,
           phase2_status: phase2?.status ?? null,
           phase2_last_error: phase2?.last_error ?? null,

@@ -485,7 +485,7 @@ mirrors that decision rather than layering scoping back on top.
 When memory does not seem to build, ask the agent to run **`memory_inspect`**.
 It reports:
 
-- stage-1 job counts and recent extraction errors
+- stage-1 job counts, failure classes (`backoff` / `provider_capacity` / `other_exhausted`), and recent extraction errors
 - phase-2 status / last error / cooldown
 - last session-discovery outcome
 - effective options (after clamping) and config warnings
@@ -500,6 +500,7 @@ Common causes:
 | Discovery failed | Host API/`experimental/session` unavailable; inspect shows the error. Retry after restarting OpenCode. |
 | Pin stuck on old version | OpenCode freezes bare package specs; pin an explicit version and bump it (see Install). |
 | Consolidation never runs | Check `phase2_status` and `phase2_last_error` in inspect; failed artifacts keep the workspace diff for the next run. |
+| `stage1_error` mentions usage/rate limit | Temporary provider quota. Inspect shows `provider_capacity` or `backoff`; those jobs retry after about an hour once quota returns. Permanent holes are `other_exhausted`. |
 
 Install target: this package runs **inside OpenCode** (Bun). You do not need to
 install it as a standalone Node app; OpenCode resolves the plugin into its own

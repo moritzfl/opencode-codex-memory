@@ -495,6 +495,31 @@ describe("memory_inspect", () => {
     expect(r.metadata.phase2_last_success_finished_at).toBeNull()
   })
 
+  it("labels stage-1 quota backoff separately from exhausted permanent failures", async () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const { memory_inspect } = require("../tools/control.js")
+    const store = new MemoryStore()
+    const quota = store.claimStage1Jobs([{ id: "ses_quota", updated_at: 1000 }])
+    store.markStage1Failed(quota[0].sessionId, quota[0].ownershipToken, "The usage limit has been reached")
+    let perm = store.claimStage1Jobs([{ id: "ses_perm", updated_at: 1000 }])
+    store.markStage1Failed(perm[0].sessionId, perm[0].ownershipToken, "boom 0")
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at=1 WHERE job_key='ses_perm'").run()
+      perm = store.claimStage1Jobs([{ id: "ses_perm", updated_at: 1000 }])
+      store.markStage1Failed(perm[0].sessionId, perm[0].ownershipToken, `boom ${i}`)
+    }
+
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("stage1_failures:")
+    expect(r.output).toContain("backoff=")
+    expect(r.output).toContain("other_exhausted=")
+    expect(r.output).toContain("ses_quota (pending, backoff)")
+    expect(r.output).toContain("ses_perm (failed, other_exhausted)")
+    expect(r.metadata.stage1_failures.backoff).toBeGreaterThanOrEqual(1)
+    expect(r.metadata.stage1_failures.other_exhausted).toBe(1)
+  })
+
   it("does not read a memory summary through a symlink", async () => {
     const root = path.join(TEST_ROOT, "memories")
     const outside = path.join(TEST_ROOT, "outside-summary.md")

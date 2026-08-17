@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Extraction jobs that fail because the model is out of quota stay retryable
+  instead of being permanently dropped after three attempts. Already-failed
+  quota jobs are reopened automatically; `memory_inspect` labels backoff vs
+  quota vs other exhausted failures.
 - Reloading OpenCode finds leftover memory helper sessions again (same host-wide
   listing used for session discovery).
 - Stuck OpenCode API calls abort instead of leaving background learning hanging.

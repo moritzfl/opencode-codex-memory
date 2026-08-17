@@ -190,6 +190,10 @@ mappings:
       probes session.get per selected row (404 → deleteSessionMemory, same
       as session.deleted; timeout/error keeps the row). Codex re-validates
       against the live threads table at selection time.
+      Host adaptation (no live quota API): quota/rate-limit stage-1 failures
+      keep status=pending and do not decrement retry_remaining; exhausted
+      quota-failed rows are requeued without a newer session watermark. Codex
+      instead skips claiming via guard.rs before any job is started.
 
   # --- Write path: phase 1 (extraction) ---
   - ours: src/phase1.ts
@@ -207,7 +211,9 @@ mappings:
       (empty raw_memory OR empty rollout_summary) match codex → no-output.
       Citation blocks are stripped from the transcript before extraction
       (codex rollouts retain them; keeps the extractor from mining our own
-      citation markup).
+      citation markup). After an observed quota/rate-limit error, remaining
+      claimed jobs in the same pass are finalized without calling the model
+      (Codex guard.rs skips the whole startup instead).
   - ours: src/capture.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
@@ -251,6 +257,8 @@ mappings:
       assistant message carries an error; llm.ts treats that as failed_agent
       so phase2 preserves the workspace diff, matching codex's requirement
       that AgentStatus be Completed before validation/baseline reset.
+      Observed-quota stamp (src/ratelimit.ts) skips claiming phase 2 the same
+      way Codex start.rs skips both phases when guard.rs fails.
       DIVERGENCE (codex_ref 1bbdb32, 2026-07-15 audit): codex now threads a
       parent_permission_profile into phase2::run/agent::get_config so the
       consolidation agent inherits the parent session's OS sandbox choice
@@ -502,9 +510,11 @@ mappings:
       Opencode does not expose provider rate limits, so the port keeps a phase-1
       process-local anti-stampede (30s) that stamps only AFTER a stage-1 claim
       succeeds; empty/no-claim passes do not burn the interval (matches codex
-      skipped_no_candidates free retry). Phase 2 has no process timer — DB
-      claim/cooldown only, like codex. Wire min_rate_limit_remaining_percent
-      when the host exposes provider quota.
+      skipped_no_candidates free retry). After an observed quota/rate-limit
+      error, a 1h process stamp skips further phase-1 and phase-2 claims
+      (Codex start.rs skips both phases when the live guard fails). Phase 2
+      still has no 30s timer — DB claim/cooldown only, like codex. Wire
+      min_rate_limit_remaining_percent when the host exposes provider quota.
   # Platform-only modules (no codex theirs path — do not map with theirs: null,
   # the drift script existence-checks every theirs value):
   #   src/lifecycle.ts — dispose/reload abort for consolidator + sub-sessions
