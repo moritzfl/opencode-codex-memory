@@ -291,4 +291,66 @@ describe("phase 2 orchestration", () => {
     expect(selected.map((o) => o.session_id)).toEqual(["ses_live"])
     expect(store.stage1Outputs().map((o) => o.session_id)).toEqual(["ses_live"])
   })
+
+  it("preserves ranking while backfilling across liveness chunks", async () => {
+    const gone = new Set(["ses_rank_11", "ses_rank_9", "ses_rank_4"])
+    setPluginInput({
+      client: {
+        session: {
+          get: async (req: { path: { id: string } }) => gone.has(req.path.id)
+            ? { response: { status: 404 } }
+            : { data: { id: req.path.id }, response: { status: 200 } },
+        },
+      },
+    } as any)
+    const store = new MemoryStore()
+    const ts = Date.now()
+    for (let i = 0; i < 12; i++) {
+      const id = `ses_rank_${i}`
+      store.upsertStage1Output({
+        session_id: id,
+        source_updated_at: ts + i,
+        raw_memory: id,
+        rollout_summary: id,
+        rollout_slug: id,
+        cwd: "/p",
+        generated_at: ts + i,
+      })
+    }
+
+    const selected = await selectLivePhase2Inputs(store, 9, 30)
+    expect(selected.map((o) => o.session_id)).toEqual([
+      "ses_rank_10",
+      "ses_rank_8",
+      "ses_rank_7",
+      "ses_rank_6",
+      "ses_rank_5",
+      "ses_rank_3",
+      "ses_rank_2",
+      "ses_rank_1",
+      "ses_rank_0",
+    ])
+  })
+
+  it("terminates when every ranked phase2 input is gone", async () => {
+    setPluginInput({
+      client: { session: { get: async () => ({ response: { status: 404 } }) } },
+    } as any)
+    const store = new MemoryStore()
+    const ts = Date.now()
+    for (let i = 0; i < 10; i++) {
+      const id = `ses_all_gone_${i}`
+      store.upsertStage1Output({
+        session_id: id,
+        source_updated_at: ts + i,
+        raw_memory: id,
+        rollout_summary: id,
+        rollout_slug: id,
+        cwd: "/p",
+        generated_at: ts + i,
+      })
+    }
+    expect(await selectLivePhase2Inputs(store, 4, 30)).toEqual([])
+    expect(store.stage1Outputs()).toEqual([])
+  })
 })

@@ -9,6 +9,9 @@ import {
   fillTemplate,
   cleanupOldSubSessions,
   isMemorySubSession,
+  resolveExtractionModel,
+  setConfigGetTimeoutForTest,
+  setStaleDeleteBatchTimeoutForTest,
   setSubSessionCreateTimeoutForTest,
   SubagentTimeoutError,
   SubagentCancelledError,
@@ -89,6 +92,74 @@ describe("parseExtraction", () => {
       rollout_slug: "slug",
     })
     expect(() => parseExtraction(raw)).toThrow()
+  })
+})
+
+describe("sub-agent model resolution", () => {
+  afterEach(() => {
+    setConfigGetTimeoutForTest()
+    setPluginInput({ client: undefined } as any)
+  })
+
+  it("does not cache a transient config error", async () => {
+    let calls = 0
+    setPluginInput({
+      client: {
+        config: {
+          get: async () => ++calls === 1
+            ? { error: { message: "temporary" } }
+            : { data: { small_model: "healthy/model" } },
+        },
+      },
+    } as any)
+    expect(await resolveExtractionModel()).toBeUndefined()
+    expect(await resolveExtractionModel()).toBe("healthy/model")
+    expect(calls).toBe(2)
+  })
+
+  it("bounds and aborts a stalled config lookup", async () => {
+    let signal: AbortSignal | undefined
+    setPluginInput({
+      client: {
+        config: {
+          get: async (opts: { signal?: AbortSignal }) => {
+            signal = opts.signal
+            return new Promise(() => {})
+          },
+        },
+      },
+    } as any)
+    setConfigGetTimeoutForTest(20)
+    expect(await resolveExtractionModel()).toBeUndefined()
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it("coalesces lookups and ignores a stale client response", async () => {
+    let resolveOld!: (value: unknown) => void
+    let oldCalls = 0
+    setPluginInput({
+      client: {
+        config: {
+          get: async () => {
+            oldCalls++
+            return new Promise((resolve) => { resolveOld = resolve })
+          },
+        },
+      },
+    } as any)
+    const oldA = resolveExtractionModel()
+    const oldB = resolveExtractionModel()
+    await Promise.resolve()
+    expect(oldCalls).toBe(1)
+
+    setPluginInput({
+      client: { config: { get: async () => ({ data: { small_model: "new/model" } }) } },
+    } as any)
+    expect(await resolveExtractionModel()).toBe("new/model")
+    resolveOld({ data: { small_model: "old/model" } })
+    expect(await oldA).toBeUndefined()
+    expect(await oldB).toBeUndefined()
+    expect(await resolveExtractionModel()).toBe("new/model")
   })
 })
 
@@ -528,7 +599,10 @@ function cleanupListClient(
 }
 
 describe("cleanupOldSubSessions", () => {
-  afterEach(() => setPluginInput({ client: undefined } as any))
+  afterEach(() => {
+    setStaleDeleteBatchTimeoutForTest()
+    setPluginInput({ client: undefined } as any)
+  })
 
   it("reseeds isMemorySubSession for live codex-memory-* sessions", async () => {
     // Simulate a plugin reload: Set is empty, but live sub-sessions remain.
@@ -710,13 +784,13 @@ describe("cleanupOldSubSessions", () => {
     expect(Date.now() - started).toBeLessThan(500)
   })
 
-  it("paginates beyond the first global helper page", async () => {
+  it("paginates through sessions tied at the page boundary", async () => {
     const now = Date.now()
     const firstPage = Array.from({ length: SCAN_LIMIT }, (_, i) => ({
       id: `paged-live-${i}`,
       title: "codex-memory-consolidate",
       metadata: { "opencode-codex-memory": true },
-      time: { created: now, updated: SCAN_LIMIT - i },
+      time: { created: now, updated: 1 },
     }))
     const queries: Record<string, unknown>[] = []
     const deleted: string[] = []
@@ -724,16 +798,20 @@ describe("cleanupOldSubSessions", () => {
       client: cleanupListClient([], {
         list: async (opts) => {
           queries.push(opts.query ?? {})
-          return opts.query?.cursor === undefined
-            ? { data: firstPage }
-            : {
-                data: [{
+          if (opts.query?.cursor === undefined || opts.query?.limit === SCAN_LIMIT) {
+            return { data: firstPage }
+          }
+          return {
+            data: [
+              ...firstPage,
+              {
                   id: "paged-old",
                   title: "codex-memory-consolidate",
                   metadata: { "opencode-codex-memory": true },
-                  time: { created: now - 120 * 60 * 1000, updated: 0 },
-                }],
-              }
+                  time: { created: now - 120 * 60 * 1000, updated: 1 },
+              },
+            ],
+          }
         },
         delete: async (req) => {
           deleted.push(req.path.id)
@@ -745,9 +823,69 @@ describe("cleanupOldSubSessions", () => {
     await cleanupOldSubSessions(90)
     await Promise.resolve()
     await Promise.resolve()
-    expect(queries).toHaveLength(2)
+    expect(queries).toHaveLength(3)
     expect(queries[0]).toMatchObject({ search: "codex-memory-" })
-    expect(queries[1]).toMatchObject({ cursor: 1, search: "codex-memory-" })
+    expect(queries[1]).toMatchObject({ cursor: 2, limit: SCAN_LIMIT, search: "codex-memory-" })
+    expect(queries[2]).toMatchObject({ cursor: 2, limit: SCAN_LIMIT * 2, search: "codex-memory-" })
     expect(deleted).toContain("paged-old")
+  })
+
+  it("limits concurrent stale-helper deletions", async () => {
+    const now = Date.now()
+    let active = 0
+    let maxActive = 0
+    let completed = 0
+    const sessions = Array.from({ length: 20 }, (_, i) => ({
+      id: `stale-batch-${i}`,
+      title: "codex-memory-consolidate",
+      metadata: { "opencode-codex-memory": true },
+      time: { created: now - 120 * 60 * 1000, updated: now - i },
+    }))
+    setPluginInput({
+      client: cleanupListClient(sessions, {
+        delete: async () => {
+          active++
+          maxActive = Math.max(maxActive, active)
+          await new Promise((resolve) => setTimeout(resolve, 1))
+          active--
+          completed++
+          return { data: {} }
+        },
+      }),
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    for (let i = 0; i < 50 && completed < sessions.length; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+    expect(completed).toBe(sessions.length)
+    expect(maxActive).toBeLessThanOrEqual(8)
+  })
+
+  it("bounds the detached stale-helper deletion batch", async () => {
+    let calls = 0
+    const now = Date.now()
+    const sessions = Array.from({ length: 20 }, (_, i) => ({
+      id: `stale-hung-${i}`,
+      title: "codex-memory-consolidate",
+      metadata: { "opencode-codex-memory": true },
+      time: { created: now - 120 * 60 * 1000, updated: now - i },
+    }))
+    setPluginInput({
+      client: cleanupListClient(sessions, {
+        delete: async () => {
+          calls++
+          return new Promise(() => {})
+        },
+      }),
+    } as any)
+    setStaleDeleteBatchTimeoutForTest(20)
+
+    await cleanupOldSubSessions(90)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const stoppedAt = calls
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(stoppedAt).toBeLessThanOrEqual(8)
+    expect(calls).toBe(stoppedAt)
   })
 })

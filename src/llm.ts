@@ -23,10 +23,13 @@ export interface ExtractionResult {
 }
 
 let inputRef: PluginInput | null = null
+let inputGeneration = 0
 
 export function setPluginInput(input: PluginInput): void {
   inputRef = input
+  inputGeneration++
   configModels = null
+  configModelsInFlight = null
 }
 
 export function getPluginInput(): PluginInput | null {
@@ -43,11 +46,26 @@ const SUBSESSION_ABORT_TIMEOUT_MS = 1_000
 const SUBSESSION_CONFIRM_TIMEOUT_MS = 1_000
 const SUBSESSION_DELETE_TIMEOUT_MS = 10_000
 const SUBSESSION_CREATE_TIMEOUT_MS = 10_000
+const CONFIG_GET_TIMEOUT_MS = 5_000
+const SUBSESSION_DELETE_CONCURRENCY = 8
+const SUBSESSION_DELETE_BATCH_TIMEOUT_MS = 30_000
 let createTimeoutMs = SUBSESSION_CREATE_TIMEOUT_MS
+let configGetTimeoutMs = CONFIG_GET_TIMEOUT_MS
+let staleDeleteBatchTimeoutMs = SUBSESSION_DELETE_BATCH_TIMEOUT_MS
 
 /** Test seam. */
 export function setSubSessionCreateTimeoutForTest(ms?: number): void {
   createTimeoutMs = ms ?? SUBSESSION_CREATE_TIMEOUT_MS
+}
+
+/** Test seam. */
+export function setConfigGetTimeoutForTest(ms?: number): void {
+  configGetTimeoutMs = ms ?? CONFIG_GET_TIMEOUT_MS
+}
+
+/** Test seam. */
+export function setStaleDeleteBatchTimeoutForTest(ms?: number): void {
+  staleDeleteBatchTimeoutMs = ms ?? SUBSESSION_DELETE_BATCH_TIMEOUT_MS
 }
 
 export function isMemorySubSession(sessionId: string): boolean {
@@ -118,21 +136,39 @@ interface PromptOptions {
  * plugin instance — opencode reloads plugins on config change.
  */
 let configModels: { model?: string; smallModel?: string } | null = null
+let configModelsInFlight: Promise<{ model?: string; smallModel?: string }> | null = null
 
 async function getConfigModels(): Promise<{ model?: string; smallModel?: string }> {
   if (configModels) return configModels
+  if (configModelsInFlight) return configModelsInFlight
   const input = getPluginInput()
   if (!input) return {}
+  const generation = inputGeneration
+  const request = (async (): Promise<{ model?: string; smallModel?: string }> => {
+    const controller = new AbortController()
+    try {
+      const res = await withHostTimeout(
+        input.client.config.get({ signal: controller.signal }),
+        configGetTimeoutMs,
+        "config.get",
+        controller,
+      ) as { data?: { model?: string; small_model?: string }; error?: unknown }
+      if (res.error || !res.data || generation !== inputGeneration) return {}
+      const resolved = { model: res.data.model, smallModel: res.data.small_model }
+      configModels = resolved
+      return resolved
+    } catch {
+      // Config endpoint unavailable: leave models unset so the sub-agent runs
+      // on the session default. Do not cache failures: the next call can recover.
+      return {}
+    }
+  })()
+  configModelsInFlight = request
   try {
-    const res = await input.client.config.get()
-    const cfg = (res as { data?: { model?: string; small_model?: string } })?.data
-    configModels = { model: cfg?.model, smallModel: cfg?.small_model }
-  } catch {
-    // Config endpoint unavailable: leave models unset so the sub-agent runs
-    // on the session default, the previous behavior.
-    configModels = {}
+    return await request
+  } finally {
+    if (configModelsInFlight === request) configModelsInFlight = null
   }
-  return configModels
 }
 
 export async function resolveExtractionModel(configured?: string): Promise<string | undefined> {
@@ -431,16 +467,19 @@ export async function cleanupOldSubSessions(
   if (!input) return
   if (!pluginHttpGet(input.client)) return
   const controller = new AbortController()
+  const staleSessionIds: string[] = []
   try {
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
     const deadline = Date.now() + timeoutMs
+    const seen = new Set<string>()
     let cursor: number | undefined
+    let pageLimit = SCAN_LIMIT
     while (true) {
       const remaining = deadline - Date.now()
       if (remaining <= 0) return
       const res = await withHostTimeout(
         hostListSessionsGlobal(input.client, {
-          limit: SCAN_LIMIT,
+          limit: pageLimit,
           cursor,
           search: "codex-memory-",
           signal: controller.signal,
@@ -456,8 +495,11 @@ export async function cleanupOldSubSessions(
         metadata?: Record<string, unknown>
         time?: { created?: number; updated?: number }
       }>
+      let newSessionCount = 0
       for (const s of list) {
-        if (!s.id) continue
+        if (!s.id || seen.has(s.id)) continue
+        seen.add(s.id)
+        newSessionCount++
         const pluginTitle = isPluginSubSessionTitle(s.title)
         const owned = s.metadata?.[SUBSESSION_METADATA_KEY] === true && pluginTitle
         const legacy = s.metadata?.[SUBSESSION_METADATA_KEY] !== true && pluginTitle
@@ -468,21 +510,55 @@ export async function cleanupOldSubSessions(
         if (!owned) continue
         const created = s.time?.created ?? 0
         if (created && created < cutoff) {
-          void deleteSession(s.id)
+          staleSessionIds.push(s.id)
         }
       }
-      if (list.length < SCAN_LIMIT) return
-      const updates = list
-        .map((s) => s.time?.updated)
-        .filter((updated): updated is number => typeof updated === "number" && updated > 0)
+      if (list.length < pageLimit) return
+      const updates = list.map((s) => s.time?.updated).filter((updated): updated is number =>
+        typeof updated === "number" && Number.isFinite(updated) && updated >= 0
+      )
       if (updates.length === 0) return
-      const nextCursor = Math.min(...updates)
-      if (cursor !== undefined && nextCursor >= cursor) return
+      // listGlobal uses `updated < cursor`. Add one millisecond so sessions
+      // tied at the page boundary remain visible, then dedupe repeated rows.
+      const nextCursor = updates.reduce((min, updated) => Math.min(min, updated), Infinity) + 1
+      if (cursor !== undefined && (nextCursor >= cursor || newSessionCount === 0)) {
+        // A full page can consist entirely of the same timestamp. Increase the
+        // page size until unseen tied rows appear or the overall deadline wins.
+        pageLimit += SCAN_LIMIT
+        continue
+      }
       cursor = nextCursor
+      pageLimit = SCAN_LIMIT
     }
   } catch {
     // best effort only
+  } finally {
+    void deleteStaleSubSessions(staleSessionIds, input, staleDeleteBatchTimeoutMs)
   }
+}
+
+async function deleteStaleSubSessions(
+  sessionIds: string[],
+  input: PluginInput,
+  timeoutMs: number,
+): Promise<void> {
+  let cursor = 0
+  const deadline = Date.now() + timeoutMs
+  const workers = Array.from(
+    { length: Math.min(SUBSESSION_DELETE_CONCURRENCY, sessionIds.length) },
+    async () => {
+      while (cursor < sessionIds.length && Date.now() < deadline && !isPluginShuttingDown()) {
+        const id = sessionIds[cursor++]
+        try {
+          await deleteSession(id, input, Math.max(1, Math.min(SUBSESSION_DELETE_TIMEOUT_MS, deadline - Date.now())))
+        } catch {
+          // deleteSession is best-effort; one unexpected failure must not stop
+          // the remaining stale-helper cleanup.
+        }
+      }
+    },
+  )
+  await Promise.all(workers)
 }
 
 function isPluginSubSessionTitle(title: string | undefined): boolean {
@@ -498,8 +574,11 @@ function isPluginSubSessionTitle(title: string | undefined): boolean {
  * really gone?) and only governs ownership tracking, never the shutdown result:
  * hosts without `session.get` would otherwise never report a clean shutdown.
  */
-async function deleteSession(id: string): Promise<boolean> {
-  const input = getPluginInput()
+async function deleteSession(
+  id: string,
+  input: PluginInput | null = getPluginInput(),
+  timeoutMs = SUBSESSION_DELETE_TIMEOUT_MS,
+): Promise<boolean> {
   if (!input) return false
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -511,8 +590,8 @@ async function deleteSession(id: string): Promise<boolean> {
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort()
-          reject(new Error(`session.delete timed out after ${SUBSESSION_DELETE_TIMEOUT_MS}ms`))
-        }, SUBSESSION_DELETE_TIMEOUT_MS)
+          reject(new Error(`session.delete timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
         timer.unref?.()
       }),
     ])

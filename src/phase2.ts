@@ -12,7 +12,6 @@ import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } fr
 import {
   consolidateViaSubagent,
   getPluginInput,
-  resolveConsolidationModel,
   SubagentCancelledError,
   SubagentShutdownError,
 } from "./llm.js"
@@ -138,7 +137,7 @@ export async function runPhase2(
   try {
     // No 30s process gate: codex serializes phase 2 only via the DB claim.
     // An observed quota stamp still skips both phases (Codex start.rs).
-    const consolidationModel = await resolveConsolidationModel(opts.consolidationModel)
+    const consolidationModel = opts.consolidationModel
     const rl = await checkRateLimit("phase2", consolidationModel)
     if (!rl.ok) return { status: "skipped_rate_limit" }
 

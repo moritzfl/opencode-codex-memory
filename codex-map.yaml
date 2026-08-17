@@ -446,8 +446,10 @@ mappings:
       a forced StructuredOutput tool call (toolChoice: required), so the
       otherwise tool-less memorize-extract agent allows that one
       side-effect-free tool (opencode.json; tests/agents.test.ts enforces the
-      exception). parseExtraction (brace-scrape, unknown-field tolerant) stays
-      as a fallback for hosts/models that don't populate structured. per-request
+      exception). Model config lookup is timeout-bounded and only successful
+      responses are cached, so transient host failures cannot pin missing model
+      config until reload. parseExtraction (brace-scrape, unknown-field tolerant)
+      stays as a fallback for hosts/models that don't populate structured. Per-request
       timeouts mirror the 1h job leases (codex relies on the lease alone);
       timed-out or ownership-cancelled prompts call the bound session.abort SDK
       method with a 1s bound before session deletion; deletion is bounded to
@@ -462,10 +464,10 @@ mappings:
       marker and an exact generated title because OpenCode copies metadata to
       user forks. Exact legacy titles are temporarily reseeded but never
       deleted; plugin startup awaits a bounded, title-filtered, cursor-paginated
-      host-wide list/reseed pass while
-      stale deletions continue asynchronously and retain ownership unless a
-      follow-up session.get confirms 404 (OpenCode may return success after an
-      internally failed remove);
+      host-wide list/reseed pass while stale deletions continue through a
+      concurrency- and time-bounded background batch and retain ownership
+      unless a follow-up session.get confirms 404 (OpenCode may return success
+      after an internally failed remove);
       AssistantMessage.error is treated as a failed sub-agent turn even though
       opencode returns it with HTTP 200;
       reasoning effort is pinned via PromptInput.variant low/medium (codex:
@@ -512,8 +514,8 @@ mappings:
       process-local anti-stampede (30s) that stamps only AFTER a stage-1 claim
       succeeds; empty/no-claim passes do not burn the interval (matches codex
       skipped_no_candidates free retry). After an observed quota/rate-limit
-      error, a 1h process stamp skips further claims for the same resolved
-      model (or the same phase when no model is resolved). Codex start.rs skips
+      error, a 1h process stamp skips further claims for the same configured
+      model (or the same phase when no model is configured). Codex start.rs skips
       both phases when its account-level live guard fails; model scoping avoids
       blocking independently configured opencode providers. Phase 2 still has
       no 30s timer — DB claim/cooldown only, like codex. Wire
