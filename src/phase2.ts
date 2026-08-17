@@ -1,4 +1,5 @@
 import { MemoryStore } from "./store.js"
+import { checkRateLimit, isProviderCapacityError, noteProviderCapacityExhausted } from "./ratelimit.js"
 import {
   ensureLayout,
   rebuildRawMemories,
@@ -98,9 +99,10 @@ export async function runPhase2(
   if (phase2InFlight) return { status: "already_running" }
   phase2InFlight = true
   try {
-    // No process-local rate gate: codex serializes phase 2 only via the DB
-    // claim (cooldown / running / retry_at). Empty and cooldown skips must
-    // not delay a later real claim.
+    // No 30s process gate: codex serializes phase 2 only via the DB claim.
+    // An observed quota stamp still skips both phases (Codex start.rs).
+    const rl = await checkRateLimit("phase2")
+    if (!rl.ok) return { status: "skipped_rate_limit" }
 
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") return { status: claim.type }
@@ -290,6 +292,7 @@ export async function runPhase2(
         store.releasePhase2OnShutdown(claim.ownershipToken)
         return { status: "shutting_down" }
       }
+      if (isProviderCapacityError(err)) noteProviderCapacityExhausted()
       store.markPhase2Failed(claim.ownershipToken, err)
       return { status: "failed" }
     } finally {

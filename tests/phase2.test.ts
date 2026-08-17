@@ -7,6 +7,7 @@ import { captureWorkspaceDiff } from "../src/git-baseline.js"
 import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
 import { DEFAULT_PHASE2_OPTIONS, dropGonePhase2Inputs, runPhase2 } from "../src/phase2.js"
+import { noteProviderCapacityExhausted, resetRateLimitForTest } from "../src/ratelimit.js"
 import { MemoryStore } from "../src/store.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase2-${process.pid}-${Date.now()}`)
@@ -14,6 +15,7 @@ const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase2-${process
 beforeEach(() => {
   closeDb()
   resetPluginLifecycle()
+  resetRateLimitForTest()
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
@@ -21,6 +23,7 @@ beforeEach(() => {
 afterEach(() => {
   closeDb()
   resetPluginLifecycle()
+  resetRateLimitForTest()
   setPluginInput({ client: undefined } as any)
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -73,6 +76,15 @@ describe("phase 2 orchestration", () => {
 
     const pending = await captureWorkspaceDiff()
     expect(pending.changes.some((change) => change.path === "raw_memories.md")).toBe(true)
+  })
+
+  it("skips claiming when provider capacity is exhausted", async () => {
+    noteProviderCapacityExhausted()
+    const result = await runPhase2(new MemoryStore())
+    expect(result.status).toBe("skipped_rate_limit")
+    expect(
+      openDb().prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_consolidate_global'").get(),
+    ).toBeNull()
   })
 
   it("holds the lease when the consolidation sub-session cannot be closed", async () => {

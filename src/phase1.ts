@@ -3,7 +3,13 @@ import { loadTranscript, selectEligibleSessions } from "./capture.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
 import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
-import { checkRateLimit, markRateLimitUsed } from "./ratelimit.js"
+import {
+  checkRateLimit,
+  isProviderCapacityBlocked,
+  isProviderCapacityError,
+  markRateLimitUsed,
+  noteProviderCapacityExhausted,
+} from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
 
@@ -44,6 +50,12 @@ export async function runPhase1(
   if (isPluginShuttingDown()) return
   // Prune first (no tokens), matching codex start.rs ordering before the gate.
   store.pruneStage1Outputs(opts.maxUnusedDays ?? 30)
+  // Historical quota-exhausted jobs never get a newer watermark; reopen them
+  // before the gate so a later unblocked pass can claim them.
+  const requeued = store.requeueExhaustedProviderCapacityJobs()
+  if (requeued > 0) {
+    recordDiagnostic("info", "phase1", `requeued ${requeued} quota-exhausted job(s)`)
+  }
   const rl = await rateLimitCheck("phase1")
   if (!rl.ok) {
     console.warn("[opencode-codex-memory] skipping phase1 due to rate limit:", rl.reason)
@@ -74,6 +86,11 @@ export async function runPhase1(
     // for the 1h lease — otherwise jobs stay `running` until lease expiry.
     if (isPluginShuttingDown()) {
       store.releaseStage1OnShutdown(sid, claim.ownershipToken)
+      return
+    }
+    // Sibling jobs in this pass: do not call the model after quota was observed.
+    if (isProviderCapacityBlocked()) {
+      store.markStage1Failed(sid, claim.ownershipToken, "provider capacity exhausted")
       return
     }
     try {
@@ -123,6 +140,7 @@ export async function runPhase1(
       if (err instanceof SubagentCancelledError || isPluginShuttingDown()) {
         store.releaseStage1OnShutdown(sid, claim.ownershipToken)
       } else {
+        if (isProviderCapacityError(err)) noteProviderCapacityExhausted()
         store.markStage1Failed(sid, claim.ownershipToken, err)
       }
     }
