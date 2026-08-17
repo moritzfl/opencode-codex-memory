@@ -104,6 +104,9 @@ interface PromptOptions {
   // `format` field (schema v1/session.ts) but the generated SDK body type omits
   // it, so it is passed through an `as any` cast at the call site.
   format?: Record<string, unknown>
+  // Host PromptInput.variant → model reasoningEffort (low/medium/high).
+  // Unknown variant is a host no-op.
+  variant?: string
 }
 
 /**
@@ -212,6 +215,7 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
       ...(opts.system ? { system: opts.system } : {}),
       ...(model ? { model } : {}),
       ...(opts.format ? { format: opts.format } : {}),
+      ...(opts.variant ? { variant: opts.variant } : {}),
       parts: [{ type: "text", text: prompt }],
     },
   })
@@ -330,6 +334,9 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
       // call (toolChoice: required) — which is why memorize-extract must allow
       // that one otherwise-denied tool.
       format: { type: "json_schema", schema: EXTRACTION_SCHEMA },
+      // Codex extraction ReasoningEffort::Low. Host maps variant → reasoningEffort;
+      // missing variant on the model is a no-op.
+      variant: "low",
     })
     // The captured JSON lands on AssistantMessage.structured (schema
     // v1/session.ts; absent from the generated SDK type — see host-client.ts).
@@ -367,7 +374,13 @@ export async function consolidateViaSubagent(
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
     // consolidation_model option > opencode model (main) > session default.
     const resolved = model ?? (await getConfigModels()).model
-    await promptSession(subId, prompt, agent, { model: resolved, timeoutMs: CONSOLIDATION_TIMEOUT_MS, signal })
+    await promptSession(subId, prompt, agent, {
+      model: resolved,
+      timeoutMs: CONSOLIDATION_TIMEOUT_MS,
+      signal,
+      // Codex consolidation ReasoningEffort::Medium.
+      variant: "medium",
+    })
   } catch (err) {
     promptError = err
     promptFailed = true

@@ -167,6 +167,7 @@ describe("extractViaSubagent (structured output)", () => {
     const body = captured.getPromptBody()
     expect(body.format?.type).toBe("json_schema")
     expect(body.format?.schema?.required).toContain("raw_memory")
+    expect(body.variant).toBe("low")
     expect(captured.getCreateBody().metadata).toEqual({ "opencode-codex-memory": true })
   })
 
@@ -351,6 +352,25 @@ describe("memory sub-session directory", () => {
     await consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")
     expect(seen).toHaveLength(1)
     expect(seen[0].query?.directory).toBe(memoryRoot())
+  })
+
+  it("pins consolidation reasoning to variant medium", async () => {
+    let variant: string | undefined
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-variant" } }),
+          prompt: async (req: { body: { variant?: string } }) => {
+            variant = req.body.variant
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    await consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")
+    expect(variant).toBe("medium")
   })
 })
 

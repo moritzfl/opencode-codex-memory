@@ -152,6 +152,7 @@ async function main() {
       if (msgOp) {
         const body = requestBodySchema(doc, msgOp)
         note(schemaHasProperty(body, "format"), "prompt body has 'format' (structured extraction)")
+        note(schemaHasProperty(body, "variant"), "prompt body has 'variant' (reasoning effort)")
         note(schemaHasProperty(body, "parts"), "prompt body has 'parts'")
       }
 

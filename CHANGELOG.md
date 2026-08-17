@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first page.
 - Consolidation skips sessions that no longer exist in OpenCode (same as a
   deleted-session forget).
+- Extraction uses low reasoning and consolidation uses medium, matching Codex.
 
 ## [0.6.0] - 2026-08-12
 
