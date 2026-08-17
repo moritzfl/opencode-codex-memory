@@ -6,7 +6,7 @@ import { closeDb, openDb } from "../src/db.js"
 import { captureWorkspaceDiff } from "../src/git-baseline.js"
 import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
-import { DEFAULT_PHASE2_OPTIONS, runPhase2 } from "../src/phase2.js"
+import { DEFAULT_PHASE2_OPTIONS, dropGonePhase2Inputs, runPhase2 } from "../src/phase2.js"
 import { MemoryStore } from "../src/store.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase2-${process.pid}-${Date.now()}`)
@@ -206,5 +206,35 @@ describe("phase 2 orchestration", () => {
     resetPluginLifecycle()
     const reclaim = store.claimGlobalPhase2Job()
     expect(reclaim.type).toBe("claimed")
+  })
+
+  it("drops phase2 inputs whose sessions are gone and keeps unknown/live", async () => {
+    setPluginInput({
+      client: {
+        session: {
+          get: async (req: { path: { id: string } }) => {
+            if (req.path.id === "ses_gone") return { response: { status: 404 } }
+            if (req.path.id === "ses_err") return { error: { status: 500 } }
+            return { data: { id: req.path.id }, response: { status: 200 } }
+          },
+        },
+      },
+    } as any)
+    const store = new MemoryStore()
+    const ts = Date.now()
+    for (const id of ["ses_live", "ses_gone", "ses_err"] as const) {
+      store.upsertStage1Output({
+        session_id: id,
+        source_updated_at: ts,
+        raw_memory: id,
+        rollout_summary: id,
+        rollout_slug: id,
+        cwd: "/p",
+        generated_at: ts,
+      })
+    }
+    const kept = await dropGonePhase2Inputs(store, store.getPhase2InputSelection(50, 30))
+    expect(kept.map((o) => o.session_id).sort()).toEqual(["ses_err", "ses_live"])
+    expect(store.stage1Outputs().map((o) => o.session_id).sort()).toEqual(["ses_err", "ses_live"])
   })
 })

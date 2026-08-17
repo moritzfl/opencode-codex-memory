@@ -6,7 +6,7 @@
  *
  * Current gaps (as of @opencode-ai/plugin ~1.18.10):
  * - session.create body: metadata + title typing
- * - session.prompt body: `format` (json_schema) omitted from PromptInput
+ * - session.prompt body: `format` (json_schema) and `variant` omitted from PromptInput
  * - AssistantMessage.info.structured: structured extraction result
  * - client._client.get: experimental routes (no experimental.* namespace on V1)
  * - mcp.status: present on host client, weakly typed in plugin package
@@ -98,6 +98,7 @@ export interface HostPromptBody {
   system?: string
   model?: { providerID: string; modelID: string }
   format?: Record<string, unknown>
+  variant?: string
   parts: { type: "text"; text: string }[]
 }
 
@@ -113,6 +114,7 @@ export async function hostSessionPrompt(
       ...(opts.body.system ? { system: opts.body.system } : {}),
       ...(opts.body.model ? { model: opts.body.model } : {}),
       ...(opts.body.format ? { format: opts.body.format } : {}),
+      ...(opts.body.variant ? { variant: opts.body.variant } : {}),
       parts: opts.body.parts,
     } as never,
   } as never) as Promise<{ error?: unknown; data?: unknown }>
@@ -154,6 +156,47 @@ export async function hostSessionMessages(
 
 export function hostPartType(part: unknown): string {
   return typeof (part as { type?: unknown })?.type === "string" ? (part as { type: string }).type : "unknown"
+}
+
+export type SessionLiveness = "live" | "gone" | "unknown"
+
+function isNotFoundStatus(res: { response?: { status?: number }; error?: unknown } | null | undefined): boolean {
+  if (res?.response?.status === 404) return true
+  const err = res?.error
+  if (err && typeof err === "object") {
+    const rec = err as { status?: unknown; name?: unknown }
+    if (rec.status === 404) return true
+    if (typeof rec.name === "string" && rec.name.toLowerCase().includes("notfound")) return true
+  }
+  return false
+}
+
+const SESSION_LIVE_TIMEOUT_MS = 1_000
+
+/** Codex re-checks the live threads table; 404 = gone, anything else stays. */
+export async function hostSessionLiveness(
+  client: PluginInput["client"] | null | undefined,
+  id: string,
+  timeoutMs = SESSION_LIVE_TIMEOUT_MS,
+): Promise<SessionLiveness> {
+  const session = (client as {
+    session?: { get?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<{ response?: { status?: number }; error?: unknown }> }
+  } | null | undefined)?.session
+  if (typeof session?.get !== "function") return "unknown"
+  const controller = new AbortController()
+  try {
+    const res = await withHostTimeout(
+      session.get({ path: { id }, signal: controller.signal }),
+      timeoutMs,
+      "session.get",
+      controller,
+    )
+    if (isNotFoundStatus(res)) return "gone"
+    if (res?.error) return "unknown"
+    return "live"
+  } catch {
+    return "unknown"
+  }
 }
 
 export async function hostSessionDeletionConfirmed(

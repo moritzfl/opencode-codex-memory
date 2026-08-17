@@ -8,7 +8,8 @@ import {
   validateConsolidationArtifacts,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
-import { consolidateViaSubagent, SubagentCancelledError, SubagentShutdownError } from "./llm.js"
+import { consolidateViaSubagent, getPluginInput, SubagentCancelledError, SubagentShutdownError } from "./llm.js"
+import { hostSessionLiveness } from "./host-client.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
 import {
@@ -39,6 +40,33 @@ export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
 
 // Export runs only after a successful phase 2 (fresh, validated artifacts) and
 // must never fail the run — Codex's workspace is best-effort foreign territory.
+const PHASE2_LIVE_CHECK_CONCURRENCY = 8
+
+/**
+ * Codex get_phase2_input_selection re-validates each row against the live
+ * threads table. We only drop a row on a confirmed 404 (same as session.deleted);
+ * timeouts / missing get / other errors keep the row.
+ */
+export async function dropGonePhase2Inputs(
+  store: MemoryStore,
+  selected: ReturnType<MemoryStore["getPhase2InputSelection"]>,
+): Promise<ReturnType<MemoryStore["getPhase2InputSelection"]>> {
+  const client = getPluginInput()?.client
+  if (!client || selected.length === 0) return selected
+  const kept: typeof selected = []
+  for (let i = 0; i < selected.length; i += PHASE2_LIVE_CHECK_CONCURRENCY) {
+    const chunk = selected.slice(i, i + PHASE2_LIVE_CHECK_CONCURRENCY)
+    const results = await Promise.all(
+      chunk.map(async (out) => ({ out, live: await hostSessionLiveness(client, out.session_id) })),
+    )
+    for (const { out, live } of results) {
+      if (live === "gone") store.deleteSessionMemory(out.session_id)
+      else kept.push(out)
+    }
+  }
+  return kept
+}
+
 function maybeExportToCodex(interop: ReturnType<typeof resolveCodexInterop>): void {
   if (!interop?.exportEnabled) return
   try {
@@ -105,7 +133,10 @@ export async function runPhase2(
         return { status: "shutting_down" }
       }
 
-      const outputs = store.getPhase2InputSelection(opts.maxRaw, opts.maxUnusedDays)
+      const outputs = await dropGonePhase2Inputs(
+        store,
+        store.getPhase2InputSelection(opts.maxRaw, opts.maxUnusedDays),
+      )
       rebuildRawMemories(outputs)
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)

@@ -83,7 +83,10 @@ describe("fake-subagent write pipeline", () => {
             deleted.push(request.path.id)
             return { data: {} }
           },
-          get: async () => ({ response: { status: 404 } }),
+          get: async (req: { path: { id: string } }) => {
+            if (req.path.id.startsWith("sub-")) return { response: { status: 404 } }
+            return { data: { id: req.path.id }, response: { status: 200 } }
+          },
         },
         config: { get: async () => ({ data: {} }) },
       },

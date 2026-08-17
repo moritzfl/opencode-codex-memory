@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stuck OpenCode API calls abort instead of leaving background learning hanging.
 - Time-only `memory_search` listings paginate with `cursor` instead of repeating
   the first page.
+- Consolidation skips sessions that no longer exist in OpenCode (same as a
+  deleted-session forget).
 
 ## [0.6.0] - 2026-08-12
 

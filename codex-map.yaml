@@ -186,9 +186,10 @@ mappings:
       probes stage1_outputs.source_updated_at — diverges only in exotic DB
       states); phase-2 success watermark = max(selected source_updated_at)
       (codex additionally folds in the claim-time input_watermark;
-      informational column, nothing reads it); phase-2 selection trusts
-      memory_session_meta + session.deleted events (codex re-validates each
-      row against the live threads table at selection time).
+      informational column, nothing reads it); phase-2 selection also
+      probes session.get per selected row (404 → deleteSessionMemory, same
+      as session.deleted; timeout/error keeps the row). Codex re-validates
+      against the live threads table at selection time.
 
   # --- Write path: phase 1 (extraction) ---
   - ours: src/phase1.ts
@@ -458,8 +459,9 @@ mappings:
       internally failed remove);
       AssistantMessage.error is treated as a failed sub-agent turn even though
       opencode returns it with HTTP 200;
-      reasoning effort is not pinned (codex: Low for extraction, Medium for
-      consolidation; no session.prompt equivalent).
+      reasoning effort is pinned via PromptInput.variant low/medium (codex:
+      Low extract / Medium consolidate). SDK types omit variant (same lag as
+      format); an unknown variant is a host no-op.
 
   # --- Utilities ---
   - ours: src/redact.ts
