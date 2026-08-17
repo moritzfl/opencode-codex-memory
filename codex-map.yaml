@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 3aae5d885bac39c1262491aa3fd100dfd8b3919f
-codex_ref_date: 2026-08-08
+codex_ref: 902bd9e06b3ecb32cbf7f8e64cd23b956be3e7fe
+codex_ref_date: 2026-08-13
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -109,11 +109,13 @@ mappings:
       the zod schema (enum + separate line_count instead of codex's
       internally-tagged {type, line_count}); max_results is the arg name for
       codex's max_results (was `limit` pre-0.2); queries[] is optional
-      because the port adds since/until time filtering with a no-query
-      chronological listing mode (no upstream equivalent).
-      read uses line_offset/max_lines like codex plus a 256KiB byte backstop
-      (codex: 20k-token budget); read on a directory returns a listing (codex:
-      NotFile error). add_note generates the filename plugin-side (codex: model
+       because the port adds since/until time filtering with a no-query
+       chronological listing mode (no upstream equivalent); that listing
+       paginates with the same integer cursor as query matches.
+       read uses line_offset/max_lines like codex plus a 256KiB byte backstop
+       (codex: 20k-token budget); read on a directory returns a listing (codex:
+       NotFile error) and skips hidden/symlink names like list/search.
+       add_note generates the filename plugin-side (codex: model
       supplies it) with codex's hyphen layout and append-only collision
       handling; port caps note<=4000/title<=120 chars and prepends a
       title/created/session header (codex: verbatim unlimited note body).
