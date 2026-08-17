@@ -282,6 +282,91 @@ describe("MemoryStore stage1", () => {
     expect(job.retry_remaining).toBe(3)
   })
 
+  it("quota failures stay pending and do not burn retries", () => {
+    const { MemoryStore, DEFAULT_RETRY_REMAINING } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const token = claimOne(store, "s1")
+    store.markStage1Failed("s1", token, "sub-agent prompt failed (APIError): The usage limit has been reached")
+    const job = openDb()
+      .prepare(
+        "SELECT status, retry_remaining, retry_at, lease_until FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'",
+      )
+      .get() as { status: string; retry_remaining: number; retry_at: number | null; lease_until: number | null }
+    expect(job.status).toBe("pending")
+    expect(job.retry_remaining).toBe(DEFAULT_RETRY_REMAINING)
+    expect(job.lease_until).toBeNull()
+    expect(job.retry_at).toBeGreaterThan(Math.floor(Date.now() / 1000))
+    expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
+    openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='s1'").run()
+    expect(claimedIds(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }]))).toEqual(["s1"])
+  })
+
+  it("repeated quota failures never exhaust the retry budget", () => {
+    const { MemoryStore, DEFAULT_RETRY_REMAINING } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    for (let i = 0; i < 5; i++) {
+      const token = claimOne(store, "s1")
+      store.markStage1Failed("s1", token, "The usage limit has been reached")
+      openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='s1'").run()
+    }
+    expect(claimedIds(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }]))).toEqual(["s1"])
+    const job = openDb().prepare("SELECT status, retry_remaining FROM memory_jobs WHERE job_key='s1'").get()
+    expect(job.status).toBe("running")
+    expect(job.retry_remaining).toBe(DEFAULT_RETRY_REMAINING)
+  })
+
+  it("requeues exhausted quota jobs without new session activity", () => {
+    const { MemoryStore, DEFAULT_RETRY_REMAINING } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    let token = claimOne(store, "quota")
+    store.markStage1Failed("quota", token, "boom 0")
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='quota'").run()
+      token = claimOne(store, "quota")
+      store.markStage1Failed("quota", token, `boom ${i}`)
+    }
+    openDb()
+      .prepare("UPDATE memory_jobs SET last_error=?, retry_at=1 WHERE job_key='quota'")
+      .run("sub-agent prompt failed (APIError): The usage limit has been reached")
+    token = claimOne(store, "perm")
+    store.markStage1Failed("perm", token, "malformed transcript")
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='perm'").run()
+      token = claimOne(store, "perm")
+      store.markStage1Failed("perm", token, "malformed transcript")
+    }
+    openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='perm'").run()
+
+    expect(store.requeueExhaustedProviderCapacityJobs()).toBe(1)
+    expect(claimedIds(store.claimStage1Jobs([{ id: "quota", updated_at: 1000 }]))).toEqual(["quota"])
+    expect(store.claimStage1Jobs([{ id: "perm", updated_at: 1000 }])).toEqual([])
+    const quota = openDb().prepare("SELECT retry_remaining FROM memory_jobs WHERE job_key='quota'").get()
+    expect(quota.retry_remaining).toBe(DEFAULT_RETRY_REMAINING)
+  })
+
+  it("inspect snapshot distinguishes backoff, quota, and other exhausted failures", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const quotaToken = claimOne(store, "quota")
+    store.markStage1Failed("quota", quotaToken, "The usage limit has been reached")
+    let permToken = claimOne(store, "perm")
+    store.markStage1Failed("perm", permToken, "boom 0")
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='perm'").run()
+      permToken = claimOne(store, "perm")
+      store.markStage1Failed("perm", permToken, `boom ${i}`)
+    }
+    const snap = store.stage1JobSnapshot()
+    expect(snap.by_failure_class.backoff).toBeGreaterThanOrEqual(1)
+    expect(snap.by_failure_class.other_exhausted).toBe(1)
+    expect(snap.recent_errors.some((e: { failure_class: string }) => e.failure_class === "backoff")).toBe(true)
+    expect(snap.recent_errors.some((e: { session_id: string }) => e.session_id === "perm")).toBe(true)
+  })
+
   it("markStage1SucceededNoOutput finishes the job and drops the output row", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")

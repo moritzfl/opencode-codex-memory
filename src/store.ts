@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { openDb } from "./db.js"
+import { isProviderCapacityError } from "./ratelimit.js"
 
 export const DEFAULT_RETRY_REMAINING = 3
 export const STAGE1_LEASE_SECONDS = 3600
@@ -235,6 +236,26 @@ export class MemoryStore {
 
   markStage1Failed(sessionId: string, ownershipToken: string, error: unknown): void {
     const message = failureMessage(error)
+    const tNow = nowSec()
+    const retryAt = tNow + STAGE1_RETRY_DELAY_SECONDS
+    // Quota/rate-limit is transient provider capacity, not a bad transcript.
+    // Codex avoids claiming in that state via guard.rs; we cannot read quota,
+    // so keep the job pending and do not burn retry_remaining. Claim still
+    // honors retry_at, so this cannot tight-loop while quota is down.
+    if (isProviderCapacityError(message)) {
+      this.db
+        .prepare(
+          `UPDATE memory_jobs SET
+             status = 'pending',
+             last_error = ?,
+             retry_at = ?,
+             finished_at = ?,
+             lease_until = NULL
+           WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
+        )
+        .run(message.slice(0, 4000), retryAt, tNow, sessionId, ownershipToken)
+      return
+    }
     this.db
       .prepare(
         `UPDATE memory_jobs SET
@@ -246,7 +267,34 @@ export class MemoryStore {
            lease_until = NULL
          WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
       )
-      .run(message.slice(0, 4000), nowSec() + STAGE1_RETRY_DELAY_SECONDS, nowSec(), sessionId, ownershipToken)
+      .run(message.slice(0, 4000), retryAt, tNow, sessionId, ownershipToken)
+  }
+
+  /**
+   * Re-open stage-1 jobs that exhausted their retry budget solely because of
+   * a quota/rate-limit error. Historical completed sessions never get a newer
+   * watermark, so without this they stay failed forever after a quota outage.
+   * Leaves retry_at alone so an active backoff still holds.
+   */
+  requeueExhaustedProviderCapacityJobs(): number {
+    const rows = this.db
+      .prepare(
+        `SELECT job_key, last_error FROM memory_jobs
+         WHERE kind='memory_stage1' AND status='failed' AND last_error IS NOT NULL`,
+      )
+      .all() as { job_key: string; last_error: string }[]
+    let n = 0
+    const stmt = this.db.prepare(
+      `UPDATE memory_jobs SET status='pending', retry_remaining=?
+       WHERE kind='memory_stage1' AND job_key=? AND status='failed'`,
+    )
+    this.db.transaction(() => {
+      for (const row of rows) {
+        if (!isProviderCapacityError(row.last_error)) continue
+        n += stmt.run(DEFAULT_RETRY_REMAINING, row.job_key).changes
+      }
+    }).immediate()
+    return n
   }
 
   /**
@@ -638,21 +686,67 @@ export class MemoryStore {
    */
   stage1JobSnapshot(): {
     by_status: Record<string, number>
-    recent_errors: { session_id: string; last_error: string; retry_at: number | null; status: string }[]
+    by_failure_class: { backoff: number; provider_capacity: number; other_exhausted: number }
+    recent_errors: Stage1RecentError[]
   } {
     const rows = this.db
       .prepare("SELECT status, COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' GROUP BY status")
       .all() as { status: string; c: number }[]
     const by_status: Record<string, number> = {}
     for (const r of rows) by_status[r.status] = r.c
-    const recent_errors = this.db
+    const tNow = nowSec()
+    const errorRows = this.db
       .prepare(
-        `SELECT job_key AS session_id, last_error, retry_at, status FROM memory_jobs
+        `SELECT job_key AS session_id, last_error, retry_at, status, retry_remaining FROM memory_jobs
          WHERE kind='memory_stage1' AND last_error IS NOT NULL
-         ORDER BY COALESCE(finished_at, started_at, 0) DESC
-         LIMIT 5`,
+         ORDER BY COALESCE(finished_at, started_at, 0) DESC`,
       )
-      .all() as { session_id: string; last_error: string; retry_at: number | null; status: string }[]
-    return { by_status, recent_errors }
+      .all() as {
+        session_id: string
+        last_error: string
+        retry_at: number | null
+        status: string
+        retry_remaining: number
+      }[]
+    const by_failure_class = { backoff: 0, provider_capacity: 0, other_exhausted: 0 }
+    const recent_errors: Stage1RecentError[] = []
+    for (const row of errorRows) {
+      const failure_class = classifyStage1Failure(row, tNow)
+      if (failure_class) by_failure_class[failure_class]++
+      if (recent_errors.length < 5) {
+        recent_errors.push({
+          session_id: row.session_id,
+          last_error: row.last_error,
+          retry_at: row.retry_at,
+          status: row.status,
+          retry_remaining: row.retry_remaining,
+          failure_class,
+        })
+      }
+    }
+    return { by_status, by_failure_class, recent_errors }
   }
+}
+
+export type Stage1FailureClass = "backoff" | "provider_capacity" | "other_exhausted"
+
+export interface Stage1RecentError {
+  session_id: string
+  last_error: string
+  retry_at: number | null
+  status: string
+  retry_remaining: number
+  failure_class: Stage1FailureClass | null
+}
+
+function classifyStage1Failure(
+  row: { status: string; last_error: string; retry_at: number | null; retry_remaining: number },
+  nowSec: number,
+): Stage1FailureClass | null {
+  if (row.status === "failed" || row.retry_remaining <= 0) {
+    return isProviderCapacityError(row.last_error) ? "provider_capacity" : "other_exhausted"
+  }
+  if (row.retry_at != null && row.retry_at > nowSec) return "backoff"
+  if (isProviderCapacityError(row.last_error)) return "provider_capacity"
+  return null
 }

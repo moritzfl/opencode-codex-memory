@@ -8,7 +8,9 @@ import { resetPluginLifecycle } from "../src/lifecycle.js"
 import { DEFAULT_PHASE1_OPTIONS, runPhase1 } from "../src/phase1.js"
 import {
   checkRateLimit,
+  isProviderCapacityError,
   markRateLimitUsed,
+  noteProviderCapacityExhausted,
   resetRateLimitForTest,
 } from "../src/ratelimit.js"
 import { MemoryStore } from "../src/store.js"
@@ -52,6 +54,27 @@ describe("rate-limit stub semantics", () => {
     expect((await checkRateLimit("phase2")).ok).toBe(true)
     markRateLimitUsed("phase2") // no-op for phase2
     expect((await checkRateLimit("phase2")).ok).toBe(true)
+  })
+
+  it("classifies quota and rate-limit errors, not permanent extraction failures", () => {
+    expect(isProviderCapacityError("sub-agent prompt failed (APIError): The usage limit has been reached")).toBe(true)
+    expect(isProviderCapacityError("rate_limit_exceeded")).toBe(true)
+    expect(isProviderCapacityError("HTTP 429 too many requests")).toBe(true)
+    expect(isProviderCapacityError("insufficient_quota")).toBe(true)
+    expect(isProviderCapacityError("boom")).toBe(false)
+    expect(isProviderCapacityError("empty transcript for previously extracted session")).toBe(false)
+    expect(isProviderCapacityError("failed_invalid_artifacts: missing MEMORY.md")).toBe(false)
+  })
+
+  it("observed quota blocks later phase1 and phase2 claims", async () => {
+    expect((await checkRateLimit("phase1")).ok).toBe(true)
+    expect((await checkRateLimit("phase2")).ok).toBe(true)
+    noteProviderCapacityExhausted()
+    const phase1 = await checkRateLimit("phase1")
+    const phase2 = await checkRateLimit("phase2")
+    expect(phase1.ok).toBe(false)
+    expect(phase1.reason).toContain("provider capacity")
+    expect(phase2.ok).toBe(false)
   })
 
   it("empty phase1 eligibility does not stamp the process timer", async () => {

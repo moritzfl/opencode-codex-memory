@@ -4,27 +4,62 @@ export interface RateLimitInfo {
 }
 
 /**
- * Process-local anti-stampede for phase 1 only.
+ * Process-local anti-stampede for phase 1, plus an observed-quota circuit
+ * breaker that stands in for Codex guard.rs.
  *
  * Codex has no wall-clock throttle: it reads live provider quota once per
  * startup (memories/write/src/guard.rs) and fails open when unknown. Opencode
- * does not expose provider rate limits to plugins, so this stub keeps
- * chat.message/idle from hammering discovery + claim when many sessions go
- * idle at once.
+ * does not expose provider rate limits to plugins, so this stub:
+ * - keeps chat.message/idle from hammering discovery + claim (30s, phase 1)
+ * - after a quota/rate-limit API error, skips further claims until the same
+ *   1h window Codex uses for job retry_at — so a quota outage cannot burn
+ *   every eligible session's retry budget
  *
  * Semantics deliberately match "do not start another token-using run too
  * often", not "do not look often":
- * - checkRateLimit only reads the clock (empty/no-claim passes do not stamp)
+ * - checkRateLimit only reads clocks (empty/no-claim passes do not stamp)
  * - markRateLimitUsed stamps after a stage-1 claim actually succeeds
- * - phase 2 has no process timer; the DB claim + 6h cooldown serialize it
- *   (same as codex phase2 job outcomes)
+ * - noteProviderCapacityExhausted stamps after an observed quota error
+ * - phase 2 has no 30s timer; the DB claim + 6h cooldown serialize it.
+ *   The observed-quota stamp still skips phase 2 (Codex start.rs skips both).
  */
 let lastPhase1Work = 0
+let providerCapacityUntil = 0
 
 const MIN_PHASE1_INTERVAL_MS = 30_000
+export const PROVIDER_CAPACITY_BACKOFF_MS = 3_600_000
+
+const PROVIDER_CAPACITY_RE =
+  /usage limit|rate[\s_-]?limit|quota(?:\s+(?:exceeded|exhausted|reached))?|too many requests|\b429\b|resource_exhausted|insufficient_quota|billing.?hard.?limit/i
+
+export function providerCapacityMessage(error: unknown): string {
+  try {
+    if (typeof error === "string") return error
+    if (error instanceof Error) return String(error.message ?? "unknown error")
+    return String(error ?? "unknown error")
+  } catch {
+    return "unknown error"
+  }
+}
+
+export function isProviderCapacityError(error: unknown): boolean {
+  return PROVIDER_CAPACITY_RE.test(providerCapacityMessage(error))
+}
+
+export function isProviderCapacityBlocked(now = Date.now()): boolean {
+  return providerCapacityUntil > now
+}
+
+/** Call after a quota/rate-limit failure so later passes skip claiming. */
+export function noteProviderCapacityExhausted(now = Date.now()): void {
+  providerCapacityUntil = now + PROVIDER_CAPACITY_BACKOFF_MS
+}
 
 export async function checkRateLimit(kind: "phase1" | "phase2" = "phase1"): Promise<RateLimitInfo> {
-  // Phase 2: no process-local gate (codex relies on DB claim/cooldown only).
+  if (isProviderCapacityBlocked()) {
+    return { ok: false, reason: "provider capacity exhausted (observed quota/rate-limit)" }
+  }
+  // Phase 2: no 30s gate (codex relies on DB claim/cooldown only).
   if (kind === "phase2") return { ok: true }
 
   const now = Date.now()
@@ -39,7 +74,8 @@ export function markRateLimitUsed(kind: "phase1" | "phase2" = "phase1"): void {
   if (kind === "phase1") lastPhase1Work = Date.now()
 }
 
-/** Test seam: reset the process-local stamp. */
+/** Test seam: reset the process-local stamps. */
 export function resetRateLimitForTest(): void {
   lastPhase1Work = 0
+  providerCapacityUntil = 0
 }
