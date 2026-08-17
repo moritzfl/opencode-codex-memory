@@ -122,15 +122,31 @@ describe("loadTranscript", () => {
     const { loadTranscript } = require("../src/capture.js")
     expect(await loadTranscript("ses_1")).toEqual([])
   })
+
+  it("passes an abort signal to session.messages", async () => {
+    let signal: AbortSignal | undefined
+    setClient({
+      session: {
+        messages: async (req: { signal?: AbortSignal }) => {
+          signal = req.signal
+          return { data: API_ROWS }
+        },
+      },
+    })
+    const { loadTranscript } = require("../src/capture.js")
+    await loadTranscript("ses_1")
+    expect(signal).toBeDefined()
+  })
 })
 
-function discoveryClient(rows: unknown[] | Error, capture?: { query?: unknown; url?: string }) {
+function discoveryClient(rows: unknown[] | Error, capture?: { query?: unknown; url?: string; signal?: AbortSignal }) {
   return {
     _client: {
-      get: async (opts: { url: string; query?: unknown }) => {
+      get: async (opts: { url: string; query?: unknown; signal?: AbortSignal }) => {
         if (capture) {
           capture.url = opts.url
           capture.query = opts.query
+          capture.signal = opts.signal
         }
         if (rows instanceof Error) throw rows
         return { data: rows }
@@ -170,7 +186,7 @@ describe("listRecentSessions", () => {
   })
 
   it("calls experimental.session.list with roots, limit, and empty directory (global)", async () => {
-    const seen: { query?: unknown; url?: string } = {}
+    const seen: { query?: unknown; url?: string; signal?: AbortSignal } = {}
     setClient(discoveryClient([], seen))
     const { listRecentSessions } = require("../src/capture.js")
     await listRecentSessions(42)
@@ -178,6 +194,7 @@ describe("listRecentSessions", () => {
     // directory:"" suppresses the SDK client's project-scope injection so
     // listGlobal is host-wide (memory is global).
     expect(seen.query).toEqual({ roots: true, limit: 42, directory: "" })
+    expect(seen.signal).toBeDefined()
   })
 
   it("coalesces repeated discovery calls within the cache window", async () => {

@@ -27,6 +27,55 @@ export function pluginHttpGet(client: PluginInput["client"] | null | undefined):
   return http.get.bind(http) as HostHttpGet
 }
 
+/**
+ * Host-wide session list. The SDK injects `directory` from
+ * x-opencode-directory on every GET; a truthy value makes the experimental
+ * handler filter to that instance's project. Pass `directory:""` so rewrite
+ * does not re-inject and the handler sees a falsy value → listGlobal.
+ * Used by discovery and helper-session cleanup (memory is global).
+ */
+export async function hostListSessionsGlobal(
+  client: PluginInput["client"] | null | undefined,
+  opts: { limit: number; signal?: AbortSignal },
+): Promise<{ error?: unknown; data?: unknown }> {
+  const get = pluginHttpGet(client)
+  if (!get) throw new Error("plugin HTTP client unavailable")
+  return get({
+    url: "/experimental/session",
+    query: { roots: true, limit: opts.limit, directory: "" },
+    signal: opts.signal,
+  })
+}
+
+/** Attach a no-op catch so a raced-away promise cannot become unhandled. */
+export function ignoreLateRejection(promise: Promise<unknown>): void {
+  void promise.catch(() => {})
+}
+
+export async function withHostTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+  abort?: AbortController,
+): Promise<T> {
+  ignoreLateRejection(promise)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          abort?.abort()
+          reject(new Error(`${label} timed out after ${ms}ms`))
+        }, ms)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export interface SessionCreateBody {
   title?: string
   metadata?: Record<string, unknown>
@@ -35,11 +84,12 @@ export interface SessionCreateBody {
 /** session.create with metadata (SDK body type is incomplete). */
 export async function hostSessionCreate(
   client: PluginInput["client"],
-  opts: { directory: string; body: SessionCreateBody },
+  opts: { directory: string; body: SessionCreateBody; signal?: AbortSignal },
 ): Promise<{ error?: unknown; data?: { id?: string } }> {
   return client.session.create({
     query: { directory: opts.directory },
     body: opts.body as never,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   } as never) as Promise<{ error?: unknown; data?: { id?: string } }>
 }
 
@@ -91,11 +141,15 @@ export async function hostMcpStatus(
 export async function hostSessionMessages(
   client: PluginInput["client"] | null | undefined,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<{ error?: unknown; data?: unknown }> {
   if (!client || typeof client.session?.messages !== "function") {
     throw new Error("plugin client unavailable; cannot load transcript")
   }
-  return client.session.messages({ path: { id: sessionId } }) as Promise<{ error?: unknown; data?: unknown }>
+  return client.session.messages({
+    path: { id: sessionId },
+    ...(signal ? { signal } : {}),
+  }) as Promise<{ error?: unknown; data?: unknown }>
 }
 
 export function hostPartType(part: unknown): string {

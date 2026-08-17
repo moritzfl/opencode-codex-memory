@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reloading OpenCode finds leftover memory helper sessions again (same host-wide
+  listing used for session discovery).
+- Stuck OpenCode API calls abort instead of leaving background learning hanging.
+
 ## [0.6.0] - 2026-08-12
 
 ### Added

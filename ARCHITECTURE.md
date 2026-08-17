@@ -184,7 +184,10 @@ authenticated client (`input.client`), which shares auth with the host:
    auto-injects `directory` on GETs (project scope); we pass `directory=""` so
    the handler runs listGlobal without a directory filter — required because
    memory is global. Fail-safe: any error skips the pass and never finalizes a
-   job. The pass is also rate-limited (30s min interval).
+   job. The pass is also rate-limited (30s min interval). Helper-session
+   cleanup after reload uses the same host-wide list so memory-root
+   extract/consolidate sessions are visible (project-scoped `session.list`
+   cannot see them).
 
 Trade-off accepted: discovery rides an experimental route (stable since
 1.17.x) rather than reading `opencode.db`. The only SQLite the plugin touches
@@ -279,7 +282,7 @@ root" invariant. The extension approach is pure content.
 | Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
 | Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
 | Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 process anti-stampede (30s, stamps only after a claim); phase 2 uses DB claim/cooldown only | See `src/ratelimit.ts`; wire provider quota when opencode exposes it |
-| Plugin dispose / reload | N/A (in-process core) | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry |
+| Plugin dispose / reload | N/A (in-process core) | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions; startup reseeds helpers via host-wide `experimental.session` | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry |
 | Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
 
 ---

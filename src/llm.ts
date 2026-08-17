@@ -3,12 +3,17 @@ import path from "path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { memoryRoot } from "./paths.js"
 import {
+  hostListSessionsGlobal,
   hostSessionCreate,
   hostSessionDeletionConfirmed,
   hostSessionPrompt,
   hostStructuredOutput,
+  ignoreLateRejection,
+  pluginHttpGet,
+  withHostTimeout,
 } from "./host-client.js"
-import { pluginShutdownSignal } from "./lifecycle.js"
+import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
+import { SCAN_LIMIT } from "./store.js"
 
 export interface ExtractionResult {
   raw_memory: string
@@ -36,6 +41,13 @@ const SUBSESSION_LIST_TIMEOUT_MS = 5_000
 const SUBSESSION_ABORT_TIMEOUT_MS = 1_000
 const SUBSESSION_CONFIRM_TIMEOUT_MS = 1_000
 const SUBSESSION_DELETE_TIMEOUT_MS = 10_000
+const SUBSESSION_CREATE_TIMEOUT_MS = 10_000
+let createTimeoutMs = SUBSESSION_CREATE_TIMEOUT_MS
+
+/** Test seam. */
+export function setSubSessionCreateTimeoutForTest(ms?: number): void {
+  createTimeoutMs = ms ?? SUBSESSION_CREATE_TIMEOUT_MS
+}
 
 export function isMemorySubSession(sessionId: string): boolean {
   return activeSubSessions.has(sessionId)
@@ -57,16 +69,24 @@ function resolveSubSessionDirectory(): string {
 async function createSession(agent: string, title?: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
+  if (isPluginShuttingDown()) throw new SubagentCancelledError()
   const directory = resolveSubSessionDirectory()
   // directory is a query param (not body); without it the client inherits
   // PluginInput.directory, which may be a deleted project path.
-  const res = await hostSessionCreate(input.client, {
-    directory,
-    body: {
-      title: title ?? `codex-memory-${agent}`,
-      metadata: { [SUBSESSION_METADATA_KEY]: true },
-    },
-  })
+  const controller = new AbortController()
+  const res = await withHostTimeout(
+    hostSessionCreate(input.client, {
+      directory,
+      body: {
+        title: title ?? `codex-memory-${agent}`,
+        metadata: { [SUBSESSION_METADATA_KEY]: true },
+      },
+      signal: controller.signal,
+    }),
+    createTimeoutMs,
+    "session.create",
+    controller,
+  )
   if (!res.data) throw new Error(`session create failed: ${JSON.stringify(res.error ?? {})}`)
   const body = res.data as { id?: string }
   const id = body.id
@@ -195,6 +215,7 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
       parts: [{ type: "text", text: prompt }],
     },
   })
+  ignoreLateRejection(promptPromise)
   let timer: ReturnType<typeof setTimeout> | undefined
   let onAbort: (() => void) | undefined
   try {
@@ -370,15 +391,15 @@ export async function cleanupOldSubSessions(
 ): Promise<void> {
   const input = getPluginInput()
   if (!input) return
-  let timer: ReturnType<typeof setTimeout> | undefined
+  if (!pluginHttpGet(input.client)) return
+  const controller = new AbortController()
   try {
-    if (typeof input.client?.session?.list !== "function") return
-    const res = await Promise.race([
-      input.client.session.list(),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`session.list timed out after ${timeoutMs}ms`)), timeoutMs)
-      }),
-    ])
+    const res = await withHostTimeout(
+      hostListSessionsGlobal(input.client, { limit: SCAN_LIMIT, signal: controller.signal }),
+      timeoutMs,
+      "experimental.session.list",
+      controller,
+    )
     if (!res.data) return
     const list = res.data as Array<{
       id: string
@@ -404,8 +425,6 @@ export async function cleanupOldSubSessions(
     }
   } catch {
     // best effort only
-  } finally {
-    clearTimeout(timer)
   }
 }
 
@@ -428,8 +447,10 @@ async function deleteSession(id: string): Promise<boolean> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
+    const deletePromise = input.client.session.delete({ path: { id }, signal: controller.signal })
+    ignoreLateRejection(deletePromise)
     const res = await Promise.race([
-      input.client.session.delete({ path: { id }, signal: controller.signal }),
+      deletePromise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort()

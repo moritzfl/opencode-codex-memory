@@ -2,7 +2,7 @@ import { SCAN_LIMIT } from "./store.js"
 import type { MemoryStore } from "./store.js"
 import { getPluginInput } from "./llm.js"
 import { recordDiscoveryStatus } from "./diagnostics.js"
-import { hostPartType, hostSessionMessages, pluginHttpGet } from "./host-client.js"
+import { hostListSessionsGlobal, hostPartType, hostSessionMessages, pluginHttpGet, withHostTimeout } from "./host-client.js"
 
 export interface SessionRow {
   id: string
@@ -11,20 +11,6 @@ export interface SessionRow {
 }
 
 const API_TIMEOUT_MS = 60_000
-
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 interface ApiSession {
   id: string
@@ -63,25 +49,18 @@ export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<Se
     return discoveryCache.rows.slice(0, limit)
   }
 
-  const get = pluginHttpGet(getPluginInput()?.client)
-  if (!get) {
+  const client = getPluginInput()?.client
+  if (!pluginHttpGet(client)) {
     recordDiscoveryStatus({ ok: false, count: 0, error: "plugin HTTP client unavailable" })
     return []
   }
   try {
-    // Opencode's SDK client injects `directory` from x-opencode-directory on
-    // every GET (sdk client rewrite). The experimental session handler treats
-    // any present directory query as "filter to this instance's project",
-    // which would hide every other project's idle sessions — memory is global.
-    // Pass an empty directory so rewrite does not re-inject, and the handler
-    // sees a falsy value → listGlobal without a directory filter.
-    const res = await withTimeout(
-      get({
-        url: "/experimental/session",
-        query: { roots: true, limit, directory: "" },
-      }),
+    const controller = new AbortController()
+    const res = await withHostTimeout(
+      hostListSessionsGlobal(client, { limit, signal: controller.signal }),
       API_TIMEOUT_MS,
       "experimental.session.list",
+      controller,
     )
     if (!res || res.error || !Array.isArray(res.data)) {
       throw new Error(`experimental.session.list failed: ${JSON.stringify(res?.error ?? {})}`)
@@ -119,10 +98,12 @@ export interface TranscriptMessage {
 
 /** Official transcript surface: GET /session/{id}/message via the plugin's authenticated client. */
 async function fetchMessagesViaApi(sessionId: string): Promise<{ info?: { role?: string }; parts?: unknown[] }[]> {
-  const res = await withTimeout(
-    hostSessionMessages(getPluginInput()?.client, sessionId),
+  const controller = new AbortController()
+  const res = await withHostTimeout(
+    hostSessionMessages(getPluginInput()?.client, sessionId, controller.signal),
     API_TIMEOUT_MS,
     "session.messages",
+    controller,
   )
   if (!res || res.error || !Array.isArray(res.data)) {
     throw new Error(`session.messages failed: ${JSON.stringify(res?.error ?? {})}`)

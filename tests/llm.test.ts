@@ -9,10 +9,12 @@ import {
   fillTemplate,
   cleanupOldSubSessions,
   isMemorySubSession,
+  setSubSessionCreateTimeoutForTest,
   SubagentTimeoutError,
   SubagentCancelledError,
   SubagentShutdownError,
 } from "../src/llm.js"
+import { SCAN_LIMIT } from "../src/store.js"
 
 describe("fillTemplate", () => {
   it("substitutes placeholders", () => {
@@ -151,7 +153,10 @@ describe("extractViaSubagent (structured output)", () => {
       getCreateBody: () => capturedCreateBody,
     }
   }
-  afterEach(() => setPluginInput({ client: undefined } as any))
+  afterEach(() => {
+    setPluginInput({ client: undefined } as any)
+    setSubSessionCreateTimeoutForTest()
+  })
 
   it("requests json_schema format and reads the result from AssistantMessage.structured", async () => {
     const captured = stubClient(() => ({
@@ -192,6 +197,24 @@ describe("extractViaSubagent (structured output)", () => {
       },
     }))
     expect(extractViaSubagent("ses_error", "transcript")).rejects.toThrow("ProviderAuthError")
+  })
+
+  it("bounds a stalled session.create", async () => {
+    let createSignal: AbortSignal | undefined
+    setPluginInput({
+      client: {
+        session: {
+          create: async (req: { signal?: AbortSignal }) => {
+            createSignal = req.signal
+            return new Promise(() => {})
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    setSubSessionCreateTimeoutForTest(20)
+    await expect(extractViaSubagent("ses_create_hang", "transcript")).rejects.toThrow("session.create timed out")
+    expect(createSignal?.aborted).toBe(true)
   })
 
   it("aborts the sub-session when the prompt times out", async () => {
@@ -455,29 +478,55 @@ describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finis
   })
 })
 
+function cleanupListClient(
+  sessions: unknown[],
+  extras?: {
+    delete?: (req: { path: { id: string } }) => Promise<unknown>
+    get?: () => Promise<unknown>
+    hangList?: boolean
+    seen?: { url?: string; query?: unknown }
+  },
+) {
+  return {
+    _client: {
+      get: extras?.hangList
+        ? async () => new Promise(() => {})
+        : async (opts: { url?: string; query?: unknown }) => {
+            if (extras?.seen) {
+              extras.seen.url = opts.url
+              extras.seen.query = opts.query
+            }
+            return { data: sessions }
+          },
+    },
+    session: {
+      delete: extras?.delete ?? (async () => ({ data: {} })),
+      get: extras?.get ?? (async () => ({ error: { name: "NotFound" }, response: { status: 404 } })),
+    },
+  }
+}
+
 describe("cleanupOldSubSessions", () => {
   afterEach(() => setPluginInput({ client: undefined } as any))
 
   it("reseeds isMemorySubSession for live codex-memory-* sessions", async () => {
     // Simulate a plugin reload: Set is empty, but live sub-sessions remain.
     expect(isMemorySubSession("sub-live")).toBe(false)
+    const seen: { url?: string; query?: unknown } = {}
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              { id: "sub-live", title: "codex-memory-consolidate", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() } },
-              { id: "sub-old", title: "codex-memory-extract-ses_old123", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() - 120 * 60 * 1000 } },
-              { id: "user-ses", title: "normal chat", time: { created: Date.now() } },
-            ],
-          }),
-          delete: async () => ({ data: {} }),
-          get: async () => ({ error: { name: "NotFound" }, response: { status: 404 } }),
-        },
-      },
+      client: cleanupListClient(
+        [
+          { id: "sub-live", title: "codex-memory-consolidate", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() } },
+          { id: "sub-old", title: "codex-memory-extract-ses_old123", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() - 120 * 60 * 1000 } },
+          { id: "user-ses", title: "normal chat", time: { created: Date.now() } },
+        ],
+        { seen },
+      ),
     } as any)
     await cleanupOldSubSessions(90)
     await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(seen.url).toBe("/experimental/session")
+    expect(seen.query).toEqual({ roots: true, limit: SCAN_LIMIT, directory: "" })
     expect(isMemorySubSession("sub-live")).toBe(true)
     // Old one was deleted and removed from the set.
     expect(isMemorySubSession("sub-old")).toBe(false)
@@ -487,23 +536,21 @@ describe("cleanupOldSubSessions", () => {
   it("reseeds legacy sub-sessions without allowing their titles to authorize deletion", async () => {
     const deleted: string[] = []
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              {
-                id: "legacy-live",
-                title: "codex-memory-extract-ses_legacy123",
-                time: { created: Date.now() - 120 * 60 * 1000 },
-              },
-            ],
-          }),
+      client: cleanupListClient(
+        [
+          {
+            id: "legacy-live",
+            title: "codex-memory-extract-ses_legacy123",
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
+        ],
+        {
           delete: async (req: { path: { id: string } }) => {
             deleted.push(req.path.id)
             return { data: {} }
           },
         },
-      },
+      ),
     } as any)
 
     await cleanupOldSubSessions(90)
@@ -513,21 +560,17 @@ describe("cleanupOldSubSessions", () => {
 
   it("does not block startup on stale sub-session deletion", async () => {
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              {
-                id: "stale-delete",
-                title: "codex-memory-consolidate",
-                metadata: { "opencode-codex-memory": true },
-                time: { created: Date.now() - 120 * 60 * 1000 },
-              },
-            ],
-          }),
-          delete: async () => new Promise(() => {}),
-        },
-      },
+      client: cleanupListClient(
+        [
+          {
+            id: "stale-delete",
+            title: "codex-memory-consolidate",
+            metadata: { "opencode-codex-memory": true },
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
+        ],
+        { delete: async () => new Promise(() => {}) },
+      ),
     } as any)
 
     const started = Date.now()
@@ -538,21 +581,17 @@ describe("cleanupOldSubSessions", () => {
 
   it("keeps ownership when stale sub-session deletion fails", async () => {
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              {
-                id: "failed-delete",
-                title: "codex-memory-consolidate",
-                metadata: { "opencode-codex-memory": true },
-                time: { created: Date.now() - 120 * 60 * 1000 },
-              },
-            ],
-          }),
-          delete: async () => ({ error: { message: "busy" } }),
-        },
-      },
+      client: cleanupListClient(
+        [
+          {
+            id: "failed-delete",
+            title: "codex-memory-consolidate",
+            metadata: { "opencode-codex-memory": true },
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
+        ],
+        { delete: async () => ({ error: { message: "busy" } }) },
+      ),
     } as any)
 
     await cleanupOldSubSessions(90)
@@ -562,22 +601,20 @@ describe("cleanupOldSubSessions", () => {
 
   it("keeps ownership when OpenCode reports deletion success but the session survives", async () => {
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              {
-                id: "false-success-delete",
-                title: "codex-memory-consolidate",
-                metadata: { "opencode-codex-memory": true },
-                time: { created: Date.now() - 120 * 60 * 1000 },
-              },
-            ],
-          }),
+      client: cleanupListClient(
+        [
+          {
+            id: "false-success-delete",
+            title: "codex-memory-consolidate",
+            metadata: { "opencode-codex-memory": true },
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
+        ],
+        {
           delete: async () => ({ data: true, response: { status: 200 } }),
           get: async () => ({ data: { id: "false-success-delete" }, response: { status: 200 } }),
         },
-      },
+      ),
     } as any)
 
     await cleanupOldSubSessions(90)
@@ -589,24 +626,22 @@ describe("cleanupOldSubSessions", () => {
   it("does not claim or delete user forks that copied plugin metadata", async () => {
     const deleted: string[] = []
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              {
-                id: "forked-memory-session",
-                title: "codex-memory-consolidate (fork #1)",
-                metadata: { "opencode-codex-memory": true },
-                time: { created: Date.now() - 120 * 60 * 1000 },
-              },
-            ],
-          }),
+      client: cleanupListClient(
+        [
+          {
+            id: "forked-memory-session",
+            title: "codex-memory-consolidate (fork #1)",
+            metadata: { "opencode-codex-memory": true },
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
+        ],
+        {
           delete: async (req: { path: { id: string } }) => {
             deleted.push(req.path.id)
             return { data: true }
           },
         },
-      },
+      ),
     } as any)
 
     await cleanupOldSubSessions(90)
@@ -617,23 +652,21 @@ describe("cleanupOldSubSessions", () => {
   it("never treats a user-editable title as sub-session ownership", async () => {
     const deleted: string[] = []
     setPluginInput({
-      client: {
-        session: {
-          list: async () => ({
-            data: [
-              {
-                id: "user-prefixed-title",
-                title: "codex-memory-personal-notes",
-                time: { created: Date.now() - 120 * 60 * 1000 },
-              },
-            ],
-          }),
+      client: cleanupListClient(
+        [
+          {
+            id: "user-prefixed-title",
+            title: "codex-memory-personal-notes",
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
+        ],
+        {
           delete: async (req: { path: { id: string } }) => {
             deleted.push(req.path.id)
             return { data: {} }
           },
         },
-      },
+      ),
     } as any)
 
     await cleanupOldSubSessions(90)
@@ -643,7 +676,7 @@ describe("cleanupOldSubSessions", () => {
 
   it("bounds a stalled sub-session listing", async () => {
     setPluginInput({
-      client: { session: { list: async () => new Promise(() => {}) } },
+      client: cleanupListClient([], { hangList: true }),
     } as any)
 
     const started = Date.now()

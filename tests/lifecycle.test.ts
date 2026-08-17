@@ -27,7 +27,7 @@ describe("hook wiring", () => {
     })
     let settled = false
     const serverPromise = plugin.server(
-      { client: { session: { list: () => listResult } } } as any,
+      { client: { _client: { get: () => listResult } } } as any,
       undefined,
     ).then((hooks) => {
       settled = true
