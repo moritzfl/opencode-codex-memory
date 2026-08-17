@@ -28,7 +28,9 @@ export const memory_read = tool({
       }
       const stat = fs.lstatSync(fullPath)
       if (stat.isDirectory()) {
-        const entries = fs.readdirSync(fullPath)
+        const entries = visibleEntries(fullPath)
+          .sort((a, b) => comparePathNames(a.name, b.name))
+          .map((e) => e.name)
         return {
           output: `Directory ${args.path}/\n` + entries.map((e) => `- ${e}`).join("\n") + "\n(use memory_list for sorted, typed listings)",
           metadata: { kind: "directory", entries },
@@ -207,7 +209,7 @@ interface CandidateFile {
 function collectSearchFiles(start: string, prefix: string): CandidateFile[] {
   const files: CandidateFile[] = []
   const walk = (dir: string, rel: string) => {
-    const entries = visibleEntries(dir).sort((a, b) => a.name.localeCompare(b.name))
+    const entries = visibleEntries(dir).sort((a, b) => comparePathNames(a.name, b.name))
     for (const { name, isDir } of entries) {
       const abs = path.join(dir, name)
       const relPath = rel ? `${rel}/${name}` : name
@@ -403,7 +405,21 @@ export const memory_search = tool({
       const rangeLabel = timeFiltered ? ` in ${args.since ?? "..."}..${args.until ?? "..."}` : ""
 
       if (queries.length === 0) {
-        const listing = files.slice(0, args.max_results).map((f) => {
+        let startIndex = 0
+        if (args.cursor !== undefined) {
+          startIndex = Number.parseInt(args.cursor, 10)
+          if (!Number.isInteger(startIndex) || startIndex < 0 || String(startIndex) !== args.cursor.trim()) {
+            return { output: `memory_search error: invalid cursor "${args.cursor}" (must be a non-negative integer).` }
+          }
+          if (startIndex > files.length) {
+            return { output: `memory_search error: cursor ${startIndex} exceeds result count ${files.length}.` }
+          }
+        }
+        const endIndex = Math.min(startIndex + (args.max_results ?? SEARCH_MAX_RESULTS), files.length)
+        const page = files.slice(startIndex, endIndex)
+        const nextCursor = endIndex < files.length ? String(endIndex) : null
+        const truncated = nextCursor !== null
+        const listing = page.map((f) => {
           let content = ""
           try {
             content = readRegularFileNoFollow(f.abs).content.toString("utf8")
@@ -411,10 +427,25 @@ export const memory_search = tool({
           }
           return `${new Date(f.ts!).toISOString()} ${f.rel} — ${firstContentLine(content)}`
         })
-        if (listing.length === 0) return { output: `No time-anchored memory files${rangeLabel}.` }
+        if (files.length === 0) return { output: `No time-anchored memory files${rangeLabel}.` }
+        if (listing.length === 0) {
+          return {
+            output: `No memory files at cursor ${startIndex}${rangeLabel}.`,
+            metadata: { count: 0, next_cursor: nextCursor, truncated, since: args.since, until: args.until },
+          }
+        }
         return {
-          output: `${listing.length} memory file(s)${rangeLabel}:\n${listing.join("\n")}`,
-          metadata: { count: listing.length, since: args.since, until: args.until },
+          output:
+            `${listing.length} of ${files.length} memory file(s)${rangeLabel}` +
+            `${truncated ? ` (more available; pass cursor=${nextCursor})` : ""}:\n` +
+            listing.join("\n"),
+          metadata: {
+            count: listing.length,
+            next_cursor: nextCursor,
+            truncated,
+            since: args.since,
+            until: args.until,
+          },
         }
       }
 
@@ -448,7 +479,7 @@ export const memory_search = tool({
           all,
         )
       }
-      all.sort((a, b) => a.path.localeCompare(b.path) || a.match_line_number - b.match_line_number)
+      all.sort((a, b) => comparePathNames(a.path, b.path) || a.match_line_number - b.match_line_number)
 
       let startIndex = 0
       if (args.cursor !== undefined) {

@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reloading OpenCode finds leftover memory helper sessions again (same host-wide
   listing used for session discovery).
 - Stuck OpenCode API calls abort instead of leaving background learning hanging.
+- Time-only `memory_search` listings paginate with `cursor` instead of repeating
+  the first page.
 
 ## [0.6.0] - 2026-08-12
 

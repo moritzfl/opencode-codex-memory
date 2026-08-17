@@ -63,11 +63,33 @@ describe("memory_search time filters", () => {
   it("lists the period chronologically when no queries are given", async () => {
     const r = await search({ since: "2026-07-01", until: "2026-07-02" })
     const lines = r.output.split("\n")
-    expect(lines[0]).toContain("2 memory file(s)")
+    expect(lines[0]).toContain("2 of 2 memory file(s)")
     // Newest first, and both July files (summary + ad-hoc note) included.
     expect(lines[1]).toContain("remember-flag")
     expect(lines[2]).toContain("add_metrics")
     expect(lines[2]).toContain("Added metrics dashboard")
+    expect(r.metadata.next_cursor).toBe(null)
+    expect(r.metadata.truncated).toBe(false)
+  })
+
+  it("paginates the no-query chronological listing", async () => {
+    const page1 = await search({ since: "2026-06-01", until: "2026-07-03", max_results: 1 })
+    expect(page1.metadata.count).toBe(1)
+    expect(page1.metadata.truncated).toBe(true)
+    expect(page1.metadata.next_cursor).toBe("1")
+    expect(page1.output).toContain("remember-flag")
+    expect(page1.output).not.toContain("add_metrics")
+    const page2 = await search({
+      since: "2026-06-01",
+      until: "2026-07-03",
+      max_results: 1,
+      cursor: page1.metadata.next_cursor,
+    })
+    expect(page2.metadata.count).toBe(1)
+    expect(page2.output).toContain("add_metrics")
+    expect(page2.metadata.next_cursor).toBe("2")
+    expect((await search({ since: "2026-06-01", cursor: "notanint" })).output).toContain("invalid cursor")
+    expect((await search({ since: "2026-06-01", cursor: "999" })).output).toContain("exceeds result count")
   })
 
   it("treats a date-only until as the whole day", async () => {
@@ -131,6 +153,15 @@ describe("memory_search match modes (codex parity)", () => {
     const m = (r.metadata.matches as any[]).find((x) => x.path === "ctx.md")
     expect(m.content_start_line_number).toBe(1)
     expect(m.content).toBe("before\nneedle-xyz\nafter")
+  })
+
+  it("orders matches by byte path, not locale collation", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, "B.md"), "lexorder-token\n")
+    fs.writeFileSync(path.join(root, "a.md"), "lexorder-token\n")
+    const r = await search({ queries: ["lexorder-token"], max_results: 1 })
+    expect(r.metadata.matches[0].path).toBe("B.md")
+    expect(r.metadata.next_cursor).toBe("1")
   })
 
   it("paginates with an integer cursor over the (path, line)-sorted result set", async () => {
@@ -281,6 +312,20 @@ describe("memory_list", () => {
     expect(shrunk.output).toContain("No entries at cursor 2")
     expect(shrunk.output).not.toContain("exceeds result count")
     expect(shrunk.metadata.entries).toEqual([])
+  })
+})
+
+describe("memory_read directory listing", () => {
+  it("skips hidden files and symlinks, like memory_list", async () => {
+    const root = path.join(TEST_ROOT, "memories")
+    fs.writeFileSync(path.join(root, ".hidden.md"), "x")
+    fs.symlinkSync(path.join(TEST_ROOT, "outside.txt"), path.join(root, "link.md"))
+    const { memory_read } = require("../tools/memory.js")
+    const r = await memory_read.execute({ path: "." }, CTX)
+    expect(r.metadata.kind).toBe("directory")
+    expect(r.metadata.entries).toEqual(["MEMORY.md", "extensions", "rollout_summaries"])
+    expect(r.output).not.toContain(".hidden")
+    expect(r.output).not.toContain("link.md")
   })
 })
 
