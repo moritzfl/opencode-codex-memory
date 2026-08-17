@@ -6,7 +6,12 @@ import { closeDb, openDb } from "../src/db.js"
 import { captureWorkspaceDiff } from "../src/git-baseline.js"
 import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
-import { DEFAULT_PHASE2_OPTIONS, dropGonePhase2Inputs, runPhase2 } from "../src/phase2.js"
+import {
+  DEFAULT_PHASE2_OPTIONS,
+  dropGonePhase2Inputs,
+  runPhase2,
+  selectLivePhase2Inputs,
+} from "../src/phase2.js"
 import { noteProviderCapacityExhausted, resetRateLimitForTest } from "../src/ratelimit.js"
 import { MemoryStore } from "../src/store.js"
 
@@ -248,5 +253,42 @@ describe("phase 2 orchestration", () => {
     const kept = await dropGonePhase2Inputs(store, store.getPhase2InputSelection(50, 30))
     expect(kept.map((o) => o.session_id).sort()).toEqual(["ses_err", "ses_live"])
     expect(store.stage1Outputs().map((o) => o.session_id).sort()).toEqual(["ses_err", "ses_live"])
+  })
+
+  it("backfills a gone top-ranked input with the next live session", async () => {
+    setPluginInput({
+      client: {
+        session: {
+          get: async (req: { path: { id: string } }) =>
+            req.path.id === "ses_gone"
+              ? { response: { status: 404 } }
+              : { data: { id: req.path.id }, response: { status: 200 } },
+        },
+      },
+    } as any)
+    const store = new MemoryStore()
+    const ts = Date.now()
+    store.upsertStage1Output({
+      session_id: "ses_live",
+      source_updated_at: ts,
+      raw_memory: "live",
+      rollout_summary: "live",
+      rollout_slug: "live",
+      cwd: "/p",
+      generated_at: ts,
+    })
+    store.upsertStage1Output({
+      session_id: "ses_gone",
+      source_updated_at: ts + 1,
+      raw_memory: "gone",
+      rollout_summary: "gone",
+      rollout_slug: "gone",
+      cwd: "/p",
+      generated_at: ts + 1,
+    })
+
+    const selected = await selectLivePhase2Inputs(store, 1, 30)
+    expect(selected.map((o) => o.session_id)).toEqual(["ses_live"])
+    expect(store.stage1Outputs().map((o) => o.session_id)).toEqual(["ses_live"])
   })
 })

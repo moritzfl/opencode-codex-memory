@@ -186,10 +186,10 @@ mappings:
       probes stage1_outputs.source_updated_at — diverges only in exotic DB
       states); phase-2 success watermark = max(selected source_updated_at)
       (codex additionally folds in the claim-time input_watermark;
-      informational column, nothing reads it); phase-2 selection also
-      probes session.get per selected row (404 → deleteSessionMemory, same
-      as session.deleted; timeout/error keeps the row). Codex re-validates
-      against the live threads table at selection time.
+      informational column, nothing reads it); phase-2 selection pages ranked
+      candidates and probes session.get until maxRaw live rows are collected
+      (404 → deleteSessionMemory, same as session.deleted; timeout/error keeps
+      the row). Codex performs the equivalent live-thread check while paging.
       Host adaptation (no live quota API): quota/rate-limit stage-1 failures
       keep status=pending and do not decrement retry_remaining; exhausted
       quota-failed rows are requeued without a newer session watermark. Codex

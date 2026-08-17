@@ -74,6 +74,37 @@ export async function dropGonePhase2Inputs(
   return kept
 }
 
+/**
+ * Codex pages ranked candidates until it has `maxRaw` rows whose threads are
+ * still live. Our thread metadata lives in the host, so confirmed-gone rows
+ * are deleted and the ranking is queried again to backfill their slots.
+ */
+export async function selectLivePhase2Inputs(
+  store: MemoryStore,
+  maxRaw: number,
+  maxUnusedDays: number,
+): Promise<ReturnType<MemoryStore["getPhase2InputSelection"]>> {
+  if (maxRaw <= 0) return []
+  const selected: ReturnType<MemoryStore["getPhase2InputSelection"]> = []
+  const seen = new Set<string>()
+  while (selected.length < maxRaw) {
+    // Once most slots are filled, inspect one liveness chunk beyond the
+    // already-selected rows so a single gone row does not force serial probes.
+    const scanLimit = Math.max(maxRaw, selected.length + PHASE2_LIVE_CHECK_CONCURRENCY)
+    const candidates = store
+      .getPhase2InputSelection(scanLimit, maxUnusedDays)
+      .filter((output) => !seen.has(output.session_id))
+    if (candidates.length === 0) break
+    for (const output of candidates) seen.add(output.session_id)
+    const live = await dropGonePhase2Inputs(store, candidates)
+    for (const output of live) {
+      selected.push(output)
+      if (selected.length >= maxRaw) break
+    }
+  }
+  return selected
+}
+
 function maybeExportToCodex(interop: ReturnType<typeof resolveCodexInterop>): void {
   if (!interop?.exportEnabled) return
   try {
@@ -142,10 +173,7 @@ export async function runPhase2(
         return { status: "shutting_down" }
       }
 
-      const outputs = await dropGonePhase2Inputs(
-        store,
-        store.getPhase2InputSelection(opts.maxRaw, opts.maxUnusedDays),
-      )
+      const outputs = await selectLivePhase2Inputs(store, opts.maxRaw, opts.maxUnusedDays)
       rebuildRawMemories(outputs)
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)
