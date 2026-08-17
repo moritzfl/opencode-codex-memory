@@ -36,13 +36,19 @@ export function pluginHttpGet(client: PluginInput["client"] | null | undefined):
  */
 export async function hostListSessionsGlobal(
   client: PluginInput["client"] | null | undefined,
-  opts: { limit: number; signal?: AbortSignal },
+  opts: { limit: number; cursor?: number; search?: string; signal?: AbortSignal },
 ): Promise<{ error?: unknown; data?: unknown }> {
   const get = pluginHttpGet(client)
   if (!get) throw new Error("plugin HTTP client unavailable")
   return get({
     url: "/experimental/session",
-    query: { roots: true, limit: opts.limit, directory: "" },
+    query: {
+      roots: true,
+      limit: opts.limit,
+      directory: "",
+      ...(opts.cursor !== undefined ? { cursor: opts.cursor } : {}),
+      ...(opts.search !== undefined ? { search: opts.search } : {}),
+    },
     signal: opts.signal,
   })
 }

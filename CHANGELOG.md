@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of being permanently dropped after three attempts. Already-failed
   quota jobs are reopened automatically; `memory_inspect` labels backoff vs
   quota vs other exhausted failures.
-- Reloading OpenCode finds leftover memory helper sessions again (same host-wide
-  listing used for session discovery).
+- Reloading OpenCode finds leftover memory helper sessions across all pages of
+  the host-wide session listing.
 - Stuck OpenCode API calls abort instead of leaving background learning hanging.
 - Time-only `memory_search` listings paginate with `cursor` instead of repeating
   the first page.

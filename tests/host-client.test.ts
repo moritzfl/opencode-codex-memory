@@ -73,4 +73,28 @@ describe("hostListSessionsGlobal", () => {
     expect(seen.query).toEqual({ roots: true, limit: 17, directory: "" })
     expect(seen.signal).toBe(controller.signal)
   })
+
+  it("passes optional global cursor and title search", async () => {
+    let query: unknown
+    const client = {
+      _client: {
+        get: async (opts: { query?: unknown }) => {
+          query = opts.query
+          return { data: [] }
+        },
+      },
+    }
+    await hostListSessionsGlobal(client as never, {
+      limit: 50,
+      cursor: 1234,
+      search: "codex-memory-",
+    })
+    expect(query).toEqual({
+      roots: true,
+      limit: 50,
+      directory: "",
+      cursor: 1234,
+      search: "codex-memory-",
+    })
+  })
 })

@@ -189,6 +189,8 @@ async function main() {
         )
         note(names.has("roots"), "experimental.session.list query param 'roots'")
         note(names.has("limit"), "experimental.session.list query param 'limit'")
+        note(names.has("cursor"), "experimental.session.list query param 'cursor'")
+        note(names.has("search"), "experimental.session.list query param 'search'")
       }
     }
   } finally {

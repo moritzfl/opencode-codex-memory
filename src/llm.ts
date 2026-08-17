@@ -432,34 +432,53 @@ export async function cleanupOldSubSessions(
   if (!pluginHttpGet(input.client)) return
   const controller = new AbortController()
   try {
-    const res = await withHostTimeout(
-      hostListSessionsGlobal(input.client, { limit: SCAN_LIMIT, signal: controller.signal }),
-      timeoutMs,
-      "experimental.session.list",
-      controller,
-    )
-    if (!res.data) return
-    const list = res.data as Array<{
-      id: string
-      title?: string
-      metadata?: Record<string, unknown>
-      time?: { created?: number }
-    }>
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000
-    for (const s of list) {
-      if (!s.id) continue
-      const pluginTitle = isPluginSubSessionTitle(s.title)
-      const owned = s.metadata?.[SUBSESSION_METADATA_KEY] === true && pluginTitle
-      const legacy = s.metadata?.[SUBSESSION_METADATA_KEY] !== true && pluginTitle
-      if (!owned && !legacy) continue
-      // Durable ownership requires marker + generated title; a legacy title
-      // alone can reseed the skip set but never authorizes deletion.
-      activeSubSessions.add(s.id)
-      if (!owned) continue
-      const created = s.time?.created ?? 0
-      if (created && created < cutoff) {
-        void deleteSession(s.id)
+    const deadline = Date.now() + timeoutMs
+    let cursor: number | undefined
+    while (true) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) return
+      const res = await withHostTimeout(
+        hostListSessionsGlobal(input.client, {
+          limit: SCAN_LIMIT,
+          cursor,
+          search: "codex-memory-",
+          signal: controller.signal,
+        }),
+        remaining,
+        "experimental.session.list",
+        controller,
+      )
+      if (res.error || !Array.isArray(res.data)) return
+      const list = res.data as Array<{
+        id: string
+        title?: string
+        metadata?: Record<string, unknown>
+        time?: { created?: number; updated?: number }
+      }>
+      for (const s of list) {
+        if (!s.id) continue
+        const pluginTitle = isPluginSubSessionTitle(s.title)
+        const owned = s.metadata?.[SUBSESSION_METADATA_KEY] === true && pluginTitle
+        const legacy = s.metadata?.[SUBSESSION_METADATA_KEY] !== true && pluginTitle
+        if (!owned && !legacy) continue
+        // Durable ownership requires marker + generated title; a legacy title
+        // alone can reseed the skip set but never authorizes deletion.
+        activeSubSessions.add(s.id)
+        if (!owned) continue
+        const created = s.time?.created ?? 0
+        if (created && created < cutoff) {
+          void deleteSession(s.id)
+        }
       }
+      if (list.length < SCAN_LIMIT) return
+      const updates = list
+        .map((s) => s.time?.updated)
+        .filter((updated): updated is number => typeof updated === "number" && updated > 0)
+      if (updates.length === 0) return
+      const nextCursor = Math.min(...updates)
+      if (cursor !== undefined && nextCursor >= cursor) return
+      cursor = nextCursor
     }
   } catch {
     // best effort only

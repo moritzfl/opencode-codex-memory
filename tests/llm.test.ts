@@ -505,11 +505,12 @@ function cleanupListClient(
     get?: () => Promise<unknown>
     hangList?: boolean
     seen?: { url?: string; query?: unknown }
+    list?: (opts: { url?: string; query?: Record<string, unknown> }) => Promise<unknown>
   },
 ) {
   return {
     _client: {
-      get: extras?.hangList
+      get: extras?.list ?? (extras?.hangList
         ? async () => new Promise(() => {})
         : async (opts: { url?: string; query?: unknown }) => {
             if (extras?.seen) {
@@ -517,7 +518,7 @@ function cleanupListClient(
               extras.seen.query = opts.query
             }
             return { data: sessions }
-          },
+          }),
     },
     session: {
       delete: extras?.delete ?? (async () => ({ data: {} })),
@@ -546,7 +547,12 @@ describe("cleanupOldSubSessions", () => {
     await cleanupOldSubSessions(90)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(seen.url).toBe("/experimental/session")
-    expect(seen.query).toEqual({ roots: true, limit: SCAN_LIMIT, directory: "" })
+    expect(seen.query).toEqual({
+      roots: true,
+      limit: SCAN_LIMIT,
+      directory: "",
+      search: "codex-memory-",
+    })
     expect(isMemorySubSession("sub-live")).toBe(true)
     // Old one was deleted and removed from the set.
     expect(isMemorySubSession("sub-old")).toBe(false)
@@ -702,5 +708,46 @@ describe("cleanupOldSubSessions", () => {
     const started = Date.now()
     await cleanupOldSubSessions(90, 20)
     expect(Date.now() - started).toBeLessThan(500)
+  })
+
+  it("paginates beyond the first global helper page", async () => {
+    const now = Date.now()
+    const firstPage = Array.from({ length: SCAN_LIMIT }, (_, i) => ({
+      id: `paged-live-${i}`,
+      title: "codex-memory-consolidate",
+      metadata: { "opencode-codex-memory": true },
+      time: { created: now, updated: SCAN_LIMIT - i },
+    }))
+    const queries: Record<string, unknown>[] = []
+    const deleted: string[] = []
+    setPluginInput({
+      client: cleanupListClient([], {
+        list: async (opts) => {
+          queries.push(opts.query ?? {})
+          return opts.query?.cursor === undefined
+            ? { data: firstPage }
+            : {
+                data: [{
+                  id: "paged-old",
+                  title: "codex-memory-consolidate",
+                  metadata: { "opencode-codex-memory": true },
+                  time: { created: now - 120 * 60 * 1000, updated: 0 },
+                }],
+              }
+        },
+        delete: async (req) => {
+          deleted.push(req.path.id)
+          return { data: {} }
+        },
+      }),
+    } as any)
+
+    await cleanupOldSubSessions(90)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(queries).toHaveLength(2)
+    expect(queries[0]).toMatchObject({ search: "codex-memory-" })
+    expect(queries[1]).toMatchObject({ cursor: 1, search: "codex-memory-" })
+    expect(deleted).toContain("paged-old")
   })
 })
