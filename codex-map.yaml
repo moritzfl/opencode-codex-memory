@@ -511,9 +511,11 @@ mappings:
       process-local anti-stampede (30s) that stamps only AFTER a stage-1 claim
       succeeds; empty/no-claim passes do not burn the interval (matches codex
       skipped_no_candidates free retry). After an observed quota/rate-limit
-      error, a 1h process stamp skips further phase-1 and phase-2 claims
-      (Codex start.rs skips both phases when the live guard fails). Phase 2
-      still has no 30s timer — DB claim/cooldown only, like codex. Wire
+      error, a 1h process stamp skips further claims for the same resolved
+      model (or the same phase when no model is resolved). Codex start.rs skips
+      both phases when its account-level live guard fails; model scoping avoids
+      blocking independently configured opencode providers. Phase 2 still has
+      no 30s timer — DB claim/cooldown only, like codex. Wire
       min_rate_limit_remaining_percent when the host exposes provider quota.
   # Platform-only modules (no codex theirs path — do not map with theirs: null,
   # the drift script existence-checks every theirs value):

@@ -9,7 +9,13 @@ import {
   validateConsolidationArtifacts,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
-import { consolidateViaSubagent, getPluginInput, SubagentCancelledError, SubagentShutdownError } from "./llm.js"
+import {
+  consolidateViaSubagent,
+  getPluginInput,
+  resolveConsolidationModel,
+  SubagentCancelledError,
+  SubagentShutdownError,
+} from "./llm.js"
 import { hostSessionLiveness } from "./host-client.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
@@ -101,7 +107,8 @@ export async function runPhase2(
   try {
     // No 30s process gate: codex serializes phase 2 only via the DB claim.
     // An observed quota stamp still skips both phases (Codex start.rs).
-    const rl = await checkRateLimit("phase2")
+    const consolidationModel = await resolveConsolidationModel(opts.consolidationModel)
+    const rl = await checkRateLimit("phase2", consolidationModel)
     if (!rl.ok) return { status: "skipped_rate_limit" }
 
     const claim = store.claimGlobalPhase2Job()
@@ -229,7 +236,7 @@ export async function runPhase2(
         await consolidateViaSubagent(
           memoryRoot(),
           DIFF_ARTIFACT,
-          opts.consolidationModel,
+          consolidationModel,
           consolidationSignal,
         )
       } catch (err) {
@@ -292,7 +299,7 @@ export async function runPhase2(
         store.releasePhase2OnShutdown(claim.ownershipToken)
         return { status: "shutting_down" }
       }
-      if (isProviderCapacityError(err)) noteProviderCapacityExhausted()
+      if (isProviderCapacityError(err)) noteProviderCapacityExhausted("phase2", consolidationModel)
       store.markPhase2Failed(claim.ownershipToken, err)
       return { status: "failed" }
     } finally {

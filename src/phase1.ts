@@ -2,13 +2,14 @@ import { MemoryStore, STAGE1_CONCURRENCY } from "./store.js"
 import { loadTranscript, selectEligibleSessions } from "./capture.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
-import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
+import { extractViaSubagent, resolveExtractionModel, SubagentCancelledError } from "./llm.js"
 import {
   checkRateLimit,
   isProviderCapacityBlocked,
   isProviderCapacityError,
   markRateLimitUsed,
   noteProviderCapacityExhausted,
+  ProviderCapacityError,
 } from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
@@ -56,7 +57,8 @@ export async function runPhase1(
   if (requeued > 0) {
     recordDiagnostic("info", "phase1", `requeued ${requeued} quota-exhausted job(s)`)
   }
-  const rl = await rateLimitCheck("phase1")
+  const extractModel = await resolveExtractionModel(opts.extractModel)
+  const rl = await rateLimitCheck("phase1", extractModel)
   if (!rl.ok) {
     console.warn("[opencode-codex-memory] skipping phase1 due to rate limit:", rl.reason)
     return
@@ -89,8 +91,8 @@ export async function runPhase1(
       return
     }
     // Sibling jobs in this pass: do not call the model after quota was observed.
-    if (isProviderCapacityBlocked()) {
-      store.markStage1Failed(sid, claim.ownershipToken, "provider capacity exhausted")
+    if (isProviderCapacityBlocked("phase1", extractModel)) {
+      store.markStage1Failed(sid, claim.ownershipToken, new ProviderCapacityError("provider capacity exhausted"))
       return
     }
     try {
@@ -113,7 +115,7 @@ export async function runPhase1(
       }
       const result = await extractViaSubagent(sid, transcript, {
         cwd: session?.directory ?? undefined,
-        model: opts.extractModel,
+        model: extractModel,
       })
       // Finalize after a completed model call even if dispose raced, so the
       // claim does not sit `running` until lease expiry. The mark is token +
@@ -140,7 +142,7 @@ export async function runPhase1(
       if (err instanceof SubagentCancelledError || isPluginShuttingDown()) {
         store.releaseStage1OnShutdown(sid, claim.ownershipToken)
       } else {
-        if (isProviderCapacityError(err)) noteProviderCapacityExhausted()
+        if (isProviderCapacityError(err)) noteProviderCapacityExhausted("phase1", extractModel)
         store.markStage1Failed(sid, claim.ownershipToken, err)
       }
     }

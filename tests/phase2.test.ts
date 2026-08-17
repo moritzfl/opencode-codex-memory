@@ -79,7 +79,7 @@ describe("phase 2 orchestration", () => {
   })
 
   it("skips claiming when provider capacity is exhausted", async () => {
-    noteProviderCapacityExhausted()
+    noteProviderCapacityExhausted("phase2")
     const result = await runPhase2(new MemoryStore())
     expect(result.status).toBe("skipped_rate_limit")
     expect(

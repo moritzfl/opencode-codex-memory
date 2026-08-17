@@ -7,6 +7,7 @@ import { setPluginInput } from "../src/llm.js"
 import { resetPluginLifecycle } from "../src/lifecycle.js"
 import { DEFAULT_PHASE1_OPTIONS, runPhase1 } from "../src/phase1.js"
 import {
+  activeProviderCapacityBackoffs,
   checkRateLimit,
   isProviderCapacityError,
   markRateLimitUsed,
@@ -58,6 +59,8 @@ describe("rate-limit stub semantics", () => {
 
   it("classifies quota and rate-limit errors, not permanent extraction failures", () => {
     expect(isProviderCapacityError("sub-agent prompt failed (APIError): The usage limit has been reached")).toBe(true)
+    expect(isProviderCapacityError({ name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } })).toBe(true)
+    expect(isProviderCapacityError("provider capacity exhausted")).toBe(true)
     expect(isProviderCapacityError("rate_limit_exceeded")).toBe(true)
     expect(isProviderCapacityError("HTTP 429 too many requests")).toBe(true)
     expect(isProviderCapacityError("insufficient_quota")).toBe(true)
@@ -66,15 +69,24 @@ describe("rate-limit stub semantics", () => {
     expect(isProviderCapacityError("failed_invalid_artifacts: missing MEMORY.md")).toBe(false)
   })
 
-  it("observed quota blocks later phase1 and phase2 claims", async () => {
-    expect((await checkRateLimit("phase1")).ok).toBe(true)
+  it("scopes observed quota by resolved model", async () => {
+    noteProviderCapacityExhausted("phase1", "limited/model")
+    const extraction = await checkRateLimit("phase1", "limited/model")
+    const consolidation = await checkRateLimit("phase2", "limited/model")
+    expect(extraction.ok).toBe(false)
+    expect(extraction.reason).toContain("model:limited/model")
+    expect(consolidation.ok).toBe(false)
+    expect((await checkRateLimit("phase1", "healthy/model")).ok).toBe(true)
+    expect((await checkRateLimit("phase2", "healthy/model")).ok).toBe(true)
+    expect(activeProviderCapacityBackoffs()).toEqual([
+      expect.objectContaining({ scope: "model:limited/model" }),
+    ])
+  })
+
+  it("keeps unresolved default models phase-specific", async () => {
+    noteProviderCapacityExhausted("phase1")
+    expect((await checkRateLimit("phase1")).ok).toBe(false)
     expect((await checkRateLimit("phase2")).ok).toBe(true)
-    noteProviderCapacityExhausted()
-    const phase1 = await checkRateLimit("phase1")
-    const phase2 = await checkRateLimit("phase2")
-    expect(phase1.ok).toBe(false)
-    expect(phase1.reason).toContain("provider capacity")
-    expect(phase2.ok).toBe(false)
   })
 
   it("empty phase1 eligibility does not stamp the process timer", async () => {

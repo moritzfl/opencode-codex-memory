@@ -14,6 +14,7 @@ import {
 } from "./host-client.js"
 import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
 import { SCAN_LIMIT } from "./store.js"
+import { isProviderCapacityError, ProviderCapacityError } from "./ratelimit.js"
 
 export interface ExtractionResult {
   raw_memory: string
@@ -134,6 +135,14 @@ async function getConfigModels(): Promise<{ model?: string; smallModel?: string 
   return configModels
 }
 
+export async function resolveExtractionModel(configured?: string): Promise<string | undefined> {
+  return configured ?? (await getConfigModels()).smallModel
+}
+
+export async function resolveConsolidationModel(configured?: string): Promise<string | undefined> {
+  return configured ?? (await getConfigModels()).model
+}
+
 // extract_model / consolidation model strings are "providerID/modelID".
 function parseModelRef(ref: string): { providerID: string; modelID: string } | null {
   const slash = ref.indexOf("/")
@@ -239,11 +248,27 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
         timer = setTimeout(() => reject(new SubagentTimeoutError(timeoutMs)), timeoutMs)
       }),
     ])
-    if (!res.data) throw new Error(`prompt failed: ${JSON.stringify(res.error ?? {})}`)
-    const promptError = (res.data as { info?: { error?: { name?: string; data?: { message?: string } } } }).info?.error
+    if (!res.data) {
+      const message = `prompt failed: ${JSON.stringify(res.error ?? {})}`
+      if (isProviderCapacityError(res.error)) throw new ProviderCapacityError(message)
+      throw new Error(message)
+    }
+    const promptError = (res.data as {
+      info?: {
+        error?: {
+          name?: string
+          data?: { message?: string; statusCode?: number }
+        }
+      }
+    }).info?.error
     if (promptError) {
       const detail = promptError.data?.message
-      throw new Error(`sub-agent prompt failed${promptError.name ? ` (${promptError.name})` : ""}${detail ? `: ${detail}` : ""}`)
+      const status = promptError.data?.statusCode
+      const message =
+        `sub-agent prompt failed${promptError.name ? ` (${promptError.name})` : ""}` +
+        `${detail ? `: ${detail}` : ""}${status !== undefined ? ` (HTTP ${status})` : ""}`
+      if (isProviderCapacityError(promptError)) throw new ProviderCapacityError(message, status)
+      throw new Error(message)
     }
     return res.data
   } catch (err) {
@@ -321,7 +346,7 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
   try {
     const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript)
     // extract_model option > opencode small_model > session default.
-    const model = opts.model ?? (await getConfigModels()).smallModel
+    const model = await resolveExtractionModel(opts.model)
     const data = await runPrompt(subId, prompt, agent, {
       // Mirrors the stage-1 job lease (1h): codex has no per-request timeout,
       // and a near-600k-char transcript on a slow model can easily exceed a
@@ -373,7 +398,7 @@ export async function consolidateViaSubagent(
   try {
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
     // consolidation_model option > opencode model (main) > session default.
-    const resolved = model ?? (await getConfigModels()).model
+    const resolved = await resolveConsolidationModel(model)
     await promptSession(subId, prompt, agent, {
       model: resolved,
       timeoutMs: CONSOLIDATION_TIMEOUT_MS,

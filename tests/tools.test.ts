@@ -459,6 +459,18 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("phase2_status: none")
     expect(r.output).toContain("phase2_last_success_watermark: none")
     expect(r.output).toContain("phase2_last_success_finished_at: none")
+    expect(r.output).toContain("provider_capacity_backoff: none")
+  })
+
+  it("reports active provider-capacity breaker deadlines", async () => {
+    const { noteProviderCapacityExhausted } = require("../src/ratelimit.js")
+    const { memory_inspect } = require("../tools/control.js")
+    noteProviderCapacityExhausted("phase1", "limited/model")
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toMatch(/provider_capacity_backoff model:limited\/model: retry_at=\d{4}-/)
+    expect(r.metadata.provider_capacity_backoffs).toEqual([
+      expect.objectContaining({ scope: "model:limited/model" }),
+    ])
   })
 
   it("surfaces a failed phase-2 job without labeling the failure as success", async () => {

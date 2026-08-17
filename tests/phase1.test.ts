@@ -163,6 +163,7 @@ describe("phase 1 provider capacity", () => {
   }): { prompted: string[]; updatedAt: number } {
     const updatedAt = Date.now() - 7 * 60 * 60 * 1000
     const prompted: string[] = []
+    let created = 0
     const ids = opts.sessions ?? [SESSION_ID]
     setPluginInput({
       client: {
@@ -178,7 +179,7 @@ describe("phase 1 provider capacity", () => {
           messages: async () => ({
             data: [{ info: { role: "user" }, parts: [{ type: "text", text: "remember this convention" }] }],
           }),
-          create: async () => ({ data: { id: `sub-extract-${prompted.length}` } }),
+          create: async () => ({ data: { id: `sub-extract-${created++}` } }),
           prompt: async (request: { path: { id: string } }) => {
             prompted.push(request.path.id)
             return opts.prompt(request.path.id)
@@ -200,11 +201,11 @@ describe("phase 1 provider capacity", () => {
       .get(id) as { status: string; retry_remaining: number; last_error: string | null }
   }
 
-  it("does not permanently fail a quota error and skips later claims until capacity returns", async () => {
+  it("does not permanently fail a host-shaped 429 and skips later claims until capacity returns", async () => {
     const { prompted } = installExtractClient({
       prompt: () => ({
         data: {
-          info: { error: { name: "APIError", data: { message: "The usage limit has been reached" } } },
+          info: { error: { name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } } },
         },
       }),
     })
@@ -213,7 +214,8 @@ describe("phase 1 provider capacity", () => {
     const afterFail = jobRow(SESSION_ID)
     expect(afterFail.status).toBe("pending")
     expect(afterFail.retry_remaining).toBe(3)
-    expect(afterFail.last_error).toContain("usage limit")
+    expect(afterFail.last_error).toContain("Free usage exceeded")
+    expect(afterFail.last_error).toContain("HTTP 429")
     expect(prompted.length).toBe(1)
 
     await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: 1 })
@@ -309,5 +311,24 @@ describe("phase 1 provider capacity", () => {
     expect(jobRow(OTHER_ID).status).toBe("pending")
     expect(jobRow(SESSION_ID).retry_remaining).toBe(3)
     expect(jobRow(OTHER_ID).retry_remaining).toBe(3)
+  })
+
+  it("does not burn retries on queued claims beyond extraction concurrency", async () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `ses_capacity_${i}`)
+    const { prompted } = installExtractClient({
+      sessions: ids,
+      prompt: () => ({
+        data: {
+          info: { error: { name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } } },
+        },
+      }),
+    })
+    const store = new MemoryStore()
+    await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: ids.length })
+    expect(prompted.length).toBeLessThanOrEqual(8)
+    for (const id of ids) {
+      expect(jobRow(id).status).toBe("pending")
+      expect(jobRow(id).retry_remaining).toBe(3)
+    }
   })
 })

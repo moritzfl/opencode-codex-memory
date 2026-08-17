@@ -17,6 +17,7 @@ import {
 } from "../src/diagnostics.js"
 import { isPluginShuttingDown } from "../src/lifecycle.js"
 import { getAgentHealth } from "../src/agent-health.js"
+import { activeProviderCapacityBackoffs } from "../src/ratelimit.js"
 
 function isSymlinkedRoot(): boolean {
   try {
@@ -289,6 +290,10 @@ export const memory_inspect = tool({
         `phase2_in_flight: ${isPhase2InFlight()}`,
         `plugin_shutting_down: ${isPluginShuttingDown()}`,
       ]
+      const capacityBackoffs = activeProviderCapacityBackoffs()
+      const capacityLines = capacityBackoffs.length > 0
+        ? capacityBackoffs.map((b) => `provider_capacity_backoff ${b.scope}: retry_at=${fmtUnixSec(b.retry_at)}`)
+        : ["provider_capacity_backoff: none"]
       const diagnostics = getRecentDiagnostics(12)
       const diagnosticLines =
         diagnostics.length > 0
@@ -301,6 +306,7 @@ export const memory_inspect = tool({
         discoveryLine,
         eligibilityHint,
         ...processLines,
+        ...capacityLines,
         `memory_summary_chars: ${summaryChars}`,
         `memory_summary_tokens_est: ${summaryTokens} (on disk; injection caps at ~2500)`,
         `memories_dir_entries: ${listing.length}`,
@@ -327,6 +333,7 @@ export const memory_inspect = tool({
           phase2_last_attempt_finished_at: phase2?.finished_at ?? null,
           phase2_last_success_watermark: phase2?.last_success_watermark ?? null,
           phase2_last_success_finished_at: phase2?.success_finished_at ?? null,
+          provider_capacity_backoffs: capacityBackoffs,
           // Back-compat aliases used by earlier inspect consumers.
           phase2_last_finished_at: phase2?.success_finished_at ?? null,
           discovery,

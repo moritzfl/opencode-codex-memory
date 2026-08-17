@@ -486,6 +486,7 @@ When memory does not seem to build, ask the agent to run **`memory_inspect`**.
 It reports:
 
 - stage-1 job counts, failure classes (`backoff` / `provider_capacity` / `other_exhausted`), and recent extraction errors
+- active provider/model quota backoffs and their retry times
 - phase-2 status / last error / cooldown
 - last session-discovery outcome
 - effective options (after clamping) and config warnings

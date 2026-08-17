@@ -242,7 +242,7 @@ export class MemoryStore {
     // Codex avoids claiming in that state via guard.rs; we cannot read quota,
     // so keep the job pending and do not burn retry_remaining. Claim still
     // honors retry_at, so this cannot tight-loop while quota is down.
-    if (isProviderCapacityError(message)) {
+    if (isProviderCapacityError(error)) {
       this.db
         .prepare(
           `UPDATE memory_jobs SET
