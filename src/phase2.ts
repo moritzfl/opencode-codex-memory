@@ -7,6 +7,7 @@ import {
   pruneExtensionResources,
   writeWorkspaceDiff,
   validateConsolidationArtifacts,
+  removeMemorySymlinks,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
 import {
@@ -125,6 +126,14 @@ function releaseIfShuttingDown(store: MemoryStore, ownershipToken: string): bool
   if (!isPluginShuttingDown()) return false
   store.releasePhase2OnShutdown(ownershipToken)
   return true
+}
+
+function sweepMemorySymlinksBestEffort(): void {
+  try {
+    removeMemorySymlinks(memoryRoot())
+  } catch (err) {
+    console.error("[opencode-codex-memory] failed removing memory workspace symbolic links:", err)
+  }
 }
 
 export async function runPhase2(
@@ -251,6 +260,7 @@ export async function runPhase2(
       // granting a new helper write access, then keep the lease alive while it
       // runs. This also mirrors tokio::time::interval's immediate first tick.
       if (!heartbeatOnce()) {
+        sweepMemorySymlinksBestEffort()
         store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
         return { status: "heartbeat_lost" }
       }
@@ -276,6 +286,7 @@ export async function runPhase2(
           return { status: "shutdown_failed" }
         }
         if (heartbeatLost) {
+          sweepMemorySymlinksBestEffort()
           store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
           return { status: "heartbeat_lost" }
         }
@@ -297,6 +308,7 @@ export async function runPhase2(
       // heartbeat is token+status guarded, so it fails once ownership is lost;
       // markPhase2Failed is equally guarded and becomes a no-op then.
       if (heartbeatLost || !store.heartbeatPhase2Job(claim.ownershipToken)) {
+        sweepMemorySymlinksBestEffort()
         store.markPhase2Failed(claim.ownershipToken, heartbeatFailure)
         return { status: "heartbeat_lost" }
       }
@@ -327,6 +339,7 @@ export async function runPhase2(
         return { status: "shutting_down" }
       }
       if (isProviderCapacityError(err)) noteProviderCapacityExhausted("phase2", consolidationModel)
+      sweepMemorySymlinksBestEffort()
       store.markPhase2Failed(claim.ownershipToken, err)
       return { status: "failed" }
     } finally {

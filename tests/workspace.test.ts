@@ -109,6 +109,39 @@ describe("workspace rendering", () => {
     expect(fs.existsSync(p)).toBe(true)
   })
 
+  it("unlinks a symlinked extensions dir before seeding, without writing through it", () => {
+    const { ensureLayout } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    const outside = path.join(TEST_ROOT, "outside-extensions")
+    fs.mkdirSync(root, { recursive: true })
+    fs.mkdirSync(outside)
+    fs.symlinkSync(outside, path.join(root, "extensions"))
+
+    ensureLayout()
+
+    expect(fs.lstatSync(path.join(root, "extensions")).isDirectory()).toBe(true)
+    expect(fs.lstatSync(path.join(root, "extensions")).isSymbolicLink()).toBe(false)
+    expect(fs.existsSync(path.join(root, "extensions", "ad_hoc"))).toBe(true)
+    expect(fs.existsSync(path.join(outside, "ad_hoc"))).toBe(false)
+  })
+
+  it("replaces a symlinked MEMORY.md with a real seed file", () => {
+    const { ensureLayout } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    const outside = path.join(TEST_ROOT, "outside-memory.md")
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(outside, "outside")
+    fs.symlinkSync(outside, path.join(root, "MEMORY.md"))
+
+    ensureLayout()
+
+    expect(fs.lstatSync(path.join(root, "MEMORY.md")).isSymbolicLink()).toBe(false)
+    expect(fs.readFileSync(outside, "utf8")).toBe("outside")
+    expect(fs.readFileSync(path.join(root, "MEMORY.md"), "utf8")).toContain("# MEMORY.md")
+  })
+
   it("caps the workspace diff in bytes, not UTF-16 code units", () => {
     const { ensureLayout, writeWorkspaceDiff } = require("../src/workspace.js")
     ensureLayout()
@@ -171,15 +204,36 @@ describe("validateConsolidationArtifacts", () => {
     fs.symlinkSync(outsideMemory, path.join(memoryRoot(), "MEMORY.md"))
     let result = validateConsolidationArtifacts()
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/not a file/)
+    if (!result.ok) expect(result.reason).toMatch(/removed 1 symbolic links/)
+    expect(fs.existsSync(path.join(memoryRoot(), "MEMORY.md"))).toBe(false)
+    expect(fs.readFileSync(outsideMemory, "utf8")).toBe("# valid-looking memory\n")
 
-    fs.rmSync(path.join(memoryRoot(), "MEMORY.md"))
     fs.writeFileSync(path.join(memoryRoot(), "MEMORY.md"), "# MEMORY.md\n")
     fs.rmSync(path.join(memoryRoot(), "memory_summary.md"))
     fs.symlinkSync(outsideSummary, path.join(memoryRoot(), "memory_summary.md"))
     result = validateConsolidationArtifacts()
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/not a file/)
+    if (!result.ok) expect(result.reason).toMatch(/removed 1 symbolic links/)
+    expect(fs.existsSync(path.join(memoryRoot(), "memory_summary.md"))).toBe(false)
+    expect(fs.readFileSync(outsideSummary, "utf8")).toBe("v1\n\nvalid-looking summary\n")
+  })
+
+  it("fails validation when a nested worker symlink is present, without writing through it", () => {
+    const { ensureLayout, validateConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    ensureLayout()
+    fs.writeFileSync(path.join(memoryRoot(), "memory_summary.md"), "v1\n\n## User Profile\n")
+    const outside = path.join(TEST_ROOT, "outside-instructions.md")
+    fs.writeFileSync(outside, "outside content")
+    const link = path.join(memoryRoot(), "extensions", "external_agent_import", "instructions.md")
+    fs.mkdirSync(path.dirname(link), { recursive: true })
+    fs.symlinkSync(outside, link)
+
+    const result = validateConsolidationArtifacts()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/removed 1 symbolic links/)
+    expect(fs.existsSync(link)).toBe(false)
+    expect(fs.readFileSync(outside, "utf8")).toBe("outside content")
   })
 })
 

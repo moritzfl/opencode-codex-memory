@@ -4,6 +4,7 @@ import os from "os"
 import path from "path"
 import { closeDb, openDb } from "../src/db.js"
 import { captureWorkspaceDiff } from "../src/git-baseline.js"
+import { memoryRoot } from "../src/paths.js"
 import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
 import {
@@ -81,6 +82,69 @@ describe("phase 2 orchestration", () => {
 
     const pending = await captureWorkspaceDiff()
     expect(pending.changes.some((change) => change.path === "raw_memories.md")).toBe(true)
+  })
+
+  it("removes a worker-created symlink when the consolidator fails, without resetting the baseline", async () => {
+    const outside = path.join(TEST_ROOT, "outside.md")
+    fs.writeFileSync(outside, "outside content")
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-symlink" } }),
+          prompt: async () => {
+            const link = path.join(memoryRoot(), "extensions", "external_agent_import", "instructions.md")
+            fs.mkdirSync(path.dirname(link), { recursive: true })
+            fs.symlinkSync(outside, link)
+            return {
+              data: { info: { error: { name: "ProviderAuthError", data: { message: "expired key" } } }, parts: [] },
+            }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const result = await runPhase2(new MemoryStore())
+    expect(result.status).toBe("failed")
+    const link = path.join(memoryRoot(), "extensions", "external_agent_import", "instructions.md")
+    expect(fs.existsSync(link)).toBe(false)
+    expect(fs.readFileSync(outside, "utf8")).toBe("outside content")
+    expect((await captureWorkspaceDiff()).changes.some((change) => change.path === "raw_memories.md")).toBe(true)
+  })
+
+  it("rejects a completed consolidation that left a symlink and keeps the workspace diff", async () => {
+    const outside = path.join(TEST_ROOT, "outside-complete.md")
+    fs.writeFileSync(outside, "outside content")
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-symlink-complete" } }),
+          prompt: async () => {
+            const root = memoryRoot()
+            fs.writeFileSync(path.join(root, "MEMORY.md"), "# MEMORY.md\n")
+            fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\n## User Profile\n")
+            const link = path.join(root, "extensions", "external_agent_import", "instructions.md")
+            fs.mkdirSync(path.dirname(link), { recursive: true })
+            fs.symlinkSync(outside, link)
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const result = await runPhase2(new MemoryStore())
+    expect(result.status).toBe("failed_invalid_artifacts")
+    const job = openDb()
+      .prepare("SELECT last_error FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { last_error: string }
+    expect(job.last_error).toMatch(/removed \d+ symbolic links/)
+    const link = path.join(memoryRoot(), "extensions", "external_agent_import", "instructions.md")
+    expect(fs.existsSync(link)).toBe(false)
+    expect(fs.readFileSync(outside, "utf8")).toBe("outside content")
+    expect(fs.existsSync(path.join(memoryRoot(), "phase2_workspace_diff.md"))).toBe(true)
   })
 
   it("skips claiming when provider capacity is exhausted", async () => {

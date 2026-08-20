@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Symbolic links inside the memory workspace are removed before consolidation
+  and after a failed consolidator run. A consolidation that created any link
+  is treated as failed so the next run can retry; link targets outside the
+  workspace are left untouched.
+
 ## [0.6.1] - 2026-08-17
 
 ### Fixed
