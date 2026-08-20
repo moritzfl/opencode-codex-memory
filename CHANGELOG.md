@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-20
+
 ### Fixed
 
-- Symbolic links inside the memory workspace are removed before consolidation
-  and after a failed consolidator run. A consolidation that created any link
-  is treated as failed so the next run can retry; link targets outside the
-  workspace are left untouched.
+- Shortcuts in the memories folder that point at files elsewhere on disk are
+  now removed, so memory cannot be redirected outside that folder. The real
+  files those shortcuts pointed to are left alone.
 
 ## [0.6.1] - 2026-08-17
 
