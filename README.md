@@ -48,7 +48,7 @@ If you want the mental model before the details, jump to
 
 ## Install
 
-1. Add the plugin to your `~/.config/opencode/opencode.json`:
+**1. Add the plugin** to your `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -56,31 +56,18 @@ If you want the mental model before the details, jump to
 }
 ```
 
-   **Pin the version** (here and for any OpenCode plugin). OpenCode installs a
-   plugin spec once into its package cache and never re-resolves it, so a bare
-   `"opencode-codex-memory"` is not "always latest" — it freezes at whatever
-   was latest the first time OpenCode started. With a version tag you decide
-   which release runs, and bumping the tag installs the new one. Check
-   [npm](https://www.npmjs.com/package/opencode-codex-memory) for the current
-   version.
+**Pin the version** (here and for any OpenCode plugin). OpenCode installs a
+plugin spec once into its package cache and never re-resolves it, so a bare
+`"opencode-codex-memory"` is not "always latest" — it freezes at whatever
+was latest the first time OpenCode started. With a version tag you decide
+which release runs, and bumping the tag installs the new one. Check
+[npm](https://www.npmjs.com/package/opencode-codex-memory) for the current
+version.
 
-   Since updating is then just editing version numbers, it's worth automating
-   with a custom command — one that reads your `opencode.json`, compares each
-   pin against npm, and rewrites the ones you confirm. If you'd rather not
-   write your own, this repo has one you can copy:
-   [`docs/commands/update-plugins.md`](./docs/commands/update-plugins.md) →
-   `~/.config/opencode/command/update-plugins.md`, then run `/update-plugins`.
-   It's documentation, not part of the package: nothing about it is installed
-   with the plugin, and it works for every pinned plugin in your config, not
-   just this one.
-
-   (While developing locally, point it at an absolute path to your checkout
-   instead of the package name.)
-
-2. That's it. The memory workspace is created on first use. Installing the
-   plugin is the opt-in: background learning and summary injection are active
-   immediately (Codex ships the same system behind a default-off feature flag
-   with a consent prompt; a standalone memory plugin *is* the consent).
+**2. That's it.** The memory workspace is created on first use. Installing the
+plugin is the opt-in: background learning and summary injection are active
+immediately (Codex ships the same system behind a default-off feature flag
+with a consent prompt; a standalone memory plugin *is* the consent).
 
 Requires OpenCode 1.18 or newer (official release). Git is bundled
 (`isomorphic-git`) — no `git` binary or any other external tool needed.
@@ -97,6 +84,17 @@ override `memorize`, keep an `external_directory` allow for
 `"external_directory": { "$HOME/.local/share/opencode/memories/*": "allow" }`
 after the wildcard deny) — the memory folder lives outside your project, and
 without that grant OpenCode blocks the consolidator's file access.
+
+### Installation hints
+
+Pinned versions are updated by editing the version string in `opencode.json`.
+This repo has a command that reads your config, compares each pin against npm,
+and rewrites the ones you confirm. Copy
+[`docs/commands/update-plugins.md`](./docs/commands/update-plugins.md) to
+`~/.config/opencode/command/update-plugins.md`, then run `/update-plugins`.
+This hint and the `update-plugins.md` file is documentation, not part of the package: nothing about it is installed
+with the plugin, and it works for every pinned plugin in your config, not
+just this one.
 
 ## Try it
 
