@@ -56,45 +56,25 @@ If you want the mental model before the details, jump to
 }
 ```
 
-**Pin the version** (here and for any OpenCode plugin). OpenCode installs a
-plugin spec once into its package cache and never re-resolves it, so a bare
-`"opencode-codex-memory"` is not "always latest" — it freezes at whatever
-was latest the first time OpenCode started. With a version tag you decide
-which release runs, and bumping the tag installs the new one. Check
+Pin the version — OpenCode installs a plugin spec once and never re-resolves
+it, so a bare `"opencode-codex-memory"` is not "always latest". Check
 [npm](https://www.npmjs.com/package/opencode-codex-memory) for the current
 version.
 
-**2. That's it.** The memory workspace is created on first use. Installing the
-plugin is the opt-in: background learning and summary injection are active
-immediately (Codex ships the same system behind a default-off feature flag
-with a consent prompt; a standalone memory plugin *is* the consent).
+**2. That's it.** The memory workspace is created on first use; background
+learning starts immediately.
 
-Requires OpenCode 1.18 or newer (official release). Git is bundled
-(`isomorphic-git`) — no `git` binary or any other external tool needed.
-
-The two restricted sub-agents that do the background learning (`memorize`,
-`memorize-extract`) register themselves automatically while background learning
-is enabled. To choose which models
-they use, set the `extract_model` / `consolidation_model` plugin options (see
-[Configuration](#configuration)) — don't override the agents for that. Defining
-an agent with the same name in your own config is only for advanced tweaks
-(e.g. permissions); your definition then replaces the shipped one. If you
-override `memorize`, keep an `external_directory` allow for
-`~/.local/share/opencode/memories/*` (e.g.
-`"external_directory": { "$HOME/.local/share/opencode/memories/*": "allow" }`
-after the wildcard deny) — the memory folder lives outside your project, and
-without that grant OpenCode blocks the consolidator's file access.
+Requires OpenCode 1.18 or newer. Models and other options: see
+[Configuration](#configuration).
 
 ### Installation hints
 
-Pinned versions are updated by editing the version string in `opencode.json`.
-This repo has a command that reads your config, compares each pin against npm,
-and rewrites the ones you confirm. Copy
+To bump pins, copy
 [`docs/commands/update-plugins.md`](./docs/commands/update-plugins.md) to
-`~/.config/opencode/command/update-plugins.md`, then run `/update-plugins`.
-This hint and the `update-plugins.md` file is documentation, not part of the package: nothing about it is installed
-with the plugin, and it works for every pinned plugin in your config, not
-just this one.
+`~/.config/opencode/command/update-plugins.md` and run `/update-plugins`.
+This command is not part of the plugin package — nothing about it is
+installed with the plugin. It works for every pinned plugin in your config,
+not just this one.
 
 ## Try it
 
