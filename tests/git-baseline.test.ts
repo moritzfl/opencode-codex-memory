@@ -26,6 +26,37 @@ function statusLines(diff: { changes: { status: string; path: string }[] }): str
 }
 
 describe("git-baseline", () => {
+  it("ignores hidden files such as .DS_Store instead of failing the diff", async () => {
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
+    const isogit = require("isomorphic-git")
+    const { memoryRoot } = require("../src/paths.js")
+
+    fs.writeFileSync(memFile("keep.md"), "ok\n")
+    fs.writeFileSync(memFile(".DS_Store"), "finder junk")
+    fs.mkdirSync(memFile("skills"), { recursive: true })
+    fs.writeFileSync(memFile(path.join("skills", ".DS_Store")), "nested junk")
+    expect(await ensureBaseline()).toBe(true)
+    expect(await isogit.listFiles({ fs, dir: memoryRoot() })).toEqual(["keep.md"])
+
+    fs.writeFileSync(memFile(".DS_Store"), "finder junk changed")
+    fs.writeFileSync(memFile("keep.md"), "ok2\n")
+    const diff = await captureWorkspaceDiff()
+    expect(statusLines(diff)).toEqual(["M keep.md"])
+    expect(diff.unifiedDiff).not.toContain(".DS_Store")
+
+    expect(await resetBaseline()).toBe(true)
+    expect(await isogit.listFiles({ fs, dir: memoryRoot() })).toEqual(["keep.md"])
+  })
+
+  it("does not treat a new .DS_Store as a workspace change", async () => {
+    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+    fs.writeFileSync(memFile("keep.md"), "ok\n")
+    expect(await ensureBaseline()).toBe(true)
+    fs.writeFileSync(memFile(".DS_Store"), "\0binary")
+    const diff = await captureWorkspaceDiff()
+    expect(diff.changes).toEqual([])
+  })
+
   it("captures adds/modifies/deletes with content diffs across baseline cycles", async () => {
     const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
 

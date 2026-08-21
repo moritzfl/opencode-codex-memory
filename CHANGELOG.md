@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Finder metadata files such as `.DS_Store` in the memories folder no longer
+  abort consolidation.
+
 ## [0.6.2] - 2026-08-20
 
 ### Fixed

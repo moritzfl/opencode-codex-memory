@@ -347,7 +347,11 @@ mappings:
       DIVERGENCES: patches use the `diff` package's createPatch headers
       (Index:/---/+++) instead of codex's git-style `diff --git` rendering; no
       file-mode/symlink diff rendering; workdir content reads fail closed on
-      symlinks instead of including their targets in the generated diff.
+      symlinks instead of including their targets in the generated diff;
+      hidden paths (dot components, e.g. Finder `.DS_Store`) are omitted from
+      staging and workspace diffs because path-guard reports them as not found
+      — including them failed phase 2. Codex's walker includes them and reads
+      bytes directly.
   - ours: src/templates/consolidation.md
     theirs: codex-rs/memories/write/templates/memories/consolidation.md
     note: >

@@ -12,6 +12,16 @@ const AUTHOR = { name: "opencode-codex-memory", email: "memory@opencode.local" }
 // baseline history or shows up as memory content.
 export const DIFF_ARTIFACT = "phase2_workspace_diff.md"
 
+/**
+ * Hidden path components are invisible to tools/path-guard (`not found`).
+ * Codex's gix walker includes them and reads bytes directly; isomorphic-git
+ * plus path-guard would fail the whole phase-2 job on Finder `.DS_Store`.
+ * Skip them from staging and diffs — they are not consolidator-visible.
+ */
+function isHiddenBaselinePath(filepath: string): boolean {
+  return filepath.split("/").some((part) => part.startsWith("."))
+}
+
 export interface WorkspaceChange {
   status: "A" | "M" | "D"
   path: string
@@ -59,6 +69,7 @@ async function stageAll(dir: string): Promise<number> {
   const matrix = await isogit.statusMatrix({ fs, dir })
   let changes = 0
   for (const [filepath, head, workdir, stage] of matrix) {
+    if (isHiddenBaselinePath(filepath)) continue
     if (head === 1 && workdir === 1 && stage === 1) continue
     if (workdir === 0) {
       // isogit.add throws on deleted files; they must be staged via remove
@@ -141,7 +152,8 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
   removeDiffArtifact(dir)
   const matrix = await isogit.statusMatrix({ fs, dir })
   const changedRows = matrix.filter(
-    ([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT,
+    ([filepath, head, workdir]) =>
+      head !== workdir && filepath !== DIFF_ARTIFACT && !isHiddenBaselinePath(filepath),
   )
   const changes: WorkspaceChange[] = changedRows.map(([filepath, head, workdir]) => {
     if (head === 0) return { status: "A", path: filepath }
