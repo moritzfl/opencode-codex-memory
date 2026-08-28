@@ -476,7 +476,13 @@ mappings:
       opencode returns it with HTTP 200;
       reasoning effort is pinned via PromptInput.variant low/medium (codex:
       Low extract / Medium consolidate). SDK types omit variant (same lag as
-      format); an unknown variant is a host no-op.
+      format). DELIBERATE DIVERGENCE: Codex only talks to Codex models and
+      hardcodes those efforts. This plugin looks up the model's OpenCode
+      variants and, if the pin is missing, selects the nearest listed effort
+      on none < minimal < low < medium < high < xhigh < max (ties → higher).
+      Empty variant lists omit the pin (host default). Catalog lookup failure
+      or a missing variants field keeps the Codex pin (unknown variant is a
+      host no-op). Custom picker names such as "fast xhigh" are ignored.
 
   # --- Utilities ---
   - ours: src/redact.ts
@@ -528,6 +534,7 @@ mappings:
   # the drift script existence-checks every theirs value):
   #   src/lifecycle.ts — dispose/reload abort for consolidator + sub-sessions
   #   src/host-client.ts — OpenAPI type-lag cast adapters
+  #   src/reasoning-variant.ts — nearest OpenCode effort when Codex low/medium is absent
   #   src/diagnostics.ts — inspect ring buffer (codex has OTEL metrics instead)
 
   # --- Extensions (ad-hoc notes) ---

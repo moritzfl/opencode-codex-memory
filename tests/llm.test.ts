@@ -11,6 +11,7 @@ import {
   isMemorySubSession,
   resolveExtractionModel,
   setConfigGetTimeoutForTest,
+  setProviderListTimeoutForTest,
   setStaleDeleteBatchTimeoutForTest,
   setSubSessionCreateTimeoutForTest,
   SubagentTimeoutError,
@@ -441,6 +442,98 @@ describe("memory sub-session directory", () => {
       },
     } as any)
     await consolidateViaSubagent("/tmp/does-not-matter", "phase2_workspace_diff.md")
+    expect(variant).toBe("medium")
+  })
+})
+
+describe("reasoning variant fallback", () => {
+  afterEach(() => {
+    setPluginInput({ client: undefined } as any)
+    setProviderListTimeoutForTest()
+  })
+
+  function stubWithProviders(
+    all: Array<{ id: string; models: Record<string, { variants?: Record<string, unknown> }> }>,
+    opts?: { model?: string; extract?: boolean },
+  ) {
+    let variant: string | undefined
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-variant-fb" } }),
+          prompt: async (req: { body: { variant?: string } }) => {
+            variant = req.body.variant
+            return {
+              data: opts?.extract
+                ? { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "s" } } }
+                : { info: {}, parts: [{ type: "text", text: "done" }] },
+            }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+        provider: { list: async () => ({ data: { all } }) },
+      },
+    } as any)
+    return {
+      variant: () => variant,
+      model: opts?.model,
+    }
+  }
+
+  it("keeps extract low when the model lists it", async () => {
+    const cap = stubWithProviders(
+      [{ id: "xai", models: { "grok-4.6": { variants: { low: {}, medium: {}, high: {}, xhigh: {} } } } }],
+      { extract: true, model: "xai/grok-4.6" },
+    )
+    await extractViaSubagent("ses_v", "transcript", { model: cap.model })
+    expect(cap.variant()).toBe("low")
+  })
+
+  it("maps extract low to high when the model only lists high/max", async () => {
+    const cap = stubWithProviders(
+      [{ id: "ollama-cloud", models: { "deepseek-v4-flash": { variants: { high: {}, max: {} } } } }],
+      { extract: true, model: "ollama-cloud/deepseek-v4-flash" },
+    )
+    await extractViaSubagent("ses_v", "transcript", { model: cap.model })
+    expect(cap.variant()).toBe("high")
+  })
+
+  it("maps consolidate medium to high on high/max-only models", async () => {
+    const cap = stubWithProviders(
+      [{ id: "ollama-cloud", models: { "deepseek-v4-flash": { variants: { high: {}, max: {} } } } }],
+      { model: "ollama-cloud/deepseek-v4-flash" },
+    )
+    await consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", cap.model)
+    expect(cap.variant()).toBe("high")
+  })
+
+  it("omits the pin when the model lists no effort variants", async () => {
+    const cap = stubWithProviders(
+      [{ id: "mistral", models: { "codestral-latest": { variants: {} } } }],
+      { extract: true, model: "mistral/codestral-latest" },
+    )
+    await extractViaSubagent("ses_v", "transcript", { model: cap.model })
+    expect(cap.variant()).toBeUndefined()
+  })
+
+  it("keeps the Codex pin when provider.list fails", async () => {
+    let variant: string | undefined
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-variant-err" } }),
+          prompt: async (req: { body: { variant?: string } }) => {
+            variant = req.body.variant
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+        provider: { list: async () => ({ error: { message: "nope" } }) },
+      },
+    } as any)
+    await consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", "xai/grok-4.6")
     expect(variant).toBe("medium")
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { hostListSessionsGlobal, hostSessionLiveness, withHostTimeout } from "../src/host-client.js"
+import { hostListSessionsGlobal, hostProviderList, hostSessionLiveness, withHostTimeout } from "../src/host-client.js"
 
 describe("withHostTimeout", () => {
   it("aborts the controller when the timeout wins", async () => {
@@ -96,5 +96,37 @@ describe("hostListSessionsGlobal", () => {
       cursor: 1234,
       search: "codex-memory-",
     })
+  })
+})
+
+describe("hostProviderList", () => {
+  it("uses client.provider.list when present", async () => {
+    const controller = new AbortController()
+    const res = await hostProviderList(
+      {
+        provider: {
+          list: async (opts?: { signal?: AbortSignal }) => {
+            expect(opts?.signal).toBe(controller.signal)
+            return { data: { all: [] } }
+          },
+        },
+      } as never,
+      { signal: controller.signal },
+    )
+    expect(res).toEqual({ data: { all: [] } })
+  })
+
+  it("falls back to GET /provider", async () => {
+    let url: string | undefined
+    const res = await hostProviderList({
+      _client: {
+        get: async (opts: { url?: string }) => {
+          url = opts.url
+          return { data: { all: [{ id: "xai" }] } }
+        },
+      },
+    } as never)
+    expect(url).toBe("/provider")
+    expect(res).toEqual({ data: { all: [{ id: "xai" }] } })
   })
 })

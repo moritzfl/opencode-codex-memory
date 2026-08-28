@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Extraction still prefers low reasoning and consolidation medium (Codex), but
+  if the configured model does not list that effort, the plugin picks the
+  nearest listed level (equal distance → higher). Models with no effort
+  variants keep the host default.
+
 ## [0.6.3] - 2026-08-21
 
 ### Fixed

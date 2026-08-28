@@ -10,6 +10,7 @@
  * - AssistantMessage.info.structured: structured extraction result
  * - client._client.get: experimental routes (no experimental.* namespace on V1)
  * - mcp.status: present on host client, weakly typed in plugin package
+ * - provider.list model.variants omitted from V1 OpenAPI types
  */
 
 import type { PluginInput } from "@opencode-ai/plugin"
@@ -85,6 +86,22 @@ export async function withHostTimeout<T>(
 export interface SessionCreateBody {
   title?: string
   metadata?: Record<string, unknown>
+}
+
+/** GET /provider. V1 SDK types omit model.variants; parse the payload loosely. */
+export async function hostProviderList(
+  client: PluginInput["client"] | null | undefined,
+  opts?: { signal?: AbortSignal },
+): Promise<{ error?: unknown; data?: unknown }> {
+  const list = (
+    client as { provider?: { list?: (o?: { signal?: AbortSignal }) => Promise<unknown> } } | null | undefined
+  )?.provider?.list
+  if (typeof list === "function") {
+    return (await list(opts?.signal ? { signal: opts.signal } : undefined)) as { error?: unknown; data?: unknown }
+  }
+  const get = pluginHttpGet(client)
+  if (!get) return { error: { message: "provider.list unavailable" } }
+  return get({ url: "/provider", ...(opts?.signal ? { signal: opts.signal } : {}) })
 }
 
 /** session.create with metadata (SDK body type is incomplete). */

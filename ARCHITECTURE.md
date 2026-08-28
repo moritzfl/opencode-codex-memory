@@ -83,8 +83,8 @@ STORAGE
 
 Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `capture`, `phase1`, `phase2`, `workspace`, `git-baseline`, `redact`, `token`,
-`llm`, `ratelimit`, `paths`, `path-guard`, `host-client`, `lifecycle`,
-`options`, `diagnostics`, `agent-health`) plus external-agent exchange
+`llm`, `reasoning-variant`, `ratelimit`, `paths`, `path-guard`, `host-client`,
+`lifecycle`, `options`, `diagnostics`, `agent-health`) plus external-agent exchange
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
 model-facing tools (`memory.ts`, `control.ts`). Per-file upstream provenance
 lives in `codex-map.yaml`.
@@ -163,7 +163,9 @@ The plugin SDK exposes no "make a model call" API and no provider credentials.
 **Workaround:** both phases spawn sub-agent sessions via opencode's HTTP API
 (`session.create` + `session.prompt`), reusing opencode's auth/provider/usage
 stack with zero credentials in the plugin. This is close to codex's model — codex
-also spawns a configured model client for extraction.
+also spawns a configured model client for extraction. Reasoning pins stay Codex
+`low`/`medium` when the model lists them; otherwise `src/reasoning-variant.ts`
+picks the nearest OpenCode effort (host-only — Codex does not need this).
 
 ### D4 — Retroactive transcript & session access (`src/capture.ts`)
 

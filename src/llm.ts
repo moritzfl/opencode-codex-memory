@@ -4,6 +4,7 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { memoryRoot } from "./paths.js"
 import {
   hostListSessionsGlobal,
+  hostProviderList,
   hostSessionCreate,
   hostSessionDeletionConfirmed,
   hostSessionPrompt,
@@ -12,6 +13,7 @@ import {
   pluginHttpGet,
   withHostTimeout,
 } from "./host-client.js"
+import { catalogVariantKeys, nearestReasoningVariant } from "./reasoning-variant.js"
 import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
 import { SCAN_LIMIT } from "./store.js"
 import { isProviderCapacityError, ProviderCapacityError } from "./ratelimit.js"
@@ -30,6 +32,8 @@ export function setPluginInput(input: PluginInput): void {
   inputGeneration++
   configModels = null
   configModelsInFlight = null
+  providerCatalog = null
+  providerCatalogInFlight = null
 }
 
 export function getPluginInput(): PluginInput | null {
@@ -47,10 +51,12 @@ const SUBSESSION_CONFIRM_TIMEOUT_MS = 1_000
 const SUBSESSION_DELETE_TIMEOUT_MS = 10_000
 const SUBSESSION_CREATE_TIMEOUT_MS = 10_000
 const CONFIG_GET_TIMEOUT_MS = 5_000
+const PROVIDER_LIST_TIMEOUT_MS = 5_000
 const SUBSESSION_DELETE_CONCURRENCY = 8
 const SUBSESSION_DELETE_BATCH_TIMEOUT_MS = 30_000
 let createTimeoutMs = SUBSESSION_CREATE_TIMEOUT_MS
 let configGetTimeoutMs = CONFIG_GET_TIMEOUT_MS
+let providerListTimeoutMs = PROVIDER_LIST_TIMEOUT_MS
 let staleDeleteBatchTimeoutMs = SUBSESSION_DELETE_BATCH_TIMEOUT_MS
 
 /** Test seam. */
@@ -61,6 +67,11 @@ export function setSubSessionCreateTimeoutForTest(ms?: number): void {
 /** Test seam. */
 export function setConfigGetTimeoutForTest(ms?: number): void {
   configGetTimeoutMs = ms ?? CONFIG_GET_TIMEOUT_MS
+}
+
+/** Test seam. */
+export function setProviderListTimeoutForTest(ms?: number): void {
+  providerListTimeoutMs = ms ?? PROVIDER_LIST_TIMEOUT_MS
 }
 
 /** Test seam. */
@@ -123,8 +134,8 @@ interface PromptOptions {
   // `format` field (schema v1/session.ts) but the generated SDK body type omits
   // it, so it is passed through an `as any` cast at the call site.
   format?: Record<string, unknown>
-  // Host PromptInput.variant → model reasoningEffort (low/medium/high).
-  // Unknown variant is a host no-op.
+  // Host PromptInput.variant → model reasoningEffort. Prefer Codex low/medium;
+  // if that name is missing on the model, pick the nearest listed effort.
   variant?: string
 }
 
@@ -184,6 +195,52 @@ function parseModelRef(ref: string): { providerID: string; modelID: string } | n
   const slash = ref.indexOf("/")
   if (slash <= 0 || slash === ref.length - 1) return null
   return { providerID: ref.slice(0, slash), modelID: ref.slice(slash + 1) }
+}
+
+const EXTRACT_VARIANT = "low"
+const CONSOLIDATE_VARIANT = "medium"
+
+let providerCatalog: { data: unknown } | null = null
+let providerCatalogInFlight: Promise<unknown | null> | null = null
+
+async function getProviderCatalog(): Promise<unknown | null> {
+  if (providerCatalog) return providerCatalog.data
+  if (providerCatalogInFlight) return providerCatalogInFlight
+  const input = getPluginInput()
+  if (!input) return null
+  const generation = inputGeneration
+  const request = (async (): Promise<unknown | null> => {
+    const controller = new AbortController()
+    try {
+      const res = await withHostTimeout(
+        hostProviderList(input.client, { signal: controller.signal }),
+        providerListTimeoutMs,
+        "provider.list",
+        controller,
+      )
+      if (res.error || res.data == null || generation !== inputGeneration) return null
+      providerCatalog = { data: res.data }
+      return res.data
+    } catch {
+      return null
+    }
+  })()
+  providerCatalogInFlight = request
+  try {
+    return await request
+  } finally {
+    if (providerCatalogInFlight === request) providerCatalogInFlight = null
+  }
+}
+
+async function resolveReasoningVariant(preferred: string, modelRef?: string): Promise<string | undefined> {
+  const parsed = modelRef ? parseModelRef(modelRef) : null
+  if (!parsed) return preferred
+  const catalog = await getProviderCatalog()
+  if (catalog == null) return preferred
+  const keys = catalogVariantKeys(catalog, parsed.providerID, parsed.modelID)
+  if (keys === undefined) return preferred
+  return nearestReasoningVariant(preferred, keys)
 }
 
 /**
@@ -395,9 +452,9 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
       // call (toolChoice: required) — which is why memorize-extract must allow
       // that one otherwise-denied tool.
       format: { type: "json_schema", schema: EXTRACTION_SCHEMA },
-      // Codex extraction ReasoningEffort::Low. Host maps variant → reasoningEffort;
-      // missing variant on the model is a no-op.
-      variant: "low",
+      // Codex extraction ReasoningEffort::Low. Host maps variant → reasoningEffort.
+      // If the model has no `low`, pick the nearest listed effort (host-only).
+      variant: await resolveReasoningVariant(EXTRACT_VARIANT, model),
     })
     // The captured JSON lands on AssistantMessage.structured (schema
     // v1/session.ts; absent from the generated SDK type — see host-client.ts).
@@ -439,8 +496,8 @@ export async function consolidateViaSubagent(
       model: resolved,
       timeoutMs: CONSOLIDATION_TIMEOUT_MS,
       signal,
-      // Codex consolidation ReasoningEffort::Medium.
-      variant: "medium",
+      // Codex consolidation ReasoningEffort::Medium. Nearest listed effort if missing.
+      variant: await resolveReasoningVariant(CONSOLIDATE_VARIANT, resolved),
     })
   } catch (err) {
     promptError = err

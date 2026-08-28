@@ -266,6 +266,11 @@ on your own `memorize-extract`/`memorize` agent definition, if you overrode
 one → the provider's default model. Note that the first two pass the model
 explicitly, so they win over an agent-level `model`.
 
+Reasoning effort follows Codex (`low` for extraction, `medium` for
+consolidation) when the model lists that name. Otherwise the plugin picks the
+nearest OpenCode variant on `none < minimal < low < medium < high < xhigh < max`
+(ties go higher). No listed efforts → no pin, host default.
+
 > Note: `dedicated_tools` defaults to `true` here (Codex defaults it to `false`).
 > This is the one intentional default difference — the tools are a core part of a
 > standalone memory plugin. Everything else matches Codex's defaults.
