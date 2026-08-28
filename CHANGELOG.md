@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.6.4] - 2026-08-28
+
+### Fixed
 
 - Extraction still prefers low reasoning and consolidation medium (Codex), but
   if the configured model does not list that effort, the plugin picks the
