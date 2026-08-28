@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 4aa52f2cb2cdffa9c826f9e4e421a5435a05af06
-codex_ref_date: 2026-08-24
+codex_ref: d9511fb7888d98f89526d4ae019dd9be2f14199e
+codex_ref_date: 2026-08-28
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
