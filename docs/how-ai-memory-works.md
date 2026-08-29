@@ -472,6 +472,11 @@ in the injected read-path guidance — to end any answer that drew on memory
 with a small, structured citation block naming which memory files and lines
 it used.
 
+![The memory feedback loop: an answer draws on memory and cites it; the
+citation is recorded; consolidation ranks and prunes; the next summary is
+sharper — and the loop closes. The invisible part, explained below: the
+citation markup is stripped before the user ever sees it.](memory-loop.jpeg)
+
 The host never shows the user this block. A hook in the application catches
 the model's text before it is persisted or rendered, parses the citation,
 updates the usage counters in the database, and strips the markup — so neither
