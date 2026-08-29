@@ -60,12 +60,7 @@ expensive at the bottom:
 summary, always in context) to rich and expensive (full transcripts, immutable
 raw evidence).](memory-pyramid.jpeg)
 
-Layer colors at a glance: 🟥 top — injected summary · 🟨 handbook index ·
-🟩 skills · 🟦 session recaps · 🟠 base — full transcripts. The layer colors
-in the text below follow the diagram. The plugin manages the four upper
-layers; the 🟠 full transcripts at the base belong to the host application
-(OpenCode here, the Codex CLI in the original design) and are read-only input
-to the learning pipeline.
+The layers, top to bottom:
 
 - 🟥 **The injected summary** is the only layer the model pays for on every
   turn. It is deliberately tiny — capped at roughly 2,500 tokens (estimated;
