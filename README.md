@@ -101,55 +101,20 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
 
 ## How it works
 
-You don't need to know any of this to use the plugin. The design is Codex's,
-ported as-is, and it does what any memory system has to do: decide what's worth
-keeping, write it down so it can be found again, surface the right piece at the
-right moment, and forget what stopped being useful.
+You don't need to know any of this to use the plugin. In short: two background
+writers and one reader. Once a session has been idle long enough (default 6 h),
+a cheap model reviews its transcript and writes a structured note (**phase 1 —
+extraction**). Every few hours, a stronger model merges those notes into the
+actual memory files — the index, the short summary, reusable skills — resolving
+duplicates and dropping what went stale (**phase 2 — consolidation**). On every
+turn, the short summary goes into the system prompt, and the agent searches
+deeper layers itself when a task looks familiar (**read path**). When the agent
+uses a memory it cites it; those citations feed consolidation's ranking, so
+useful memories survive and unused ones age out.
 
-Think of it as three jobs: two background writers and one reader. **Nothing here
-runs while you're waiting for a reply** — an assistant that stops to take notes
-mid-answer would be slower and more expensive, so the learning happens after the
-fact, on transcripts of conversations that are already over.
-
-**Phase 1 — read one finished session, write notes about it.** Once a
-conversation has been idle long enough that it's clearly done (default 6 h), the
-plugin fetches that transcript, strips secrets out of it, and hands it to a
-cheap model with one question: *what from this is worth keeping?* The answer
-comes back as structured data — a detailed note plus a short recap of the
-session — and lands in a local SQLite database. One session in, one record out.
-Sessions are independent, so this part is easy to parallelize and to retry when
-it fails.
-
-**Phase 2 — merge all those notes into one memory.** Every few hours at most
-(and only one run at a time across all your OpenCode windows), a second pass
-takes the most relevant per-session notes and rewrites the actual memory files:
-`MEMORY.md` as the full index, `memory_summary.md` as the short version, and
-`skills/` for procedures worth repeating. This is where the interesting work
-happens — ten similar observations collapse into one rule, contradictions get
-resolved, and notes nothing ever used age out. Forgetting is a feature: memory
-that only grows is memory that stops being useful.
-
-The split exists because the two halves have opposite needs. Phase 1 is
-per-session and can run many at once; phase 2 touches the single shared memory,
-so it has to be serialized. Keeping them apart means one slow or failing session
-extraction can't corrupt or block the shared store.
-
-**The read path — actually remembering.** Every turn, the short summary is
-appended to the system prompt (capped at ~2500 tokens, so the cost is small and
-predictable). That's the always-on layer. When a task looks related to past
-work, the agent goes further and searches the full memory itself with the
-`memory_*` tools — the equivalent of "I've seen this before, let me look it up"
-rather than carrying everything around all the time.
-
-**The feedback loop.** When the agent uses a memory, it cites it. The citation
-is recorded and then stripped before it reaches your screen, and those usage
-counts feed back into phase 2's ranking. Memories that keep proving useful get
-kept and sharpened; memories nothing has touched in a month drop out. The system
-finds out which of its own notes were worth writing.
-
-For a language-agnostic deep dive on the principles behind this — learning,
-remembering, forgetting — see
-[`docs/how-ai-memory-works.md`](./docs/how-ai-memory-works.md).
+For the full architecture — learning, remembering, forgetting, and the
+trade-offs behind each — see
+[How OpenCode Codex Memory works](./docs/how-ai-memory-works.md).
 
 ## Where your data lives
 

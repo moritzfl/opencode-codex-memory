@@ -1,7 +1,9 @@
-# How AI Memory Works: Learning, Remembering, and Forgetting
+# How OpenCode Codex Memory Works: Learning, Remembering, and Forgetting
 
-A practical tour of the architecture behind an AI agent that remembers — using
-a real, working system as the running example.
+A tour of the memory architecture behind this plugin — the design it ports
+from Codex. It deliberately stays above code level: the pieces are described
+by responsibility, data flow, and trade-off, so a reader with general
+programming background can follow without knowing the implementation language.
 
 ## Introduction
 
@@ -12,12 +14,13 @@ freshness is fine for a one-off question. It is miserable for a tool you use
 every day, where half the value is in not having to repeat yourself.
 
 This writeup explains how a persistent memory system for an AI agent closes
-that gap. The running example is a concrete, working implementation: the
-memory plugin this repository builds (itself a faithful port of the memory
-system inside OpenAI's Codex). You do not need to know TypeScript, JavaScript,
-or anything about the specific tooling. The architecture is the interesting
-part, and it is expressed here in plain concepts: which components exist, what
-data flows between them, which decisions are made where, and why.
+that gap. The running example is the memory plugin this repository builds —
+itself a faithful port of the memory system inside OpenAI's Codex — and the
+document stays deliberately above code level: components are described by
+their responsibility, the data that flows between them, and the trade-offs
+behind the choices, not by implementation detail. A reader with general
+programming background will be at home; no knowledge of the specific language
+or tooling is required.
 
 Three principles organize everything that follows:
 
