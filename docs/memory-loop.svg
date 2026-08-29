@@ -9,8 +9,9 @@
   <!-- boxes: 210x130 at cardinals of circle(cx=512, cy=532, r=300) -->
   <!-- top: read path -->
   <rect x="407" y="167" width="210" height="130" rx="26" fill="#E3F0FA" stroke="#4A90D9" stroke-width="5"/>
-  <text x="512" y="221" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Answer uses</text>
-  <text x="512" y="251" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">memory</text>
+  <text x="512" y="198" text-anchor="middle" font-size="13" letter-spacing="1.2" fill="#4A90D9">READ PATH</text>
+  <text x="512" y="228" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Answer uses</text>
+  <text x="512" y="254" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">memory</text>
 
   <!-- right: usage bookkeeping, not a job -->
   <rect x="707" y="467" width="210" height="130" rx="26" fill="#ffffff" stroke="#c5c9ce" stroke-width="3"/>
@@ -19,13 +20,14 @@
 
   <!-- bottom: phase 2 -->
   <rect x="407" y="767" width="210" height="130" rx="26" fill="#E8F6E6" stroke="#53B44A" stroke-width="5"/>
-  <text x="512" y="821" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Ranking and</text>
-  <text x="512" y="851" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">pruning</text>
+  <text x="512" y="798" text-anchor="middle" font-size="13" letter-spacing="1.2" fill="#53B44A">PHASE 2</text>
+  <text x="512" y="828" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Ranking and</text>
+  <text x="512" y="854" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">pruning</text>
 
   <!-- left: injected summary artifact -->
-  <rect x="82" y="467" width="260" height="130" rx="26" fill="#FCE8EA" stroke="#DD2E44" stroke-width="5"/>
-  <text x="212" y="521" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Sharper summary</text>
-  <text x="212" y="551" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">next time</text>
+  <rect x="82" y="467" width="260" height="130" rx="26" fill="#ffffff" stroke="#c5c9ce" stroke-width="3"/>
+  <text x="212" y="521" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Sharper summary</text>
+  <text x="212" y="551" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">next time</text>
 
   <!-- arcs: circle cx512 cy532 r=300; 42deg segments tangent to boxes -->
   <!-- top->right: from (655,288) to (782,434) -->
@@ -42,5 +44,5 @@
   <text x="512" y="542" text-anchor="middle" font-size="24" fill="#8a8f98">which notes were</text>
   <text x="512" y="574" text-anchor="middle" font-size="24" fill="#8a8f98">worth writing</text>
 
-  <text x="512" y="978" text-anchor="middle" font-size="20" fill="#6b7280">blue = read path · green = consolidation · red = injected summary · gray = counters</text>
+  <text x="512" y="978" text-anchor="middle" font-size="20" fill="#6b7280">blue = read path · green = phase 2 · gray = not a phase</text>
 </svg>

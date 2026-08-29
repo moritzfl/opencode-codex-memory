@@ -31,22 +31,32 @@
   <text x="385" y="368" font-size="20" fill="#3a3f46">human edit</text>
 
   <!-- arrow: panel -> queues -->
-  <line x1="584" y1="310" x2="657" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="584" y1="310" x2="648" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
 
-  <!-- three queue boxes -->
-  <rect x="665" y="204" width="180" height="54" rx="10" fill="#FCE8EA" stroke="#DD2E44" stroke-width="3"/>
-  <text x="755" y="238" text-anchor="middle" font-size="22" fill="#3a3f46">Ingestion</text>
-  <rect x="665" y="270" width="180" height="54" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
-  <text x="755" y="304" text-anchor="middle" font-size="22" fill="#6b7280">Forgetting</text>
-  <rect x="665" y="336" width="180" height="54" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
-  <text x="755" y="370" text-anchor="middle" font-size="22" fill="#6b7280">Honored</text>
+  <!-- phase 1: the three diff queues -->
+  <rect x="652" y="178" width="206" height="224" rx="16" fill="#FCE8EA" stroke="#DD2E44" stroke-width="3"/>
+  <text x="755" y="200" text-anchor="middle" font-size="13" letter-spacing="1.2" fill="#DD2E44">PHASE 1</text>
+  <rect x="665" y="212" width="180" height="50" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <rect x="676" y="221" width="22" height="28" rx="3" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="681" y1="234" x2="693" y2="234" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="681" y1="240" x2="693" y2="240" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="768" y="244" text-anchor="middle" font-size="20" fill="#3a3f46">Ingestion</text>
+  <rect x="665" y="268" width="180" height="50" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <rect x="676" y="277" width="22" height="28" rx="3" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="681" y1="291" x2="693" y2="291" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="768" y="300" text-anchor="middle" font-size="20" fill="#3a3f46">Forgetting</text>
+  <rect x="665" y="324" width="180" height="50" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <rect x="676" y="333" width="22" height="28" rx="3" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="683" y1="352" x2="693" y2="341" stroke="#c5c9ce" stroke-width="3"/>
+  <text x="768" y="356" text-anchor="middle" font-size="20" fill="#3a3f46">Honored</text>
 
   <!-- arrow: queues -> consolidation -->
-  <line x1="853" y1="310" x2="926" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="858" y1="310" x2="926" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
 
   <!-- consolidation box -->
-  <rect x="934" y="273" width="176" height="70" rx="12" fill="#E8F6E6" stroke="#53B44A" stroke-width="5"/>
-  <text x="1022" y="315" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Consolidation</text>
+  <rect x="934" y="268" width="176" height="80" rx="12" fill="#E8F6E6" stroke="#53B44A" stroke-width="5"/>
+  <text x="1022" y="300" text-anchor="middle" font-size="13" letter-spacing="1.2" fill="#53B44A">PHASE 2</text>
+  <text x="1022" y="326" text-anchor="middle" font-size="18" font-weight="bold" fill="#3a3f46">Consolidation</text>
 
   <!-- arrow: consolidation -> new baseline dot -->
   <line x1="1110" y1="310" x2="1156" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
