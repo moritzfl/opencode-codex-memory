@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="720" fill="#ffffff"/>
+
+  <!-- left: two single-headed arrows -->
+  <line x1="175" y1="310" x2="175" y2="170" stroke="#6b7280" stroke-width="3.5" marker-end="url(#arrowhead)"/>
+  <text x="160" y="232" text-anchor="end" font-size="20" fill="#3a3f46">cheaper,</text>
+  <text x="160" y="259" text-anchor="end" font-size="20" fill="#3a3f46">less detail</text>
+  <line x1="175" y1="470" x2="175" y2="610" stroke="#6b7280" stroke-width="3.5" marker-end="url(#arrowhead)"/>
+  <text x="160" y="532" text-anchor="end" font-size="20" fill="#3a3f46">richer,</text>
+  <text x="160" y="559" text-anchor="end" font-size="20" fill="#3a3f46">more expensive</text>
+
+  <!-- pyramid bands: straight edges from apex (560,90) to base (200..920,630) -->
+  <!-- apex: Injected summary (red) -->
+  <polygon points="560,90 463,235 657,235" fill="#DD2E44"/>
+  <text x="560" y="181" text-anchor="middle" font-size="24" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">Injected</text>
+  <text x="560" y="210" text-anchor="middle" font-size="24" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">summary</text>
+  <!-- Handbook index (yellow) -->
+  <polygon points="463,235 397,335 723,335 657,235" fill="#FDCB58"/>
+  <text x="560" y="293" text-anchor="middle" font-size="24" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">Handbook index</text>
+  <!-- Skills (green) -->
+  <polygon points="397,335 330,435 790,435 723,335" fill="#53B44A"/>
+  <text x="560" y="393" text-anchor="middle" font-size="24" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">Skills</text>
+  <!-- Session recaps (blue) -->
+  <polygon points="330,435 264,535 856,535 790,435" fill="#4A90D9"/>
+  <text x="560" y="493" text-anchor="middle" font-size="24" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">Session recaps</text>
+  <!-- Full transcripts (orange) -->
+  <polygon points="264,535 200,630 920,630 856,535" fill="#F4900C"/>
+  <text x="560" y="591" text-anchor="middle" font-size="26" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round">Full transcripts</text>
+
+  <!-- right: leader lines + annotations -->
+  <line x1="625" y1="175" x2="669" y2="175" stroke="#6b7280" stroke-width="2"/>
+  <text x="679" y="182" font-size="20" fill="#6b7280">always in context, size-capped</text>
+  <line x1="698" y1="285" x2="742" y2="285" stroke="#6b7280" stroke-width="2"/>
+  <text x="752" y="292" font-size="20" fill="#6b7280">actively searched</text>
+  <line x1="765" y1="385" x2="809" y2="385" stroke="#6b7280" stroke-width="2"/>
+  <text x="819" y="392" font-size="20" fill="#6b7280">procedures, loaded on demand</text>
+  <line x1="831" y1="485" x2="875" y2="485" stroke="#6b7280" stroke-width="2"/>
+  <text x="885" y="492" font-size="20" fill="#6b7280">per-conversation reference</text>
+  <line x1="896" y1="575" x2="940" y2="575" stroke="#6b7280" stroke-width="2"/>
+  <text x="950" y="582" font-size="20" fill="#6b7280">immutable raw evidence —</text>
+  <text x="950" y="606" font-size="20" fill="#6b7280">owned by the host app</text>
+</svg>

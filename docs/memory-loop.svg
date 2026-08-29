@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="looparrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8f98"/>
+    </marker>
+  </defs>
+  <rect width="1024" height="1024" fill="#ffffff"/>
+
+  <!-- boxes: 210x130 at cardinals of circle(cx=512, cy=532, r=300) -->
+  <!-- top box: Answer uses memory (red) center 512,232 -->
+  <rect x="407" y="167" width="210" height="130" rx="26" fill="#ffffff" stroke="#DD2E44" stroke-width="6"/>
+  <text x="512" y="221" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Answer uses</text>
+  <text x="512" y="251" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">memory</text>
+
+  <!-- right box: Citation recorded (green) center 812,532 -->
+  <rect x="707" y="467" width="210" height="130" rx="26" fill="#ffffff" stroke="#53B44A" stroke-width="6"/>
+  <text x="812" y="521" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Citation</text>
+  <text x="812" y="551" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">recorded</text>
+
+  <!-- bottom box: Ranking and pruning (blue) center 512,832 -->
+  <rect x="407" y="767" width="210" height="130" rx="26" fill="#ffffff" stroke="#4A90D9" stroke-width="6"/>
+  <text x="512" y="821" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Ranking and</text>
+  <text x="512" y="851" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">pruning</text>
+
+  <!-- left box: Sharper summary next time (orange) center 212,532, box 240 wide -->
+  <rect x="82" y="467" width="260" height="130" rx="26" fill="#ffffff" stroke="#F4900C" stroke-width="6"/>
+  <text x="212" y="521" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Sharper summary</text>
+  <text x="212" y="551" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">next time</text>
+
+  <!-- arcs: circle cx512 cy532 r=300; 42deg segments tangent to boxes -->
+  <!-- top->right: from (655,288) to (782,434) -->
+  <path d="M 655 288 A 300 300 0 0 1 782 434" fill="none" stroke="#8a8f98" stroke-width="5" marker-end="url(#looparrow)"/>
+  <!-- right->bottom: from (790,632) to (659,782) -->
+  <path d="M 790 632 A 300 300 0 0 1 659 782" fill="none" stroke="#8a8f98" stroke-width="5" marker-end="url(#looparrow)"/>
+  <!-- bottom->left: from (365,782) to (234,632) -->
+  <path d="M 365 782 A 300 300 0 0 1 234 632" fill="none" stroke="#8a8f98" stroke-width="5" marker-end="url(#looparrow)"/>
+  <!-- left->top: from (232,432) to (369,288) -->
+  <path d="M 232 432 A 300 300 0 0 1 369 288" fill="none" stroke="#8a8f98" stroke-width="5" marker-end="url(#looparrow)"/>
+
+  <!-- center caption -->
+  <text x="512" y="510" text-anchor="middle" font-size="24" fill="#8a8f98">the memory finds out</text>
+  <text x="512" y="542" text-anchor="middle" font-size="24" fill="#8a8f98">which notes were</text>
+  <text x="512" y="574" text-anchor="middle" font-size="24" fill="#8a8f98">worth writing</text>
+</svg>

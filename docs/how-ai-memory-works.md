@@ -58,7 +58,7 @@ expensive at the bottom:
 
 ![The memory pyramid: five storage layers from cheap and small (injected
 summary, always in context) to rich and expensive (full transcripts, immutable
-raw evidence).](memory-pyramid.jpeg)
+raw evidence).](memory-pyramid.svg)
 
 The layers, top to bottom:
 
@@ -480,7 +480,7 @@ it used.
 ![The memory feedback loop: an answer draws on memory and cites it; the
 citation is recorded; consolidation ranks and prunes; the next summary is
 sharper — and the loop closes. The invisible part, explained below: the
-citation markup is stripped before the user ever sees it.](memory-loop.jpeg)
+citation markup is stripped before the user ever sees it.](memory-loop.svg)
 
 The host never shows the user this block. A hook in the application catches
 the model's text before it is persisted or rendered, parses the citation,
