@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="660" viewBox="0 0 1280 660" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="660" fill="#ffffff"/>
+
+  <!-- baseline commit dot -->
+  <circle cx="191" cy="310" r="20" fill="#8a8f98"/>
+  <text x="191" y="368" text-anchor="middle" font-size="22" fill="#3a3f46">baseline commit</text>
+
+  <!-- arrow: dot -> panel -->
+  <line x1="219" y1="310" x2="316" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- workspace changes panel -->
+  <rect x="324" y="204" width="252" height="192" rx="14" fill="#efefef"/>
+  <text x="450" y="238" text-anchor="middle" font-size="22" fill="#3a3f46">workspace changes</text>
+  <!-- new notes icon -->
+  <rect x="350" y="256" width="25" height="31" rx="4" fill="#ffffff" stroke="#3fa64b" stroke-width="2"/>
+  <line x1="355" y1="271" x2="370" y2="271" stroke="#3fa64b" stroke-width="2"/>
+  <line x1="355" y1="278" x2="370" y2="278" stroke="#3fa64b" stroke-width="2"/>
+  <text x="385" y="278" font-size="20" fill="#3a3f46">new notes</text>
+  <!-- deleted recap icon -->
+  <rect x="350" y="301" width="25" height="31" rx="4" fill="#ffffff" stroke="#d9534f" stroke-width="2"/>
+  <line x1="355" y1="316" x2="370" y2="316" stroke="#d9534f" stroke-width="2"/>
+  <text x="385" y="323" font-size="20" fill="#3a3f46">deleted recap</text>
+  <!-- human edit icon -->
+  <rect x="350" y="346" width="25" height="31" rx="4" fill="#ffffff" stroke="#e3b341" stroke-width="2"/>
+  <line x1="357" y1="367" x2="368" y2="356" stroke="#e3b341" stroke-width="3"/>
+  <text x="385" y="368" font-size="20" fill="#3a3f46">human edit</text>
+
+  <!-- arrow: panel -> queues -->
+  <line x1="584" y1="310" x2="657" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- three queue boxes -->
+  <rect x="665" y="204" width="180" height="54" rx="10" fill="#ffffff" stroke="#3fa64b" stroke-width="2.5"/>
+  <text x="755" y="238" text-anchor="middle" font-size="22" fill="#3a3f46">Ingestion</text>
+  <rect x="665" y="270" width="180" height="54" rx="10" fill="#ffffff" stroke="#d9534f" stroke-width="2.5"/>
+  <text x="755" y="304" text-anchor="middle" font-size="22" fill="#3a3f46">Forgetting</text>
+  <rect x="665" y="336" width="180" height="54" rx="10" fill="#ffffff" stroke="#e3b341" stroke-width="2.5"/>
+  <text x="755" y="370" text-anchor="middle" font-size="22" fill="#3a3f46">Honored</text>
+
+  <!-- arrow: queues -> consolidation -->
+  <line x1="853" y1="310" x2="926" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- consolidation box -->
+  <rect x="934" y="281" width="176" height="54" rx="10" fill="#ffffff" stroke="#4a86e8" stroke-width="2.5"/>
+  <text x="1022" y="315" text-anchor="middle" font-size="22" fill="#3a3f46">Consolidation</text>
+
+  <!-- arrow: consolidation -> new baseline dot -->
+  <line x1="1110" y1="310" x2="1156" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- new baseline dot -->
+  <circle cx="1178" cy="310" r="20" fill="#8a8f98"/>
+  <text x="1178" y="368" text-anchor="middle" font-size="22" fill="#3a3f46">new baseline</text>
+
+  <!-- return loop: single arrowhead at baseline commit -->
+  <path d="M 1178 404 L 1178 520 Q 1178 544 1154 544 L 239 544 Q 191 544 191 520 L 191 378"
+        fill="none" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- label -->
+  <text x="676" y="590" text-anchor="middle" font-size="22" fill="#3a3f46">every few hours</text>
+</svg>

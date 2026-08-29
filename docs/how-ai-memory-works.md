@@ -285,6 +285,11 @@ been in is recoverable), and a uniform forgetting channel (any removal from
 any source — pruning, user deletion, import withdrawal — arrives in the same
 format).
 
+![The consolidation cycle: from the last baseline commit, the workspace diff
+sorts changes into three queues — ingestion (added notes), forgetting
+(deleted inputs), and honored human edits; consolidation rewrites the memory
+and commits a new baseline, restarting the cycle every few hours](memory-diff-cycle.svg)
+
 ### What the consolidator actually does
 
 The consolidation model is given the diff, the merged raw records, existing
