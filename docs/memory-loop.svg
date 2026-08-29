@@ -7,23 +7,23 @@
   <rect width="1024" height="1024" fill="#ffffff"/>
 
   <!-- boxes: 210x130 at cardinals of circle(cx=512, cy=532, r=300) -->
-  <!-- top box: Answer uses memory (red) center 512,232 -->
-  <rect x="407" y="167" width="210" height="130" rx="26" fill="#ffffff" stroke="#DD2E44" stroke-width="6"/>
+  <!-- top: read path -->
+  <rect x="407" y="167" width="210" height="130" rx="26" fill="#E3F0FA" stroke="#4A90D9" stroke-width="5"/>
   <text x="512" y="221" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Answer uses</text>
   <text x="512" y="251" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">memory</text>
 
-  <!-- right box: Citation recorded (green) center 812,532 -->
-  <rect x="707" y="467" width="210" height="130" rx="26" fill="#ffffff" stroke="#53B44A" stroke-width="6"/>
+  <!-- right: usage bookkeeping, not a job -->
+  <rect x="707" y="467" width="210" height="130" rx="26" fill="#ffffff" stroke="#c5c9ce" stroke-width="3"/>
   <text x="812" y="521" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Citation</text>
   <text x="812" y="551" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">recorded</text>
 
-  <!-- bottom box: Ranking and pruning (blue) center 512,832 -->
-  <rect x="407" y="767" width="210" height="130" rx="26" fill="#ffffff" stroke="#4A90D9" stroke-width="6"/>
+  <!-- bottom: phase 2 -->
+  <rect x="407" y="767" width="210" height="130" rx="26" fill="#E8F6E6" stroke="#53B44A" stroke-width="5"/>
   <text x="512" y="821" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Ranking and</text>
   <text x="512" y="851" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">pruning</text>
 
-  <!-- left box: Sharper summary next time (orange) center 212,532, box 240 wide -->
-  <rect x="82" y="467" width="260" height="130" rx="26" fill="#ffffff" stroke="#F4900C" stroke-width="6"/>
+  <!-- left: injected summary artifact -->
+  <rect x="82" y="467" width="260" height="130" rx="26" fill="#FCE8EA" stroke="#DD2E44" stroke-width="5"/>
   <text x="212" y="521" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">Sharper summary</text>
   <text x="212" y="551" text-anchor="middle" font-size="24" font-weight="bold" fill="#3a3f46">next time</text>
 
@@ -41,4 +41,6 @@
   <text x="512" y="510" text-anchor="middle" font-size="24" fill="#8a8f98">the memory finds out</text>
   <text x="512" y="542" text-anchor="middle" font-size="24" fill="#8a8f98">which notes were</text>
   <text x="512" y="574" text-anchor="middle" font-size="24" fill="#8a8f98">worth writing</text>
+
+  <text x="512" y="978" text-anchor="middle" font-size="20" fill="#6b7280">blue = read path · green = consolidation · red = injected summary · gray = counters</text>
 </svg>
