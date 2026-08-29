@@ -17,36 +17,36 @@
   <rect x="324" y="204" width="252" height="192" rx="14" fill="#efefef"/>
   <text x="450" y="238" text-anchor="middle" font-size="22" fill="#3a3f46">workspace changes</text>
   <!-- new notes icon -->
-  <rect x="350" y="256" width="25" height="31" rx="4" fill="#ffffff" stroke="#3fa64b" stroke-width="2"/>
-  <line x1="355" y1="271" x2="370" y2="271" stroke="#3fa64b" stroke-width="2"/>
-  <line x1="355" y1="278" x2="370" y2="278" stroke="#3fa64b" stroke-width="2"/>
+  <rect x="350" y="256" width="25" height="31" rx="4" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="355" y1="271" x2="370" y2="271" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="355" y1="278" x2="370" y2="278" stroke="#c5c9ce" stroke-width="2"/>
   <text x="385" y="278" font-size="20" fill="#3a3f46">new notes</text>
   <!-- deleted recap icon -->
-  <rect x="350" y="301" width="25" height="31" rx="4" fill="#ffffff" stroke="#d9534f" stroke-width="2"/>
-  <line x1="355" y1="316" x2="370" y2="316" stroke="#d9534f" stroke-width="2"/>
+  <rect x="350" y="301" width="25" height="31" rx="4" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="355" y1="316" x2="370" y2="316" stroke="#c5c9ce" stroke-width="2"/>
   <text x="385" y="323" font-size="20" fill="#3a3f46">deleted recap</text>
   <!-- human edit icon -->
-  <rect x="350" y="346" width="25" height="31" rx="4" fill="#ffffff" stroke="#e3b341" stroke-width="2"/>
-  <line x1="357" y1="367" x2="368" y2="356" stroke="#e3b341" stroke-width="3"/>
+  <rect x="350" y="346" width="25" height="31" rx="4" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <line x1="357" y1="367" x2="368" y2="356" stroke="#c5c9ce" stroke-width="3"/>
   <text x="385" y="368" font-size="20" fill="#3a3f46">human edit</text>
 
   <!-- arrow: panel -> queues -->
   <line x1="584" y1="310" x2="657" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
 
   <!-- three queue boxes -->
-  <rect x="665" y="204" width="180" height="54" rx="10" fill="#ffffff" stroke="#3fa64b" stroke-width="2.5"/>
+  <rect x="665" y="204" width="180" height="54" rx="10" fill="#FCE8EA" stroke="#DD2E44" stroke-width="3"/>
   <text x="755" y="238" text-anchor="middle" font-size="22" fill="#3a3f46">Ingestion</text>
-  <rect x="665" y="270" width="180" height="54" rx="10" fill="#ffffff" stroke="#d9534f" stroke-width="2.5"/>
-  <text x="755" y="304" text-anchor="middle" font-size="22" fill="#3a3f46">Forgetting</text>
-  <rect x="665" y="336" width="180" height="54" rx="10" fill="#ffffff" stroke="#e3b341" stroke-width="2.5"/>
-  <text x="755" y="370" text-anchor="middle" font-size="22" fill="#3a3f46">Honored</text>
+  <rect x="665" y="270" width="180" height="54" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="755" y="304" text-anchor="middle" font-size="22" fill="#6b7280">Forgetting</text>
+  <rect x="665" y="336" width="180" height="54" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="755" y="370" text-anchor="middle" font-size="22" fill="#6b7280">Honored</text>
 
   <!-- arrow: queues -> consolidation -->
   <line x1="853" y1="310" x2="926" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
 
   <!-- consolidation box -->
-  <rect x="934" y="281" width="176" height="54" rx="10" fill="#ffffff" stroke="#4a86e8" stroke-width="2.5"/>
-  <text x="1022" y="315" text-anchor="middle" font-size="22" fill="#3a3f46">Consolidation</text>
+  <rect x="934" y="273" width="176" height="70" rx="12" fill="#E8F6E6" stroke="#53B44A" stroke-width="5"/>
+  <text x="1022" y="315" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Consolidation</text>
 
   <!-- arrow: consolidation -> new baseline dot -->
   <line x1="1110" y1="310" x2="1156" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
