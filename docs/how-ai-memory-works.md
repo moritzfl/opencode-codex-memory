@@ -110,6 +110,39 @@ independently; consolidation touches the single shared store and must be
 strictly serialized. Keeping them apart means one slow or failing extraction
 can never corrupt or block the global memory.
 
+### Where the database fits
+
+Alongside the files sits one small embedded database (SQLite — a single local
+file, no server). It plays a deliberately *supporting* role, and the
+responsibilities are split by nature of the data:
+
+- **Files hold the consolidated knowledge.** Everything a model or a human
+  should read, edit, or search — summary, handbook, skills, recaps — lives as
+  plain text, because that is both the model's native format and the diff
+  surface that makes incremental consolidation and user edits work.
+- **The database holds the pipeline state — plus the unconsolidated learning
+  queue.** Concretely: the per-session extraction results (each session's raw
+  memory and recap) sit there as staging rows until consolidation selects and
+  merges them; around them, job bookkeeping (which session was claimed,
+  retried, exhausted — so parallel background jobs never double-process and
+  failures resume cleanly); the usage counters and timestamps the feedback
+  loop needs; session-to-file provenance; and the lease that serializes
+  consolidation across multiple app windows.
+
+One nuance worth pausing on: the database stores extracted memory *content*,
+but it deliberately does **not** act as the retrieval index for it. Nothing is
+queried out of the database when the agent looks something up; search always
+goes through the text layers. The database's rows exist to be *selected into*
+a consolidation pass (by recency and usage), not to serve the read path. That
+separation is what keeps the files the single source of truth for retrieval.
+
+These are exactly the things a relational store is good at — atomic claims
+under concurrency, transactional state, ordered selection over time and usage
+— and exactly the things plain files are bad at. Keeping them in one embedded
+file preserves the local-first rule (nothing to run, nothing to configure)
+while keeping the file tree pure: every byte you can *search* is a document
+you own.
+
 ## Learning Part 1: Extracting Signal from One Session
 
 Learning starts long after the conversation ended. The trigger is *idleness*:
