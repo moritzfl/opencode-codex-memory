@@ -62,23 +62,33 @@ raw evidence).](memory-pyramid.svg)
 
 The layers, top to bottom:
 
-- 🟥 **The injected summary** is the only layer the model pays for on every
-  turn. It is deliberately tiny — capped at roughly 2,500 tokens (estimated;
-  the cap matters more than the exact number).
-- 🟨 **The handbook** is a single structured document that indexes everything
-  worth keeping, grouped by task family, with searchable keywords. The model
-  opens it when the summary hints that relevant knowledge exists.
-- 🟩 **Skills** are reusable procedures: things the agent learned to do that
-  are worth repeating step by step.
-- 🟦 **Session recaps** are one-per-conversation detailed notes — the
-  reference layer you open when you need the full story of *that one time we
-  debugged the deploy*.
+- 🟥 **The injected summary** (`memory_summary.md`) is the only layer the
+  model pays for on every turn. It is deliberately tiny — capped at roughly
+  2,500 tokens (estimated; the cap matters more than the exact number).
+- 🟨 **The handbook** (`MEMORY.md`) is a single structured document that
+  indexes everything worth keeping, grouped by task family, with searchable
+  keywords. The model opens it when the summary hints that relevant knowledge
+  exists.
+- 🟩 **Skills** (`skills/`) are reusable procedures: things the agent learned
+  to do that are worth repeating step by step.
+- 🟦 **Session recaps** (`rollout_summaries/`) are one-per-conversation
+  detailed notes — the reference layer you open when you need the full story
+  of *that one time we debugged the deploy*.
 - 🟠 **Full transcripts** are the raw evidence at the very bottom — complete
   conversation logs. They are not managed by the memory system at all: they
   are owned, written, and stored by the host application (OpenCode here; the
   Codex CLI in the original design) and are only ever *read* by the learning
   pipeline, never edited. The memory system's responsibility starts one layer
   up, at the session recaps.
+
+On disk, the four upper layers live as ordinary files in one folder (under
+the host's data directory). Two extra entries sit beside them: `raw_memories.md`,
+a temporary merge of Phase-1 records that consolidation reads as its routing
+inventory, and `extensions/`, where explicit "remember that …" notes land
+(and, optionally, memory imported from other agents). A private version-control
+history of that same folder is what makes the diff-based change feed in
+Phase 2 possible. The embedded database is a sibling of the folder, not
+inside it.
 
 This shape is called **progressive disclosure**: the model always carries the
 cheap overview, and descends into more expensive, more detailed layers only
@@ -227,13 +237,14 @@ Each qualifying session produces two artifacts with different jobs:
 - **A raw memory**: a compact, frontmatter-tagged record — task, task group,
   outcome, working directory, search keywords — followed by task-grouped
   preference signals, reusable knowledge, and failure shields. This is the
-  routing layer for consolidation later.
+  routing layer for consolidation later. The rows live in the database;
+  before each consolidation pass they are merged into `raw_memories.md`.
 - **A rollout summary**: a much more permissive, detailed recap of the whole
   session, preserving evidence and epistemic status (*the user said X* vs.
-  *the assistant proposed Y* vs. *this was verified*). This becomes one of the
-  per-session files in the reference layer.
+  *the assistant proposed Y* vs. *this was verified*). This becomes one file
+  under `rollout_summaries/` — the reference layer of the pyramid.
 
-Both land in the memory system's own embedded database, keyed by session.
+Both start in the memory system's own embedded database, keyed by session.
 Because sessions are independent, extraction is trivially parallelizable and
 retrievable: if the model provider is out of quota, the job backs off and
 tries again later; failure in one session never affects another.
@@ -324,18 +335,18 @@ Consolidation rewrites three kinds of artifacts:
    consolidated user preferences, reusable knowledge, and failure shields.
    Provenance is mandatory: every claim traces back to session recaps, so the
    "delete only what lost its evidence" rule is enforceable.
-2. **Skills** — when a procedure has repeated itself (a workflow, a fix with
-   verification steps, an exacting format), it graduates into a reusable
-   package: trigger conditions, inputs, numbered procedure, pitfalls,
+2. **Skills (`skills/`)** — when a procedure has repeated itself (a workflow,
+   a fix with verification steps, an exacting format), it graduates into a
+   reusable package: trigger conditions, inputs, numbered procedure, pitfalls,
    verification checklist. One-off trivia never becomes a skill.
-3. **The injected summary** — rebuilt last, always, from the final state of
-   the other artifacts. A version marker on its first line guards the schema:
-   if the marker is missing or wrong, the summary is regenerated wholesale
-   rather than patched, so a format change never strands stale structure.
-   Inside, it carries a short user profile, the highest-leverage preferences,
-   general tips, and a routing index — organized by project scope and recency
-   — that tells future sessions *what to search for*, not the answers
-   themselves.
+3. **The injected summary (`memory_summary.md`)** — rebuilt last, always, from
+   the final state of the other artifacts. A version marker on its first line
+   guards the schema: if the marker is missing or wrong, the summary is
+   regenerated wholesale rather than patched, so a format change never strands
+   stale structure. Inside, it carries a short user profile, the
+   highest-leverage preferences, general tips, and a routing index —
+   organized by project scope and recency — that tells future sessions *what
+   to search for*, not the answers themselves.
 
 Note what the summary is *not*: not the full memory, not an executive digest
 in flowery abstraction, and not static. It is a dense signpost layer whose job
@@ -351,8 +362,8 @@ important — *stable*.
 
 ### Always-on: the injected summary
 
-Every turn, the small summary document is appended verbatim to the model's
-system prompt. Two properties make this affordable:
+Every turn, the small summary document (`memory_summary.md`) is appended
+verbatim to the model's system prompt. Two properties make this affordable:
 
 - **A hard size cap.** The injection is truncated to a fixed, small token
   budget. Cost per turn is therefore predictable regardless of how much the
@@ -381,7 +392,8 @@ The summary is a map, not the territory. When a task looks related to past
 work, the model descends into deeper layers itself, through a small set of
 dedicated tools: read a memory file, search the memory folder by keywords,
 list its contents, and append an explicit note. The layout it navigates is
-exactly the pyramid from earlier: summary → handbook → recaps and skills.
+exactly the pyramid from earlier: `memory_summary.md` → `MEMORY.md` →
+`rollout_summaries/` and `skills/`.
 
 This is the retrieval-augmentation pattern in its most literal form, with a
 deliberate twist: **the store is plain text and the search is keywords**. No
@@ -399,7 +411,8 @@ thing stays local, inspectable, and dependency-free.
 
 There is one deliberate write door during conversations: the user can say
 outright *"remember that …"*, and the agent appends the note as a small file
-that the next consolidation picks up through the normal diff channel. The
+under `extensions/ad_hoc/notes/` that the next consolidation picks up through
+the normal diff channel. The
 authority to *integrate* knowledge stays with the consolidator; the
 read path's writes are suggestions, not edits. This keeps the shared store
 single-writer while still letting users pin facts in real time.
