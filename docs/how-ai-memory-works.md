@@ -90,16 +90,9 @@ of what exists and pull the specific page when you need it.
 
 Around this store, three jobs run, fully decoupled:
 
-```
-conversation ends ──► [Phase 1: extraction] ──► per-session records
-                                                     │ (hours later)
-                                                     ▼
-                              [Phase 2: consolidation] ──► rewrites handbook,
-                                                           summary, skills
-
-every turn ──► [Read path] ──► inject summary, offer search tools,
-                               record citations back into the store
-```
+![Two decoupled paths: a write path that extracts finished conversations into
+per-session records and later consolidates them into memory files, and a read
+path that injects the summary and searches deeper layers on every turn.](memory-pipeline.svg)
 
 1. **Phase 1 — extraction.** After a conversation is finished, one cheap
    model reads the whole transcript and answers one question: *what here is
