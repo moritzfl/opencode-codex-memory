@@ -60,19 +60,30 @@ expensive at the bottom:
 summary, always in context) to rich and expensive (full transcripts, immutable
 raw evidence).](memory-pyramid.jpeg)
 
-- **The injected summary** is the only layer the model pays for on every
+Layer colors at a glance: 🟥 top — injected summary · 🟨 handbook index ·
+🟩 skills · 🟦 session recaps · 🟠 base — full transcripts. The layer colors
+in the text below follow the diagram. The plugin manages the four upper
+layers; the 🟠 full transcripts at the base belong to the host application
+(OpenCode here, the Codex CLI in the original design) and are read-only input
+to the learning pipeline.
+
+- 🟥 **The injected summary** is the only layer the model pays for on every
   turn. It is deliberately tiny — capped at roughly 2,500 tokens (estimated;
   the cap matters more than the exact number).
-- **The handbook** is a single structured document that indexes everything
+- 🟨 **The handbook** is a single structured document that indexes everything
   worth keeping, grouped by task family, with searchable keywords. The model
   opens it when the summary hints that relevant knowledge exists.
-- **Skills** are reusable procedures: things the agent learned to do that are
-  worth repeating step by step.
-- **Session recaps** are one-per-conversation detailed notes — the reference
-  layer you open when you need the full story of *that one time we debugged
-  the deploy*.
-- **Full transcripts** belong to the host application, not the memory system.
-  They are read-only evidence for the learning pipeline and are never edited.
+- 🟩 **Skills** are reusable procedures: things the agent learned to do that
+  are worth repeating step by step.
+- 🟦 **Session recaps** are one-per-conversation detailed notes — the
+  reference layer you open when you need the full story of *that one time we
+  debugged the deploy*.
+- 🟠 **Full transcripts** are the raw evidence at the very bottom — complete
+  conversation logs. They are not managed by the memory system at all: they
+  are owned, written, and stored by the host application (OpenCode here; the
+  Codex CLI in the original design) and are only ever *read* by the learning
+  pipeline, never edited. The memory system's responsibility starts one layer
+  up, at the session recaps.
 
 This shape is called **progressive disclosure**: the model always carries the
 cheap overview, and descends into more expensive, more detailed layers only
