@@ -147,6 +147,10 @@ counts feed back into phase 2's ranking. Memories that keep proving useful get
 kept and sharpened; memories nothing has touched in a month drop out. The system
 finds out which of its own notes were worth writing.
 
+For a language-agnostic deep dive on the principles behind this — learning,
+remembering, forgetting — see
+[`docs/how-ai-memory-works.md`](./docs/how-ai-memory-works.md).
+
 ## Where your data lives
 
 ```
