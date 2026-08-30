@@ -128,14 +128,13 @@ Alongside the files sits one small embedded database (SQLite — a single local
 file, no server). It plays a deliberately *supporting* role, and the
 responsibilities are split by nature of the data:
 
-- **Files hold the consolidated knowledge.** Everything a model or a human
+- **Files hold the published knowledge.** Everything a model or a human
   should read, edit, or search — summary, handbook, skills, recaps — lives as
   plain text, because that is both the model's native format and the diff
   surface that makes incremental consolidation and user edits work.
-- **The database holds the pipeline state — plus the unconsolidated learning
-  queue.** Concretely: the per-session extraction results (each session's raw
-  memory and recap) sit there as staging rows until consolidation selects and
-  merges them; around them, job bookkeeping (which session was claimed,
+- **The database holds the candidate pool — plus pipeline state.** Phase 1
+  writes extraction results here (each session's raw memory and recap), not
+  into the folder. Around them: job bookkeeping (which session was claimed,
   retried, exhausted — so parallel background jobs never double-process and
   failures resume cleanly); the usage counters and timestamps the feedback
   loop needs; session-to-file provenance; and the lease that serializes
@@ -144,9 +143,10 @@ responsibilities are split by nature of the data:
 One nuance worth pausing on: the database stores extracted memory *content*,
 but it deliberately does **not** act as the retrieval index for it. Nothing is
 queried out of the database when the agent looks something up; search always
-goes through the text layers. The database's rows exist to be *selected into*
-a consolidation pass (by recency and usage), not to serve the read path. That
-separation is what keeps the files the single source of truth for retrieval.
+goes through the memory folder. Rows exist to be *selected into* a
+consolidation pass (by recency and usage), not to serve the read path. That
+separation is what keeps the markdown workspace the single source of truth
+for retrieval.
 
 These are exactly the things a relational store is good at — atomic claims
 under concurrency, transactional state, ordered selection over time and usage
@@ -241,13 +241,15 @@ Each qualifying session produces two artifacts with different jobs:
   before each consolidation pass they are merged into `raw_memories.md`.
 - **A rollout summary**: a much more permissive, detailed recap of the whole
   session, preserving evidence and epistemic status (*the user said X* vs.
-  *the assistant proposed Y* vs. *this was verified*). This becomes one file
-  under `rollout_summaries/` — the reference layer of the pyramid.
+  *the assistant proposed Y* vs. *this was verified*). If this session is
+  later *published*, that recap becomes one file under `rollout_summaries/`
+  — the reference layer of the pyramid.
 
-Both start in the memory system's own embedded database, keyed by session.
-Because sessions are independent, extraction is trivially parallelizable and
-retrievable: if the model provider is out of quota, the job backs off and
-tries again later; failure in one session never affects another.
+Both land only in the database at this stage, keyed by session. They are
+candidates, not yet markdown in the memory folder. Because sessions are
+independent, extraction is trivially parallelizable and retrievable: if the
+model provider is out of quota, the job backs off and tries again later;
+failure in one session never affects another.
 
 ## Learning Part 2: Consolidating Many Sessions into One Memory
 
@@ -263,6 +265,27 @@ that even with several application windows open, exactly one consolidation is
 ever in flight. Serializing matters: the shared memory files are a single
 writer's medium. Two concurrent consolidators would interleave edits and
 corrupt the very structure they are supposed to maintain.
+
+### Publishing: candidates become markdown files
+
+Phase 2 does not read the whole candidate pool. It first **publishes a
+ranked subset** into the memory folder:
+
+1. Rank the database rows by demonstrated usefulness and recency, drop
+   anything unused past the retention horizon, and cap how many recaps feed
+   this pass.
+2. Write that subset as `rollout_summaries/*.md` and merge their raw memories
+   into `raw_memories.md`. Recaps that did not make the cut are removed from
+   the folder if they were there from a previous pass.
+3. Only then does the git diff run. The folder now *is* the selected set;
+   added, missing, and hand-edited files are the change feed the consolidator
+   sees.
+
+That is why extraction does not write markdown itself. If every Phase-1
+result landed in the folder immediately, the published tree would fill with
+sessions that never earn a place in the handbook, and the diff would be
+noise. The database is the unpublished pool; the folder is what survived
+selection — and what the read path can actually search.
 
 ### The change signal: a diff against the last good state
 
