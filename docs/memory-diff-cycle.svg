@@ -40,15 +40,18 @@
   <rect x="676" y="221" width="22" height="28" rx="3" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
   <line x1="681" y1="234" x2="693" y2="234" stroke="#c5c9ce" stroke-width="2"/>
   <line x1="681" y1="240" x2="693" y2="240" stroke="#c5c9ce" stroke-width="2"/>
-  <text x="768" y="244" text-anchor="middle" font-size="20" fill="#3a3f46">Ingestion</text>
+  <text x="768" y="236" text-anchor="middle" font-size="16" fill="#3a3f46">ingest</text>
+  <text x="768" y="254" text-anchor="middle" font-size="14" fill="#6b7280">new notes</text>
   <rect x="665" y="268" width="180" height="50" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
   <rect x="676" y="277" width="22" height="28" rx="3" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
   <line x1="681" y1="291" x2="693" y2="291" stroke="#c5c9ce" stroke-width="2"/>
-  <text x="768" y="300" text-anchor="middle" font-size="20" fill="#3a3f46">Forgetting</text>
+  <text x="768" y="292" text-anchor="middle" font-size="16" fill="#3a3f46">forget</text>
+  <text x="768" y="310" text-anchor="middle" font-size="14" fill="#6b7280">deleted recaps</text>
   <rect x="665" y="324" width="180" height="50" rx="10" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
   <rect x="676" y="333" width="22" height="28" rx="3" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
   <line x1="683" y1="352" x2="693" y2="341" stroke="#c5c9ce" stroke-width="3"/>
-  <text x="768" y="356" text-anchor="middle" font-size="20" fill="#3a3f46">Honored</text>
+  <text x="768" y="348" text-anchor="middle" font-size="16" fill="#3a3f46">integrate</text>
+  <text x="768" y="366" text-anchor="middle" font-size="14" fill="#6b7280">human edits</text>
 
   <!-- arrow: queues -> consolidation -->
   <line x1="858" y1="310" x2="926" y2="310" stroke="#6b7280" stroke-width="3" marker-end="url(#arrow)"/>
