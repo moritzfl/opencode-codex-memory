@@ -13,15 +13,6 @@ previous sessions *"yes, tests must pass before you commit."* That blank-slate
 freshness is fine for a one-off question. It is miserable for a tool you use
 every day, where half the value is in not having to repeat yourself.
 
-This writeup explains how a persistent memory system for an AI agent closes
-that gap. The running example is the memory plugin this repository builds —
-itself a faithful port of the memory system inside OpenAI's Codex — and the
-document stays deliberately above code level: components are described by
-their responsibility, the data that flows between them, and the trade-offs
-behind the choices, not by implementation detail. A reader with general
-programming background will be at home; no knowledge of the specific language
-or tooling is required.
-
 Three principles organize everything that follows:
 
 - **Learning**: turning finished conversations into durable knowledge, in the
