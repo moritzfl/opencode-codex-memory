@@ -43,6 +43,4 @@
   <text x="512" y="510" text-anchor="middle" font-size="24" fill="#8a8f98">the memory finds out</text>
   <text x="512" y="542" text-anchor="middle" font-size="24" fill="#8a8f98">which notes were</text>
   <text x="512" y="574" text-anchor="middle" font-size="24" fill="#8a8f98">worth writing</text>
-
-  <text x="512" y="978" text-anchor="middle" font-size="20" fill="#6b7280">blue = read path · green = phase 2 · gray = not a phase</text>
 </svg>
