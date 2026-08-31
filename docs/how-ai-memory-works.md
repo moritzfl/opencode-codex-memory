@@ -81,6 +81,10 @@ history of that same folder is what makes the diff-based change feed in
 Phase 2 possible. The embedded database is a sibling of the folder, not
 inside it.
 
+![On-disk layout: memory.db sits beside the memories folder. Phase 1 writes
+the database; Phase 2 publishes a ranked subset as markdown and consolidates
+it; the read path searches only the published files.](memory-files.svg)
+
 This shape is called **progressive disclosure**: the model always carries the
 cheap overview, and descends into more expensive, more detailed layers only
 when the overview suggests it. It mirrors how you would use your own notes —
