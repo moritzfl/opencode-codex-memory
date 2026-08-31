@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Memory is no longer injected into OpenCode's hidden session-title generator
+  (same session ID as the real chat; the hook has no agent field, so the
+  title prompt is detected instead).
+
 ## [0.6.4] - 2026-08-28
 
 ### Fixed

@@ -321,6 +321,12 @@ async function classifyExternalContextTool(toolName: string): Promise<boolean | 
   return false
 }
 
+const TITLE_GENERATOR_MARKER = "You are a title generator. You output ONLY a thread title."
+
+function isTitleGenerationPrompt(system: string[]): boolean {
+  return system.some((block) => block.includes(TITLE_GENERATOR_MARKER))
+}
+
 /**
  * Registers the memorize / memorize-extract sub-agents through the config
  * hook so installing the plugin requires no manual agent setup. Definitions
@@ -378,8 +384,11 @@ function buildHooks() {
     try {
       if (!pluginOptions.use_memories) return
       // OpenCode also invokes this hook while generating agent definitions,
-      // without a session. Memory belongs only in real conversation prompts.
+      // without a session, and while naming a session (hidden `title` agent,
+      // same sessionID; hook has no agent field). Memory belongs only in
+      // real conversation prompts.
       if (!input.sessionID || isMemorySubSession(input.sessionID)) return
+      if (isTitleGenerationPrompt(output.system)) return
       ensureMemoryLayout()
       const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
       if (memoryPrompt) {

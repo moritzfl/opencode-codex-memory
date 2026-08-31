@@ -112,10 +112,13 @@ puts cache breakpoints on the first two system messages
 (`provider/transform.ts`, `.slice(0, 2)`). The stable memory block therefore
 gets its own cache segment: changing memory invalidates that segment without
 invalidating opencode's base prompt. The plugin caches the summary in process
-memory, stats its mtime each turn, and re-reads only after an external edit
-changes that mtime or Phase 2 explicitly invalidates the cache. Sessionless
-invocations of the same hook (used by opencode while generating agent
-definitions) are ignored, as is a symlinked memory root or summary file.
+  memory, stats its mtime each turn, and re-reads only after an external edit
+  changes that mtime or Phase 2 explicitly invalidates the cache. Sessionless
+  invocations of the same hook (used by opencode while generating agent
+  definitions) are ignored, as is a symlinked memory root or summary file.
+  OpenCode's hidden `title` agent reuses the real conversation `sessionID` and
+  the hook does not receive `agent`, so title-generation is skipped by sniffing
+  the title prompt already present in `system[]`.
 
 Limitations, both accepted:
 
@@ -128,6 +131,9 @@ Limitations, both accepted:
 - Another plugin appending a *volatile* string triggers the collapse and shares
   one cache segment with ours, invalidating it whenever that plugin's text
   changes. Plugin order is deterministic, so a stable co-tenant is harmless.
+- Title-generation skip sniffs OpenCode's default `title` agent prompt. A
+  rewritten title prompt (user override or upstream edit) would receive memory
+  again until the marker is updated. The hook still has no `agent` field.
 
 ### D2 — Consolidation subagent sandboxing (`opencode.json`)
 

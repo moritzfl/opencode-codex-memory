@@ -185,6 +185,34 @@ describe("hook wiring", () => {
       fs.rmSync(testRoot, { recursive: true, force: true })
     }
   })
+
+  it("does not inject memory into OpenCode title-generation prompts", async () => {
+    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-title-hook-"))
+    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    try {
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
+      const root = path.join(testRoot, "memories")
+      fs.mkdirSync(root, { recursive: true })
+      fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\nremember this\n")
+      const hooks = (await plugin.server({ client: {} } as any, { use_memories: true } as any)) as any
+
+      const titlePrompt =
+        "You are a title generator. You output ONLY a thread title. Nothing else.\n\n" +
+        "<task>\nGenerate a brief title that would help the user find this conversation later.\n"
+      const titleOutput = { system: [titlePrompt] }
+      await hooks["experimental.chat.system.transform"]({ sessionID: "ses_real", model: {} }, titleOutput)
+      expect(titleOutput.system).toEqual([titlePrompt])
+
+      const mentionOutput = { system: ["Help the user name files. Mention a title if asked."] }
+      await hooks["experimental.chat.system.transform"]({ sessionID: "ses_real", model: {} }, mentionOutput)
+      expect(mentionOutput.system.join("\n")).toContain("remember this")
+    } finally {
+      await waitForBackgroundTasks()
+      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+      fs.rmSync(testRoot, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("idle event handling", () => {
