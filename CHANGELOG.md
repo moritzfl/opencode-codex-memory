@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-31
+
+### Added
+
+- Architecture writeup covering learning, remembering, and forgetting
+  (`docs/how-ai-memory-works.md`), linked from the README.
+
 ### Fixed
 
 - Memory is no longer injected into OpenCode's hidden session-title generator

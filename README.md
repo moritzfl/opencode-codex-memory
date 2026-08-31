@@ -52,7 +52,7 @@ If you want the mental model before the details, jump to
 
 ```json
 {
-  "plugin": ["opencode-codex-memory@0.6.4"]
+  "plugin": ["opencode-codex-memory@0.6.5"]
 }
 ```
 
@@ -201,7 +201,7 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.6.4", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory@0.6.5", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
@@ -268,7 +268,7 @@ Off by default; no changes to Codex's own config are required.
 {
   "plugin": [
     [
-      "opencode-codex-memory@0.6.4",
+      "opencode-codex-memory@0.6.5",
       { "codex_interop": { "import": true, "export": true } }
     ]
   ]
@@ -325,7 +325,7 @@ from the project memories Claude already keeps on your machine. **One-way only**
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.6.4", { "claude_import": { "enabled": true } }]
+    ["opencode-codex-memory@0.6.5", { "claude_import": { "enabled": true } }]
   ]
 }
 ```
@@ -352,7 +352,7 @@ Claude names each project with an opaque id (a folder under
 {
   "plugin": [
     [
-      "opencode-codex-memory@0.6.4",
+      "opencode-codex-memory@0.6.5",
       {
         "claude_import": {
           "enabled": true,
