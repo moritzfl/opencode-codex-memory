@@ -134,8 +134,8 @@ separation is what keeps the markdown workspace the single source of truth
 for retrieval.
 
 ![On-disk layout: memory.db sits beside the memories folder. Phase 1 writes
-the database; Phase 2 publishes a ranked subset as markdown and consolidates
-it; the read path searches only the published files.](memory-files.svg)
+the database; a publish step writes a ranked subset as markdown; Phase 2
+consolidates; the read path searches only the published files.](memory-files.svg)
 
 Two extra files live in the folder that are not pyramid layers:
 `raw_memories.md` (a temporary merge of selected Phase-1 rows; consolidation's
@@ -264,8 +264,8 @@ corrupt the very structure they are supposed to maintain.
 
 ### Publishing: candidates become markdown files
 
-Phase 2 does not read the whole candidate pool. It first **publishes a
-ranked subset** into the memory folder:
+Consolidation does not read the whole candidate pool. A **publish** step
+first writes a ranked subset into the memory folder:
 
 1. Rank the database rows by demonstrated usefulness and recency, drop
    anything unused past the retention horizon, and cap how many recaps feed
