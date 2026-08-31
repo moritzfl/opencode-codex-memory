@@ -72,18 +72,8 @@ The layers, top to bottom:
   pipeline, never edited. The memory system's responsibility starts one layer
   up, at the session recaps.
 
-On disk, the four upper layers live as ordinary files in one folder (under
-the host's data directory). Two extra entries sit beside them: `raw_memories.md`,
-a temporary merge of Phase-1 records that consolidation reads as its routing
-inventory, and `extensions/`, where explicit "remember that …" notes land
-(and, optionally, memory imported from other agents). A private version-control
-history of that same folder is what makes the diff-based change feed in
-Phase 2 possible. The embedded database is a sibling of the folder, not
-inside it.
-
-![On-disk layout: memory.db sits beside the memories folder. Phase 1 writes
-the database; Phase 2 publishes a ranked subset as markdown and consolidates
-it; the read path searches only the published files.](memory-files.svg)
+On disk, the four upper layers live as ordinary files in one folder. A
+database of unpublished extracts sits beside that folder, not inside it.
 
 This shape is called **progressive disclosure**: the model always carries the
 cheap overview, and descends into more expensive, more detailed layers only
@@ -142,6 +132,17 @@ goes through the memory folder. Rows exist to be *selected into* a
 consolidation pass (by recency and usage), not to serve the read path. That
 separation is what keeps the markdown workspace the single source of truth
 for retrieval.
+
+![On-disk layout: memory.db sits beside the memories folder. Phase 1 writes
+the database; Phase 2 publishes a ranked subset as markdown and consolidates
+it; the read path searches only the published files.](memory-files.svg)
+
+Two extra files live in the folder that are not pyramid layers:
+`raw_memories.md` (a temporary merge of selected Phase-1 rows; consolidation's
+routing inventory, regenerated each pass) and `extensions/` (explicit
+"remember that …" notes, plus optional imports from other agents). A private
+version-control history of the same folder is the diff-based change feed in
+Phase 2.
 
 These are exactly the things a relational store is good at — atomic claims
 under concurrency, transactional state, ordered selection over time and usage
