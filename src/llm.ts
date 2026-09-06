@@ -142,8 +142,8 @@ interface PromptOptions {
 /**
  * opencode's config carries the same split codex expresses with provider
  * model preferences: `small_model` for cheap background work (codex:
- * memory_extraction_preferred_model = gpt-5.4-mini) and `model` for capable
- * work (codex: memory_consolidation_preferred_model = gpt-5.4). Cached per
+ * memory_extraction_preferred_model = gpt-5.6-luna) and `model` for capable
+ * work (codex: memory_consolidation_preferred_model = gpt-5.6-terra). Cached per
  * plugin instance — opencode reloads plugins on config change.
  */
 let configModels: { model?: string; smallModel?: string } | null = null

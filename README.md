@@ -221,9 +221,9 @@ the default value appearing where you expected your setting.
 
 Model selection mirrors Codex's cheap-extraction / capable-consolidation
 split using OpenCode's own concepts: when `extract_model` is unset, the
-`small_model` from your `opencode.json` is used (Codex uses `gpt-5.4-mini`);
+`small_model` from your `opencode.json` is used (Codex uses `gpt-5.6-luna`);
 when `consolidation_model` is unset, your main `model` is used (Codex uses
-`gpt-5.4`). If neither is configured, the learning sub-agents fall back to
+`gpt-5.6-terra`). If neither is configured, the learning sub-agents fall back to
 their own agent-level `model` (if you defined one), else the provider default.
 (OpenCode's *automatic* small-model pick is internal to OpenCode and not
 exposed to plugins — set `small_model` explicitly to get the cheap extraction
