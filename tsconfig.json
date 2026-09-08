@@ -11,6 +11,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
     "outDir": "dist",
     "rootDir": ".",
     "baseUrl": ".",
@@ -18,6 +20,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "tools/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tools/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests"]
 }

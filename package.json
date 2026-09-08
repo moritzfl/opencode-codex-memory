@@ -9,6 +9,14 @@
       "import": "./dist/src/index.js",
       "types": "./dist/src/index.d.ts"
     },
+    "./v2": {
+      "import": "./dist/src/v2/index.js",
+      "types": "./dist/src/v2/index.d.ts"
+    },
+    "./tui": {
+      "types": "./dist/src/v2/tui.d.ts",
+      "import": "./dist/src/v2/tui.js"
+    },
     "./tools/*": {
       "import": "./dist/tools/*.js",
       "types": "./dist/tools/*.d.ts"
@@ -29,9 +37,10 @@
   },
   "scripts": {
     "dev": "bun --watch src/index.ts",
-    "build": "tsc && rm -rf dist/src/templates && cp -R src/templates dist/src/templates && cp opencode.json dist/opencode.json",
+    "build": "tsc && bun scripts/build-tui.ts && rm -rf dist/src/templates && cp -R src/templates dist/src/templates && cp opencode.json dist/opencode.json",
     "smoke": "bun scripts/smoke.ts",
     "contract": "bun scripts/check-opencode-contract.ts",
+    "contract:v2": "bun scripts/check-opencode2-contract.ts",
     "live:read": "bun scripts/live-readpath.ts",
     "live:e2e": "bun scripts/live-e2e.ts",
     "prepack": "npm run build && npm run smoke",
@@ -49,13 +58,29 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.0",
+    "@opencode/plugin": "0.0.0-beta-19296",
     "diff": "^9.0.0",
     "isomorphic-git": "^1.38.6",
-    "xdg-basedir": "^5.1.0"
+    "xdg-basedir": "^5.1.0",
+    "zod": "4.1.8"
   },
   "devDependencies": {
+    "@opencode/theme": "0.0.0-beta-19296",
+    "@opentui/core": "0.5.10",
+    "@opentui/solid": "0.5.10",
+    "solid-js": "1.9.15",
     "typescript": "^5.5.0",
     "@types/bun": "^1.1.0"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.10",
+    "@opentui/solid": ">=0.5.10",
+    "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": { "optional": true },
+    "@opentui/solid": { "optional": true },
+    "solid-js": { "optional": true }
   },
   "engines": {
     "bun": ">=1.1.0"

@@ -36,5 +36,26 @@
         "StructuredOutput": "allow"
       }
     }
+  },
+  "agents": {
+    "memorize": {
+      "description": "Memory consolidation agent (opencode-codex-memory)",
+      "mode": "subagent",
+      "system": "You are a memory consolidation agent. Read the workspace diff file and update MEMORY.md, memory_summary.md, and skills/ under the memory workspace only. Do not read or edit project source files outside that memory root. Keep memory_summary.md under 10000 chars (2500 tokens). Prune stale entries. Do not access the network.",
+      "permissions": [
+        { "action": "*", "resource": "*", "effect": "deny" },
+        { "action": "read", "resource": "*", "effect": "allow" },
+        { "action": "edit", "resource": "*", "effect": "allow" },
+        { "action": "glob", "resource": "*", "effect": "allow" },
+        { "action": "grep", "resource": "*", "effect": "allow" }
+      ]
+    },
+    "memorize-extract": {
+      "description": "Memory extraction agent (opencode-codex-memory)",
+      "mode": "subagent",
+      "hidden": true,
+      "system": "You are a memory extraction agent. The session transcript is provided inline in the prompt. Extract raw_memory, rollout_summary, and rollout_slug as JSON. Exclude AGENTS.md/instruction content. Redact secrets.",
+      "permissions": [{ "action": "*", "resource": "*", "effect": "deny" }]
+    }
   }
 }

@@ -1,0 +1,55 @@
+import { MemoryStore } from "../store.js"
+import { pluginOptions, getConfigWarnings } from "../options.js"
+import { getAgentHealth } from "../agent-health.js"
+import { isPhase2InFlight } from "../phase2.js"
+import { isPluginShuttingDown } from "../lifecycle.js"
+import { activeProviderCapacityBackoffs } from "../ratelimit.js"
+import { resolveCodexInterop } from "../codex-interop.js"
+import type { MemoryStatus } from "./status-rpc.js"
+
+/** Read the same snapshots as memory_inspect; never claim or advance a job. */
+export function readMemoryStatus(): MemoryStatus {
+  const store = new MemoryStore()
+  const phase1 = store.stage1JobSnapshot()
+  const phase2 = store.phase2JobSnapshot()
+  const options = pluginOptions
+  const now = Date.now()
+  const retryTimes = [
+    ...activeProviderCapacityBackoffs().map((backoff) => backoff.retry_at),
+    ...phase1.recent_errors.map((error) => error.retry_at),
+    phase2?.retry_at,
+  ].filter((time): time is number => time != null && time * 1000 > now)
+  const retryAt = retryTimes.length ? Math.min(...retryTimes) * 1000 : null
+  const warnings = [...getConfigWarnings()]
+  const health = getAgentHealth()
+  if (options.generate_memories && health.observed) {
+    // V2 extraction is sessionless; only the consolidator agent is used.
+    warnings.push(...health.agents.memorize.issues.map((issue) => `memorize: ${issue}`))
+  }
+  if (phase2?.last_error) warnings.push("Consolidation failed; see memory_inspect for details.")
+  if (phase1.by_failure_class.other_exhausted > 0) warnings.push("Some extraction jobs exhausted their retries.")
+  if (phase1.by_failure_class.provider_capacity > 0) warnings.push("Some extraction jobs hit provider capacity limits.")
+  const codexImport = options.codex_interop.import && resolveCodexInterop(options.codex_interop) !== null
+  if (options.codex_interop.import && !codexImport) warnings.push("Codex import is misconfigured.")
+
+  let activity: MemoryStatus["activity"] = "idle"
+  if (isPluginShuttingDown()) activity = "stopping"
+  else if (isPhase2InFlight() || phase2?.status === "running") activity = "consolidating"
+  else if ((phase1.by_status.running ?? 0) > 0) activity = "extracting"
+  else if (!options.generate_memories) activity = options.use_memories ? "read_only" : "disabled"
+  else if (retryAt !== null) activity = "retrying"
+  else if (warnings.length > 0) activity = "error"
+
+  return {
+    activity,
+    useMemories: options.use_memories,
+    generateMemories: options.generate_memories,
+    extractModel: options.extract_model ?? null,
+    consolidationModel: options.consolidation_model ?? null,
+    codexImport,
+    // finished_at on a failed attempt is NOT a successful consolidation.
+    lastSuccessAt: phase2?.success_finished_at != null ? phase2.success_finished_at * 1000 : null,
+    retryAt,
+    warnings,
+  }
+}
