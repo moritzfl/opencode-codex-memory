@@ -9,9 +9,6 @@ For the conceptual tour — learning, remembering, forgetting, and the trade-off
 behind each — see
 [How OpenCode Codex Memory works](./docs/how-ai-memory-works.md).
 
-For the historical, stage-by-stage build spec see git history
-(`implementation-plan.md`, removed once the system was complete).
-
 ---
 
 ## Staying aligned with codex
