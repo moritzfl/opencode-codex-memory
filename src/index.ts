@@ -12,6 +12,7 @@ import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from 
 import { hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
 import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from "./agent-health.js"
+import { setup as setupV2 } from "./v2/plugin.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import path from "path"
 
@@ -118,6 +119,9 @@ export function handleSessionDeleted(
 
 export default {
   id: "opencode-codex-memory",
+  // opencode2 entry point (V2 reads id + setup(), ignoring server()).
+  // Added additively: V1 hosts keep calling server() exactly as before.
+  setup: setupV2,
   async server(input: PluginInput, opts?: PluginOptions) {
     // A reload after dispose must be able to run the pipeline again.
     resetPluginLifecycle()

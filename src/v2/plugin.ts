@@ -1,0 +1,368 @@
+/**
+ * opencode2 plugin setup.
+ *
+ * The V1 pipeline (phase1/phase2/capture/llm/…) runs unchanged on top of the
+ * V1-client shim (./shim.ts). This module only translates V2 host surfaces
+ * into the same calls the V1 hooks made:
+ *
+ * - prompt hook        → turn-start stamp + phase-1 pump (was chat.message)
+ * - context hook       → memory injection (was system.transform) + citation
+ *                        record/strip (was text.complete/messages.transform)
+ * - tool.execute.before→ external-context pollution mark (unchanged name)
+ * - session.created    → session-registry sighting (feeds V2 discovery)
+ * - execution.succeeded→ phase-1 pump (was session.status idle/session.idle)
+ * - agent.transform    → memorize sub-agent provisioning (was config hook)
+ * - tool.transform     → memory tool registration (was returned tool map)
+ *
+ * Known V2 adaptations (see docs/opencode2.md): sessions cannot be deleted
+ * (helpers are interrupted + released, rows remain as inert history);
+ * discovery is registry-based (no list API); citations are stripped from the
+ * model-bound transcript but remain in stored history; config/get-based
+ * model defaults are unavailable (set extract_model/consolidation_model).
+ */
+import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "../source.js"
+import { stripCitations, extractCitedSessionIds } from "../citation.js"
+import { MemoryStore } from "../store.js"
+import { runPhase1 } from "../phase1.js"
+import { runPhase2 } from "../phase2.js"
+import {
+  setPluginInput,
+  cleanupOldSubSessions,
+  isMemorySubSession,
+  abortActiveSubSessions,
+} from "../llm.js"
+import { pluginOptions, clearConfigWarnings, resetPluginOptions } from "../options.js"
+import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "../lifecycle.js"
+import { hostMcpStatus } from "../host-client.js"
+import { recordDiagnostic } from "../diagnostics.js"
+import { resetAgentHealth } from "../agent-health.js"
+import { applyPluginOptions } from "../index.js"
+import {
+  setV2Context,
+  buildV1ClientShim,
+  recordSessionSighting,
+  type V2Context,
+} from "./shim.js"
+import { ensureV2Agents } from "./agents.js"
+import { buildV2Tools } from "./tools.js"
+import { MemoryStatusRpc } from "./status-rpc.js"
+import { readMemoryStatus } from "./status.js"
+
+let phase1InFlight = false
+let shimClient: unknown = null
+const backgroundTasks = new Set<Promise<void>>()
+const statusListeners = new Set<() => void>()
+
+function notifyStatusChanged(): void {
+  for (const notify of statusListeners) notify()
+}
+
+function trackBackgroundTask(task: Promise<void>): void {
+  const tracked = task.catch((err) => {
+    console.error("[opencode-codex-memory] background task error:", err)
+  })
+  backgroundTasks.add(tracked)
+  void tracked.then(() => backgroundTasks.delete(tracked))
+}
+
+/** Test seam: wait for hook-launched work to settle. */
+export async function waitForV2BackgroundTasks(): Promise<void> {
+  while (backgroundTasks.size > 0) {
+    await Promise.all([...backgroundTasks])
+  }
+}
+
+/** Test seam: reset module state between tests. */
+export function resetV2ModuleStateForTest(): void {
+  phase1InFlight = false
+  statusListeners.clear()
+  backgroundTasks.clear()
+  recordedCitations.clear()
+  seenTurnSessions.clear()
+  mcpStatusInFlight = null
+}
+
+function getStore(): MemoryStore {
+  return new MemoryStore()
+}
+
+// Citation blocks surface on every context call for as long as the message
+// is in history (V2 has no pre-persist strip hook), so count each citation
+// exactly once per message per process.
+const recordedCitations = new Map<string, Set<string>>()
+const MAX_TRACKED_PARTS = 500
+
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, max: number): V {
+  map.delete(key)
+  map.set(key, value)
+  if (map.size > max) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest)
+  }
+  return value
+}
+
+export function takeNewV2Citations(partKey: string, ids: string[]): string[] {
+  const seen = recordedCitations.get(partKey) ?? new Set<string>()
+  lruSet(recordedCitations, partKey, seen, MAX_TRACKED_PARTS)
+  const fresh = ids.filter((id) => !seen.has(id))
+  for (const id of fresh) seen.add(id)
+  return fresh
+}
+
+// One stamp+pump per session per process from the prompt hook.
+const seenTurnSessions = new Map<string, number>()
+const MAX_TRACKED_TURN_SESSIONS = 1000
+
+export function markV2TurnSeen(sessionId: string): boolean {
+  const first = seenTurnSessions.get(sessionId)
+  lruSet(seenTurnSessions, sessionId, first ?? Date.now(), MAX_TRACKED_TURN_SESSIONS)
+  return first === undefined
+}
+
+let mcpStatusInFlight: Promise<string[] | null> | null = null
+const MCP_STATUS_TIMEOUT_MS = 1_000
+
+async function mcpToolPrefixes(): Promise<string[] | null> {
+  if (!shimClient) return null
+  if (!mcpStatusInFlight) {
+    mcpStatusInFlight = (async () => {
+      const controller = new AbortController()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const res = await Promise.race([
+          hostMcpStatus(shimClient as any, controller.signal),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort()
+              reject(new Error(`mcp status timed out after ${MCP_STATUS_TIMEOUT_MS}ms`))
+            }, MCP_STATUS_TIMEOUT_MS)
+          }),
+        ])
+        if (!res || (res as { error?: unknown }).error) return null
+        const servers = (res as { data?: unknown }).data
+        if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
+        const prefixes: string[] = []
+        for (const [server, status] of Object.entries(servers as Record<string, unknown>)) {
+          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string") continue
+          prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
+        }
+        return prefixes
+      } catch {
+        return null
+      } finally {
+        clearTimeout(timer)
+        mcpStatusInFlight = null
+      }
+    })()
+  }
+  return mcpStatusInFlight
+}
+
+async function classifyExternalContextTool(toolName: string): Promise<boolean | null> {
+  if (toolName === "websearch" || toolName === "webfetch") return true
+  const prefixes = await mcpToolPrefixes()
+  if (prefixes === null) return null
+  for (const prefix of prefixes) {
+    if (toolName.startsWith(`${prefix}_`) || toolName.startsWith(`mcp_${prefix}_`)) return true
+  }
+  return false
+}
+
+function stampAndPump(sid: string): void {
+  try {
+    getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
+  } catch (e) {
+    console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
+  }
+  trackBackgroundTask(triggerPhase1(sid))
+}
+
+async function triggerPhase1(currentSessionId: string): Promise<void> {
+  if (phase1InFlight || !pluginOptions.generate_memories || isPluginShuttingDown()) return
+  phase1InFlight = true
+  notifyStatusChanged()
+  try {
+    await runPhase1(getStore(), {
+      maxAgeDays: pluginOptions.max_rollout_age_days,
+      minIdleHours: pluginOptions.min_rollout_idle_hours,
+      maxClaimed: pluginOptions.max_rollouts_per_startup,
+      maxUnusedDays: pluginOptions.max_unused_days,
+      excludeSession: currentSessionId,
+      extractModel: pluginOptions.extract_model,
+    })
+  } catch (err) {
+    console.error("[opencode-codex-memory] phase1 error:", err)
+    recordDiagnostic("error", "phase1", err instanceof Error ? err.message : String(err))
+  } finally {
+    phase1InFlight = false
+    notifyStatusChanged()
+  }
+  trackBackgroundTask(triggerPhase2())
+}
+
+async function triggerPhase2(): Promise<void> {
+  if (isPluginShuttingDown()) return
+  try {
+    const result = await runPhase2(getStore(), {
+      maxRaw: pluginOptions.max_raw_memories_for_consolidation,
+      maxUnusedDays: pluginOptions.max_unused_days,
+      extensionRetentionDays: 7,
+      consolidationModel: pluginOptions.consolidation_model,
+      codexInterop: pluginOptions.codex_interop,
+      claudeImport: pluginOptions.claude_import,
+    })
+    if (result.status !== "already_running" && result.status !== "skipped_cooldown" && result.status !== "skipped_running") {
+      recordDiagnostic(
+        result.status === "succeeded" || result.status === "no_workspace_changes" ? "info" : "warn",
+        "phase2",
+        result.status,
+      )
+    }
+  } catch (err) {
+    console.error("[opencode-codex-memory] phase2 error:", err)
+    recordDiagnostic("error", "phase2", err instanceof Error ? err.message : String(err))
+  } finally {
+    notifyStatusChanged()
+  }
+}
+
+export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
+  resetPluginLifecycle()
+  setV2Context(ctx)
+  shimClient = buildV1ClientShim()
+  setPluginInput({ client: shimClient } as any)
+  resetAgentHealth()
+  mcpStatusInFlight = null
+  clearConfigWarnings()
+  if (ctx.options) applyPluginOptions(ctx.options as Record<string, unknown>)
+  else resetPluginOptions()
+  await ensureV2Agents(ctx as any)
+
+  const statusRegistration = await ctx.rpc.register(MemoryStatusRpc, {
+    status: async () => readMemoryStatus(),
+  })
+  const publishStatus = () => {
+    void statusRegistration.events.emit("changed", {}).catch((err) => {
+      console.warn("[opencode-codex-memory] status notification failed:", err)
+    })
+  }
+
+  const locationDirectory = (ctx.location as { directory?: string } | undefined)?.directory
+
+  await ctx.tool.transform((editor: any) => {
+    for (const t of buildV2Tools()) editor.add(t)
+  })
+
+  await ctx.session.hook("prompt", (ev: any) => {
+    try {
+      const sid = ev?.sessionID
+      if (!sid || isMemorySubSession(sid)) return
+      recordSessionSighting(sid, { directory: locationDirectory ?? null })
+      if (!markV2TurnSeen(sid)) return
+      stampAndPump(sid)
+    } catch (err) {
+      console.error("[opencode-codex-memory] v2 prompt hook error:", err)
+    }
+  })
+
+  await ctx.session.hook("context", (ev: any) => {
+    try {
+      const sid = ev?.sessionID
+      if (!sid || isMemorySubSession(sid)) return
+      // Citation feedback (write path): record usage and strip the block
+      // from the model-bound transcript. Stored history keeps the markup
+      // (V2 has no pre-persist hook); the per-message dedupe keeps counts
+      // exact within a process.
+      try {
+        for (const [i, msg] of (ev.messages ?? []).entries()) {
+          if (msg?.type !== "assistant" || !Array.isArray(msg.content)) continue
+          for (const part of msg.content) {
+            if (part?.type !== "text" || typeof part.text !== "string") continue
+            if (!part.text.includes("<memory-citation>")) continue
+            try {
+              const ids = extractCitedSessionIds(part.text)
+              const fresh = takeNewV2Citations(`${sid}:${msg.id ?? i}`, ids)
+              if (fresh.length > 0) getStore().recordUsage(fresh)
+            } catch (e) {
+              console.error("[opencode-codex-memory] citation recording failed:", e)
+            }
+            part.text = stripCitations(part.text)
+          }
+        }
+      } catch (e) {
+        console.error("[opencode-codex-memory] v2 citation handling failed:", e)
+      }
+      // Read path: inject the memory summary block.
+      if (!pluginOptions.use_memories) return
+      ensureMemoryLayout()
+      const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+      if (memoryPrompt) {
+        ev.system.push({ type: "text", text: memoryPrompt })
+      }
+    } catch (err) {
+      console.error("[opencode-codex-memory] v2 context hook error:", err)
+    }
+  })
+
+  await ctx.tool.hook("execute.before", async (ev: any) => {
+    try {
+      if (!pluginOptions.disable_on_external_context || !ev?.sessionID) return
+      if ((await classifyExternalContextTool(ev.tool)) !== true) return
+      getStore().markPolluted(ev.sessionID)
+    } catch (err) {
+      console.error("[opencode-codex-memory] v2 tool hook error:", err)
+    }
+  })
+
+  // Event loop: session.created feeds discovery; execution.succeeded pumps
+  // phase 1 the way V1's idle events did.
+  const eventAbort = new AbortController()
+  void (async () => {
+    while (!eventAbort.signal.aborted && !isPluginShuttingDown()) {
+      try {
+        for await (const raw of ctx.event.subscribe({ signal: eventAbort.signal })) {
+          const e = raw as { type?: string } & Record<string, any>
+          try {
+            if (e.type === "session.created") {
+              if (e.sessionID && !isMemorySubSession(e.sessionID)) {
+                recordSessionSighting(e.sessionID, {
+                  title: typeof e.title === "string" ? e.title : undefined,
+                  directory: (e.location as { directory?: string } | undefined)?.directory ?? locationDirectory ?? null,
+                })
+              }
+            } else if (e.type === "session.execution.succeeded" || e.type === "session.execution.ended") {
+              const sid = (e as { sessionID?: string }).sessionID
+              if (sid && !isMemorySubSession(sid)) {
+                recordSessionSighting(sid, { directory: locationDirectory ?? null })
+                trackBackgroundTask(triggerPhase1(sid))
+              }
+            }
+          } catch (err) {
+            console.error("[opencode-codex-memory] v2 event handling error:", err)
+          }
+        }
+        break
+      } catch (err) {
+        if (eventAbort.signal.aborted || isPluginShuttingDown()) break
+        console.error("[opencode-codex-memory] v2 event subscription error:", err)
+        await new Promise((r) => setTimeout(r, 5000))
+      }
+    }
+  })().catch((err) => console.error("[opencode-codex-memory] v2 event loop error:", err))
+
+  // Bounded reseed before hooks observe traffic (mirrors server()).
+  await cleanupOldSubSessions()
+  statusListeners.add(publishStatus)
+
+  return () => {
+    statusListeners.delete(publishStatus)
+    eventAbort.abort()
+    beginPluginShutdown()
+    setV2Context(null)
+    void abortActiveSubSessions().catch((err) => {
+      console.warn("[opencode-codex-memory] v2 dispose abort of sub-sessions failed:", err)
+    })
+    invalidateCache()
+  }
+}

@@ -67,6 +67,20 @@ learning starts immediately.
 Requires OpenCode 1.18 or newer. Models and other options: see
 [Configuration](#configuration).
 
+**OpenCode 2:** the same package works on opencode2 — install it with the
+V2 plugin syntax:
+
+```jsonc
+{
+  "plugins": [{ "package": "opencode-codex-memory@0.6.5" }],
+}
+```
+
+Behavior is identical; see [docs/opencode2.md](./docs/opencode2.md) for the
+few platform adaptations and current limitations. On opencode2 you also get a
+**Memory** section in the session sidebar plus a `/memory-status` command,
+served live from the same state as `memory_inspect`.
+
 ### Installation hints
 
 To bump pins, copy
