@@ -5,6 +5,10 @@ standalone opencode plugin (no core changes, no MCP server, no separate process)
 This document explains *how the system is shaped and why*, and how to keep it
 aligned with upstream codex over time.
 
+For the conceptual tour — learning, remembering, forgetting, and the trade-offs
+behind each — see
+[How OpenCode Codex Memory works](./docs/how-ai-memory-works.md).
+
 For the historical, stage-by-stage build spec see git history
 (`implementation-plan.md`, removed once the system was complete).
 
