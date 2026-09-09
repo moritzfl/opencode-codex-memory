@@ -43,8 +43,8 @@ worked and what didn't — and puts that context back in front of the agent in
 later conversations. You don't manage any of it; OpenCode just gets more useful
 the more you use it.
 
-If you want the mental model before the details, jump to
-[How it works](#how-it-works).
+If you want the mental model — learning, remembering, forgetting — see
+[How OpenCode Codex Memory works](./docs/how-ai-memory-works.md).
 
 ## Install
 
@@ -98,23 +98,6 @@ mkdir -p ~/.local/share/opencode/memories
 echo 'I prefer TypeScript strict mode and 2-space indentation.' \
   > ~/.local/share/opencode/memories/memory_summary.md
 ```
-
-## How it works
-
-You don't need to know any of this to use the plugin. In short: two background
-writers and one reader. Once a session has been idle long enough (default 6 h),
-a cheap model reviews its transcript and writes a structured note (**phase 1 —
-extraction**). Every few hours, a stronger model merges those notes into the
-actual memory files — the index, the short summary, reusable skills — resolving
-duplicates and dropping what went stale (**phase 2 — consolidation**). On every
-turn, the short summary goes into the system prompt, and the agent searches
-deeper layers itself when a task looks familiar (**read path**). When the agent
-uses a memory it cites it; those citations feed consolidation's ranking, so
-useful memories survive and unused ones age out.
-
-For the full architecture — learning, remembering, forgetting, and the
-trade-offs behind each — see
-[How OpenCode Codex Memory works](./docs/how-ai-memory-works.md).
 
 ## Where your data lives
 
@@ -462,8 +445,9 @@ package cache.
 ## Contributing
 
 The port follows Codex closely: same two-phase pipeline, same on-disk artifacts,
-same prompts (adapted only where OpenCode differs). If you want the full design
-and the trade-offs, see [`ARCHITECTURE.md`](./ARCHITECTURE.md); contributor
+same prompts (adapted only where OpenCode differs). Conceptual design:
+[How OpenCode Codex Memory works](./docs/how-ai-memory-works.md). Implementation
+map and workarounds: [`ARCHITECTURE.md`](./ARCHITECTURE.md). Contributor
 guidance lives in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and
 [`AGENTS.md`](./AGENTS.md) — in short: this repo exists to port Codex's memory
 system to OpenCode, and PRs that break that parity will be rejected.
