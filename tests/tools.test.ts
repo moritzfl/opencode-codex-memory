@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import fs from "fs"
 import path from "path"
 import os from "os"
+import { resetRateLimitForTest } from "../src/ratelimit.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-tools-${process.pid}-${Date.now()}`)
 const CTX = { sessionID: "ses_test" } as any
 
 beforeEach(() => {
+  resetRateLimitForTest()
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
   // Module-singleton DB handle: drop any handle from another test file.
@@ -29,6 +31,7 @@ beforeEach(() => {
   )
 })
 afterEach(() => {
+  resetRateLimitForTest()
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
