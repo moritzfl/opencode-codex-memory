@@ -55,6 +55,20 @@ function isNotFoundError(e: unknown): boolean {
   return false
 }
 
+async function sessionGoneOnService(client: V2ServiceClient, sessionID: string): Promise<boolean> {
+  if (typeof client.session.get !== "function") return false
+  try {
+    const info = await client.session.get({ sessionID })
+    if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
+      return true
+    }
+    const data = und(info)
+    return !data || typeof data !== "object"
+  } catch (e) {
+    return isNotFoundError(e)
+  }
+}
+
 /** Sub-session ids released via delete(): report 404 from get(). */
 const releasedSubSessions = new Set<string>()
 const RELEASED_CAP = 500
@@ -431,8 +445,11 @@ export function buildV1ClientShim(): unknown {
           opts.signal ? { signal: opts.signal } : undefined,
         )
         if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
-        markReleased(opts.path.id)
-        return {}
+        if (await sessionGoneOnService(client, opts.path.id)) {
+          markReleased(opts.path.id)
+          return {}
+        }
+        throw new Error("session still exists after remove")
       } catch (error) {
         shutdownError = error
       }

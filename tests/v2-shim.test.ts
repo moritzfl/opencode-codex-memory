@@ -450,7 +450,7 @@ describe("V1 client shim", () => {
     expect((calls[2].args as any).text).toBe("DO")
   })
 
-  it("maps NotFound gets to 404 and released ids stay 404", async () => {
+  it("maps NotFound gets to 404", async () => {
     const { ctx } = fakeCtx()
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
@@ -458,8 +458,24 @@ describe("V1 client shim", () => {
     expect(gone.response?.status).toBe(404)
     const live = await client.session.get({ path: { id: "ses_live" } })
     expect(live.data?.id).toBe("ses_live")
-    await client.session.delete({ path: { id: "ses_live" } })
-    const after = await client.session.get({ path: { id: "ses_live" } })
+  })
+
+  it("does not treat remove 200 as delete while get still returns the session", async () => {
+    const { ctx } = fakeCtx()
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    const still = await client.session.delete({ path: { id: "ses_live" } })
+    expect(still.error?.message).toMatch(/still exists/i)
+    const live = await client.session.get({ path: { id: "ses_live" } })
+    expect(live.data?.id).toBe("ses_live")
+  })
+
+  it("marks a helper released only after remove plus a confirmed 404", async () => {
+    const { ctx } = fakeCtx()
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    await expect(client.session.delete({ path: { id: "ses_gone" } })).resolves.toEqual({})
+    const after = await client.session.get({ path: { id: "ses_gone" } })
     expect(after.response?.status).toBe(404)
   })
 
