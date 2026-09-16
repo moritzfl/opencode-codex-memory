@@ -65,26 +65,26 @@ function versionGte(a: string, b: string): boolean {
   return av.beta >= bv.beta
 }
 
-const REQUIRED_OPS = [
-  "v2.session.create",
-  "v2.session.get",
-  "v2.session.prompt",
-  "v2.session.wait",
-  "v2.session.context",
-  "v2.session.generate",
-  "v2.session.switchAgent",
-  "v2.session.switchModel",
-  "v2.session.interrupt",
-  "v2.session.list",
-  "v2.session.remove",
-  "v2.message.list",
-  "v2.config.get",
-  "v2.generate.text",
-  "v2.mcp.list",
-  "v2.agent.get",
-  "v2.event.subscribe",
-  "v2.model.list",
-] as const
+/** Live 2.0.5 ids first; 2.0.3 `v2.*` aliases still accepted. */
+const REQUIRED_OPS: { name: string; ids: string[] }[] = [
+  { name: "session.create", ids: ["session.create", "v2.session.create"] },
+  { name: "session.get", ids: ["session.get", "v2.session.get"] },
+  { name: "session.prompt", ids: ["session.prompt", "v2.session.prompt"] },
+  { name: "session.wait", ids: ["session.wait", "experimental.session.wait", "v2.session.wait"] },
+  { name: "session.generate", ids: ["session.generate", "v2.session.generate"] },
+  { name: "session.switchAgent", ids: ["session.switchAgent", "v2.session.switchAgent"] },
+  { name: "session.switchModel", ids: ["session.switchModel", "v2.session.switchModel"] },
+  { name: "session.interrupt", ids: ["session.interrupt", "v2.session.interrupt"] },
+  { name: "session.list", ids: ["session.list", "v2.session.list"] },
+  { name: "session.remove", ids: ["session.remove", "v2.session.remove"] },
+  { name: "session.message.list", ids: ["session.message.list", "v2.message.list", "message.list"] },
+  { name: "config.get", ids: ["config.get", "v2.config.get"] },
+  { name: "generate.text", ids: ["experimental.generate.text", "generate.text", "v2.generate.text"] },
+  { name: "mcp.list", ids: ["mcp.list", "v2.mcp.list"] },
+  { name: "agent.get", ids: ["agent.get", "v2.agent.get"] },
+  { name: "event.subscribe", ids: ["event.subscribe", "v2.event.subscribe"] },
+  { name: "model.list", ids: ["model.list", "v2.model.list"] },
+]
 
 async function main(): Promise<void> {
   // --- binary ---
@@ -113,7 +113,8 @@ async function main(): Promise<void> {
   }
   note(ops.size > 0, `openapi has ${ops.size} operations`)
   for (const op of REQUIRED_OPS) {
-    note(ops.has(op), `operation ${op} present`)
+    const found = op.ids.find((id) => ops.has(id))
+    note(Boolean(found), `operation ${op.name} present${found && found !== op.name ? ` as ${found}` : ""}`)
   }
 
   // --- built plugin dual export ---
