@@ -12,7 +12,6 @@ import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from 
 import { hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
 import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from "./agent-health.js"
-import type { V2Context } from "./v2/shim.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import path from "path"
 
@@ -51,9 +50,11 @@ function getStore(): MemoryStore {
  * setup(). OpenCode 1 imports this module to obtain server(); it must not need
  * the V2 SDK or execute any V2 module initialization just to start.
  */
-async function setupV2(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
+type PluginSetup = (() => void | Promise<void>) | void
+
+async function setupV2(ctx: unknown): Promise<PluginSetup> {
   const { setup } = await import("./v2/plugin.js")
-  return setup(ctx)
+  return (setup as (context: unknown) => Promise<PluginSetup> | PluginSetup)(ctx)
 }
 
 // Citation blocks are seen by both the text.complete hook (once, at
@@ -115,9 +116,13 @@ export function shouldHandleIdle(sessionId: string, now: number = Date.now()): b
   return !deduped
 }
 
+interface SessionMemoryStore {
+  deleteSessionMemory(sessionId: string): boolean
+}
+
 export function handleSessionDeleted(
   sessionId: string,
-  store: Pick<MemoryStore, "deleteSessionMemory"> = getStore(),
+  store: SessionMemoryStore = getStore(),
   // With generation off the memorize agent is not injected, so a consolidation
   // attempt could only fail; the row deletion above still happens, and the
   // enqueued job runs when generation is re-enabled (codex: delete only

@@ -18,9 +18,9 @@ export const CITATION_FENCE_LANG = "memory-citation"
 // fenced form ```memory-citation ... ``` which markdown clients render as a
 // code block and the V2 TUI renders natively.
 const CITATION_BLOCK_RE =
-  /<memory-citation>[\s\S]*?<\/memory-citation>|```memory-citation[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*```/gi
+  /<memory-citation>[\s\S]*?<\/memory-citation>|^[ \t]{0,3}(`{3,})memory-citation[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*\1[ \t]*$/gim
 
-const FENCE_RE = /^```memory-citation[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```$/i
+const FENCE_RE = /^[ \t]{0,3}(`{3,})memory-citation[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*\1[ \t]*$/i
 const SESSIONS_LINE_RE = /^sessions?\s*:\s*(.*)$/i
 
 function extractSection(block: string, name: string): string | null {
@@ -81,7 +81,7 @@ export function parseCitations(text: string): ParsedCitation[] {
     const raw = m[0]
     const fenced = raw.match(FENCE_RE)
     if (fenced) {
-      const parsed = parseCitationBody(fenced[1])
+      const parsed = parseCitationBody(fenced[2])
       if (parsed.entries.length > 0 || parsed.sessionIds.length > 0) results.push({ ...parsed, raw })
       continue
     }
@@ -126,7 +126,7 @@ export function parseCitations(text: string): ParsedCitation[] {
 
 /** Cheap pre-check before running the full parser (either format). */
 export function hasCitationMarkup(text: string): boolean {
-  return text.includes("<memory-citation>") || text.includes("```memory-citation")
+  return /<memory-citation>/i.test(text) || /^[ \t]{0,3}`{3,}memory-citation[ \t]*$/im.test(text)
 }
 
 export function extractCitedSessionIds(text: string): string[] {

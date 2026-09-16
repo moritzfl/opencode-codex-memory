@@ -38,6 +38,10 @@ const ASSISTANT_TOOL_MSG = {
 let serviceRows: unknown[] = []
 let servicePageResponses: unknown[] = []
 let serviceListInputs: unknown[] = []
+let messagePageResponses: unknown[] = []
+let messageListInputs: unknown[] = []
+let serviceRemove: () => Promise<unknown> = async () => {}
+let serviceConfigResponse: unknown = [{ type: "document", info: { model: "acme/m1" } }]
 
 function fakeCtx() {
   const calls: { name: string; args: unknown }[] = []
@@ -101,6 +105,10 @@ beforeEach(() => {
   setV2Context(null)
   servicePageResponses = []
   serviceListInputs = []
+  messagePageResponses = []
+  messageListInputs = []
+  serviceRemove = async () => {}
+  serviceConfigResponse = [{ type: "document", info: { model: "acme/m1" } }]
   const serviceClient: any = {
     health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) },
     session: {
@@ -112,11 +120,16 @@ beforeEach(() => {
         if (sessionID === "ses_gone") throw { _tag: "SessionNotFoundError" }
         return { id: sessionID, parentID: null }
       },
-      remove: async () => {},
+      remove: async () => serviceRemove(),
       interrupt: async () => {},
     },
-    message: { list: async () => ({ data: [{ id: "m1", time: { created: 1 }, text: "hi", type: "user" }] }) },
-    config: { get: async () => [{ type: "document", info: { model: "acme/m1" } }] },
+    message: {
+      list: async (input: unknown) => {
+        messageListInputs.push(input)
+        return messagePageResponses.shift() ?? { data: [{ id: "m1", time: { created: 1 }, text: "hi", type: "user" }] }
+      },
+    },
+    config: { get: async () => serviceConfigResponse },
   }
   setV2ServiceDependenciesForTest({
     service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
@@ -204,6 +217,28 @@ describe("V1 client shim", () => {
     ).rejects.toThrow(/healthy/i)
   })
 
+  it("times out health discovery and aborts the request", async () => {
+    let aborted = false
+    const never = new Promise<unknown>(() => {})
+    await expect(
+      discoverOwnService(
+        {
+          service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+          make: () => ({
+            health: {
+              get: async (options?: { signal?: AbortSignal }) => {
+                options?.signal?.addEventListener("abort", () => { aborted = true }, { once: true })
+                return never
+              },
+            },
+          }) as any,
+        },
+        10,
+      ),
+    ).rejects.toThrow(/timed out/i)
+    expect(aborted).toBe(true)
+  })
+
   it("serves global paginated discovery from the registered service", async () => {
     serviceRows = [
       { id: "ses_b", title: "b", directory: "/p", time: { created: 1, updated: 3 }, parentID: null },
@@ -229,6 +264,22 @@ describe("V1 client shim", () => {
       { limit: 2, order: "desc", parentID: null },
       { limit: 2, order: "desc", parentID: null, cursor: "cursor-1" },
     ])
+  })
+
+  it("preserves cleanup search/cursor semantics and maps V2 locations", async () => {
+    serviceRows = [
+      { id: "ses_old", title: "codex-memory-consolidate", location: { directory: "/memory/project" }, time: { updated: 1 }, parentID: null },
+      { id: "ses_new", title: "ordinary", location: { directory: "/other" }, time: { updated: 3 }, parentID: null },
+    ]
+    const client = buildV1ClientShim() as any
+    const res = await client._client.get({
+      url: "/experimental/session",
+      query: { roots: true, limit: 10, cursor: 2, search: "codex-memory-", directory: "" },
+    })
+    expect(res.data).toEqual([
+      expect.objectContaining({ id: "ses_old", directory: "/memory/project" }),
+    ])
+    expect(serviceListInputs[0]).toEqual({ limit: 10, order: "desc", parentID: null, search: "codex-memory-" })
   })
 
   it("routes structured extraction through generate.text", async () => {
@@ -258,6 +309,37 @@ describe("V1 client shim", () => {
     setV2Context(fakeCtx().ctx as any)
     const client = buildV1ClientShim() as any
     await expect(client.config.get()).resolves.toEqual({ data: { model: "acme/m1" } })
+  })
+
+  it("merges config documents from low to high precedence", async () => {
+    serviceConfigResponse = [
+      { type: "document", info: { model: "low/model", temperature: 0.2 } },
+      { type: "document", info: { model: { providerID: "high", model: "model" } } },
+    ]
+    setV2Context(fakeCtx().ctx as any)
+    const client = buildV1ClientShim() as any
+    await expect(client.config.get()).resolves.toEqual({ data: { model: "high/model", temperature: 0.2 } })
+  })
+
+  it("loads every message page and omits order on cursor requests", async () => {
+    messagePageResponses = [
+      { data: [{ id: "m1", time: { created: 1 }, text: "one", type: "user" }], cursor: { next: "m-cursor" } },
+      { data: [{ id: "m2", time: { created: 2 }, text: "two", type: "user" }], cursor: { next: null } },
+    ]
+    const client = buildV1ClientShim() as any
+    const res = await client.session.messages({ path: { id: "ses_long" } })
+    expect(res.data.map((row: any) => row.parts[0].text)).toEqual(["one", "two"])
+    expect(messageListInputs).toEqual([
+      { sessionID: "ses_long", order: "asc" },
+      { sessionID: "ses_long", cursor: "m-cursor" },
+    ])
+  })
+
+  it("rejects an unavailable or malformed transcript instead of returning empty", async () => {
+    messagePageResponses = [{ data: { not: "an array" } }]
+    const client = buildV1ClientShim() as any
+    const malformed = await client.session.messages({ path: { id: "ses_bad" } })
+    expect(malformed.error?.message).toMatch(/invalid message list/i)
   })
 
   it("forwards cancellation to structured extraction", async () => {
@@ -331,6 +413,21 @@ describe("V1 client shim", () => {
     await client.session.delete({ path: { id: "ses_live" } })
     const after = await client.session.get({ path: { id: "ses_live" } })
     expect(after.response?.status).toBe(404)
+  })
+
+  it("interrupts locally when public removal fails and does not fake success if both fail", async () => {
+    const { ctx, calls } = fakeCtx()
+    serviceRemove = async () => { throw new Error("service unavailable") }
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    await expect(client.session.delete({ path: { id: "ses_fallback" } })).resolves.toEqual({})
+    expect(calls.some((call) => call.name === "interrupt")).toBe(true)
+
+    ctx.session.interrupt = async () => { throw new Error("local interrupt failed") }
+    const failed = await client.session.delete({ path: { id: "ses_still-running" } })
+    expect(failed.error?.message).toMatch(/service unavailable/i)
+    const live = await client.session.get({ path: { id: "ses_still-running" } })
+    expect(live.data?.id).toBe("ses_still-running")
   })
 
   it("adapts context() into messages rows", async () => {

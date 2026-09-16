@@ -206,6 +206,35 @@ function parseModelRef(ref: string): { providerID: string; modelID: string } | n
   return { providerID: ref.slice(0, slash), modelID: ref.slice(slash + 1) }
 }
 
+function responseRows(response: unknown): unknown[] | null {
+  const payload = und(response)
+  if (Array.isArray(payload)) return payload
+  if (payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)) {
+    return (payload as { data: unknown[] }).data
+  }
+  return null
+}
+
+function responseNextCursor(response: unknown): string | undefined {
+  const payload = und(response) as { cursor?: { next?: unknown } } | null | undefined
+  const direct = (response as { cursor?: { next?: unknown } } | null | undefined)?.cursor?.next
+  const next = direct ?? payload?.cursor?.next
+  return typeof next === "string" && next.length > 0 ? next : undefined
+}
+
+function adaptV2SessionRow(row: unknown): unknown {
+  if (!row || typeof row !== "object") return row
+  const record = row as Record<string, unknown>
+  const location = record.location
+  const directory =
+    typeof record.directory === "string"
+      ? record.directory
+      : location && typeof location === "object" && typeof (location as { directory?: unknown }).directory === "string"
+        ? (location as { directory: string }).directory
+        : undefined
+  return directory === undefined ? row : { ...record, directory }
+}
+
 // ---------------------------------------------------------------------------
 // The façade: V1-shaped client over the V2 context
 // ---------------------------------------------------------------------------
@@ -289,27 +318,39 @@ export function buildV1ClientShim(): unknown {
     return client
   }
 
-  async function listGlobalSessions(limit: number, cursor?: string): Promise<{ data: unknown[] }> {
+  async function listGlobalSessions(limit: number, cursor?: string | number, search?: string): Promise<{ data: unknown[] }> {
     const client = await serviceOrThrow()
     const pageSize = Math.min(Math.max(limit, 1), 5000)
     const out: unknown[] = []
     const seenCursors = new Set<string>()
-    let next = cursor
+    const timestampCursor = typeof cursor === "number" ? cursor : undefined
+    let next = typeof cursor === "string" ? cursor : undefined
     while (out.length < limit) {
       const response = (await client.session.list?.({
         limit: pageSize,
         order: "desc",
         parentID: null,
+        ...(search ? { search } : {}),
         ...(next ? { cursor: next } : {}),
       })) as any
-      const payload = und(response)
-      let rows = response
-      if (!Array.isArray(rows)) rows = response?.data
-      if (!Array.isArray(rows)) rows = Array.isArray(payload) ? payload : payload?.data
-      if (!Array.isArray(rows)) throw new Error("registered service returned an invalid session list")
+      const rawRows = responseRows(response)
+      if (!rawRows) throw new Error("registered service returned an invalid session list")
+      const rows = rawRows
+        .map(adaptV2SessionRow)
+        .filter((row) => {
+          if (!row || typeof row !== "object") return false
+          const record = row as Record<string, unknown>
+          const time = record.time
+          const updated = time && typeof time === "object" ? (time as { updated?: unknown }).updated : undefined
+          if (timestampCursor !== undefined && (typeof updated !== "number" || updated >= timestampCursor)) return false
+          if (!search) return true
+          const title = typeof record.title === "string" ? record.title : ""
+          const id = typeof record.id === "string" ? record.id : ""
+          return `${id}\n${title}`.toLowerCase().includes(search.toLowerCase())
+        })
       out.push(...rows)
-      const candidate = response?.cursor?.next ?? payload?.cursor?.next
-      if (typeof candidate !== "string" || candidate.length === 0 || seenCursors.has(candidate) || rows.length === 0) break
+      const candidate = responseNextCursor(response)
+      if (!candidate || seenCursors.has(candidate) || rawRows.length === 0) break
       seenCursors.add(candidate)
       next = candidate
     }
@@ -350,21 +391,47 @@ export function buildV1ClientShim(): unknown {
       try {
         if (isReleasedSubSession(opts.path.id)) throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
         const client = await serviceOrThrow()
-        const response = await client.message?.list({ sessionID: opts.path.id, order: "asc" })
-        const payload = und(response)
-        return { data: adaptV2Messages(Array.isArray(payload) ? payload : payload?.data ?? []) }
+        if (typeof client.message?.list !== "function") throw new Error("registered service does not support message.list")
+        const messages: unknown[] = []
+        const seenCursors = new Set<string>()
+        let cursor: string | undefined
+        while (true) {
+          const response = await client.message.list(
+            cursor ? { sessionID: opts.path.id, cursor } : { sessionID: opts.path.id, order: "asc" },
+          )
+          const rows = responseRows(response)
+          if (!rows) throw new Error("registered service returned an invalid message list")
+          messages.push(...rows)
+          const next = responseNextCursor(response)
+          if (!next || seenCursors.has(next)) break
+          seenCursors.add(next)
+          cursor = next
+        }
+        return { data: adaptV2Messages(messages) }
       } catch (e) {
         return { error: e }
       }
     },
     delete: async (opts: { path: { id: string } }) => {
+      let shutdownError: unknown
       try {
         const client = await serviceOrThrow()
-        await client.session.remove?.({ sessionID: opts.path.id })
-      } finally {
+        if (typeof client.session.remove !== "function") throw new Error("registered service does not support session.remove")
+        const result = await client.session.remove({ sessionID: opts.path.id })
+        if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
         markReleased(opts.path.id)
+        return {}
+      } catch (error) {
+        shutdownError = error
       }
-      return {}
+      try {
+        const result = await (ctx().session as any).interrupt({ sessionID: opts.path.id })
+        if (result?.error) throw result.error
+        markReleased(opts.path.id)
+        return {}
+      } catch (interruptError) {
+        return { error: shutdownError ?? interruptError }
+      }
     },
     get: async (opts: { path: { id: string } }) => {
       try {
@@ -382,7 +449,14 @@ export function buildV1ClientShim(): unknown {
     abort: async (opts: { path: { id: string } }) => {
       try {
         const client = await serviceOrThrow()
-        await client.session.interrupt?.({ sessionID: opts.path.id })
+        if (typeof client.session.interrupt !== "function") throw new Error("registered service does not support session.interrupt")
+        const result = await client.session.interrupt({ sessionID: opts.path.id })
+        if (!(result as { error?: unknown } | null | undefined)?.error) return {}
+      } catch {
+        // Fall through to the context-local interrupt below.
+      }
+      try {
+        await (ctx().session as any).interrupt({ sessionID: opts.path.id })
       } catch {
         // Best-effort, mirrors V1.
       }
@@ -395,18 +469,21 @@ export function buildV1ClientShim(): unknown {
         const client = await serviceOrThrow()
         const response = await client.config?.get({ location: { directory: ctx().location.directory } })
         const documents = und(response)
-        let document = null
-        if (Array.isArray(documents)) {
-          document = documents.find((entry) => entry?.type === "document")
-        } else if (documents?.type === "document") {
-          document = documents
+        const candidates = Array.isArray(documents) ? documents : documents?.type === "document" ? [documents] : []
+        let info: Record<string, unknown> = {}
+        let found = false
+        for (const entry of candidates) {
+          if (!entry || typeof entry !== "object" || entry.type !== "document") continue
+          if (!entry.info || typeof entry.info !== "object" || Array.isArray(entry.info)) continue
+          info = { ...info, ...(entry.info as Record<string, unknown>) }
+          found = true
         }
-        const info = document?.info
-        if (!info || typeof info !== "object") return { data: {} }
-        const model = (info as any).model
+        if (!found) return { data: {} }
+        const model = info.model
         let normalizedModel = model
-        if (model && typeof model === "object" && typeof model.providerID === "string" && typeof model.model === "string") {
-          normalizedModel = `${model.providerID}/${model.model}`
+        const modelRecord = model && typeof model === "object" ? (model as Record<string, unknown>) : null
+        if (typeof modelRecord?.providerID === "string" && typeof modelRecord.model === "string") {
+          normalizedModel = `${modelRecord.providerID}/${modelRecord.model}`
         }
         return { data: { ...info, ...(normalizedModel !== undefined ? { model: normalizedModel } : {}) } }
       } catch (e) {
@@ -438,7 +515,12 @@ export function buildV1ClientShim(): unknown {
     get: async (opts: { url: string; query?: Record<string, unknown> }) => {
       if (opts.url === "/experimental/session") {
         const q = opts.query ?? {}
-        return listGlobalSessions(typeof q.limit === "number" ? q.limit : 5000, typeof q.cursor === "string" ? q.cursor : undefined)
+        const cursor = typeof q.cursor === "number" || typeof q.cursor === "string" ? q.cursor : undefined
+        return listGlobalSessions(
+          typeof q.limit === "number" ? q.limit : 5000,
+          cursor,
+          typeof q.search === "string" ? q.search : undefined,
+        )
       }
       if (opts.url === "/provider") {
         return provider.list()

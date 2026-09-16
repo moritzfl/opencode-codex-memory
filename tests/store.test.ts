@@ -216,6 +216,19 @@ describe("MemoryStore stage1", () => {
     expect(store.stage1Outputs().map((o) => [o.session_id, o.usage_count]).sort()).toEqual([["s1", 1], ["s2", 1]])
   })
 
+  it("does not consume citation dedupe before an output exists", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    expect(store.recordUsageOnce("main", "assistant-1", ["later"])).toEqual([])
+    const ledger = openDb().prepare("SELECT COUNT(*) AS c FROM memory_citation_usage").get() as { c: number }
+    expect(ledger.c).toBe(0)
+
+    store.upsertStage1Output({ session_id: "later", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    expect(store.recordUsageOnce("main", "assistant-1", ["later"])).toEqual(["later"])
+    expect(store.stage1Outputs()[0].usage_count).toBe(1)
+  })
+
   it("marks failed, decrements retry_remaining, and clears the lease", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
@@ -806,6 +819,7 @@ describe("MemoryStore session meta", () => {
       generated_at: 1,
     })
     store.setMemoryMode("s2", "disabled")
+    store.recordUsageOnce("main", "assistant-reset", ["s1"])
     store.clearMemoryData()
     expect(store.stage1Outputs().length).toBe(0)
     // codex clear_memory_data preserves memory modes: disabled stays disabled.
@@ -815,6 +829,12 @@ describe("MemoryStore session meta", () => {
       .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1'")
       .get() as { c: number }
     expect(stage1Left.c).toBe(0)
+    const ledgerLeft = openDb()
+      .prepare("SELECT COUNT(*) AS c FROM memory_citation_usage")
+      .get() as { c: number }
+    expect(ledgerLeft.c).toBe(0)
+    store.upsertStage1Output({ session_id: "s1", source_updated_at: 2, raw_memory: "m2", rollout_summary: "s2", rollout_slug: null, generated_at: 2 })
+    expect(store.recordUsageOnce("main", "assistant-reset", ["s1"])).toEqual(["s1"])
     // Without this marker, idle hooks first-run-claim phase 2 and ensureLayout
     // re-seeds the wiped memory root (live e2e reset race).
     expect(store.claimGlobalPhase2Job().type).toBe("skipped_cooldown")

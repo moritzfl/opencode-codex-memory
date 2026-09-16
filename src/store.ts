@@ -179,8 +179,14 @@ export class MemoryStore {
       for (const citedSessionId of ids) {
         const result = insert.run(sessionId, assistantMessageId, citedSessionId, ts)
         if (result.changes === 0) continue
-        update.run(ts, citedSessionId)
-        fresh.push(citedSessionId)
+        const updated = update.run(ts, citedSessionId)
+        if (updated.changes > 0) {
+          fresh.push(citedSessionId)
+        } else {
+          this.db
+            .prepare("DELETE FROM memory_citation_usage WHERE session_id = ? AND assistant_message_id = ? AND cited_session_id = ?")
+            .run(sessionId, assistantMessageId, citedSessionId)
+        }
       }
     }).immediate()
     return fresh
@@ -707,6 +713,7 @@ export class MemoryStore {
     this.db.transaction(() => {
       this.db.run("DELETE FROM memory_stage1_outputs")
       this.db.run("DELETE FROM memory_jobs")
+      this.db.run("DELETE FROM memory_citation_usage")
       this.db
         .prepare(
           `INSERT INTO memory_jobs

@@ -27,6 +27,15 @@ function elapsed(time: number | null | undefined, now: number): string {
   return `${Math.floor(minutes / 1440)}d ago`
 }
 
+function remaining(time: number | null | undefined, now: number): string {
+  if (time == null) return "—"
+  const minutes = Math.max(0, Math.ceil((time - now) / 60_000))
+  if (minutes < 1) return "in <1m"
+  if (minutes < 60) return `in ${minutes}m`
+  if (minutes < 1440) return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  return `in ${Math.floor(minutes / 1440)}d`
+}
+
 /**
  * Dual-arity slot registration. Early V2 previews exposed
  * `ui.slot(name, render)`; current previews take a single options object.
@@ -99,7 +108,7 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
         ]
       : []),
     { label: "Last consolidated", value: s.lastSuccessAt == null ? "Never" : elapsed(s.lastSuccessAt, now) },
-    ...(s.retryAt == null ? [] : [{ label: "Next retry", value: elapsed(s.retryAt, now).replace(" ago", ""), tone: "warn" as const }]),
+    ...(s.retryAt == null ? [] : [{ label: "Next retry", value: remaining(s.retryAt, now), tone: "warn" as const }]),
   ]
 }
 
@@ -140,7 +149,7 @@ type Control = {
 }
 
 /**
- * /memory dialog. Tabs switch by mouse click. Controls: ↑/↓ move, Enter or
+ * /memory dialog. Tabs switch by mouse click or left/right. Controls: ↑/↓ move, Enter or
  * click toggles/runs. Esc closes (host-owned).
  */
 function MemoryDialog(context: TuiContext, sessionID: string | undefined, initial: MemoryStatus | null) {
@@ -150,7 +159,7 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
   const [cursor, setCursor] = createSignal(0)
   const [notice, setNotice] = createSignal("")
   const [busy, setBusy] = createSignal(false)
-  const now = Date.now()
+  const now = () => Date.now()
 
   const refresh = async () => {
     try {
@@ -160,7 +169,11 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
     }
   }
   const unsubscribe = rpc.events.on("changed", () => void refresh())
-  onCleanup(unsubscribe)
+  const timer = setInterval(() => void refresh(), 30_000)
+  onCleanup(() => {
+    clearInterval(timer)
+    unsubscribe()
+  })
 
   const call = async (method: string, input: Record<string, unknown>, done: string) => {
     if (busy()) return
@@ -209,7 +222,7 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
           ? "Auto-excluded: this session pulled in external context"
           : "Whether this conversation may be extracted into memory",
         on: learning,
-        enabled: s.generateMemories,
+        enabled: true,
         run: () => void call("setSessionMode", { sessionID, mode: learning ? "disabled" : "enabled" }, learning ? "This session will not be learned from." : "This session will be learned from."),
       })
     }
@@ -234,8 +247,15 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
     setCursor((cursor() + d + n) % n)
   }
 
-  // Keyboard is only claimed on the Controls tab; nothing is bound to digits
-  // or arrows elsewhere so the host's own dialog keys keep working.
+  context.keymap.layer(() => ({
+    enabled: () => true,
+    commands: [
+      { title: "Previous tab", bind: "left", run: () => { setTab(TABS[(TABS.indexOf(tab()) + TABS.length - 1) % TABS.length]!) } },
+      { title: "Next tab", bind: "right", run: () => { setTab(TABS[(TABS.indexOf(tab()) + 1) % TABS.length]!) } },
+    ],
+  }))
+
+  // Keyboard control navigation is only claimed on the Controls tab.
   context.keymap.layer(() => ({
     enabled: () => tab() === "Controls",
     commands: [
@@ -307,7 +327,7 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
         ) : tab() === "Overview" ? (
           <box flexDirection="column">
             <Section title="Status" />
-            <Rows rows={statusRows(status()!, now)} />
+            <Rows rows={statusRows(status()!, now())} />
             <Section title="Context usage" />
             <Rows rows={usageRows(status()!)} />
             <Section title="Setup" />

@@ -319,6 +319,31 @@ describe("extractViaSubagent (structured output)", () => {
     expect(deleted).toEqual(["sub-timeout"])
   })
 
+  it("forwards extraction cancellation to the host prompt request", async () => {
+    let promptSignal: AbortSignal | undefined
+    const controller = new AbortController()
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-signal" } }),
+          prompt: async (req: { signal?: AbortSignal }) => {
+            promptSignal = req.signal
+            return new Promise(() => {})
+          },
+          abort: async () => ({ data: {} }),
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    const running = extractViaSubagent("ses_signal", "transcript", { model: "acme/m1", signal: controller.signal })
+    for (let i = 0; i < 100 && !promptSignal; i++) await new Promise((resolve) => setTimeout(resolve, 1))
+    expect(promptSignal).toBeDefined()
+    controller.abort()
+    await expect(running).rejects.toBeInstanceOf(SubagentCancelledError)
+    expect(promptSignal?.aborted).toBe(true)
+  })
+
   it("does not abort when the failure is not a timeout", async () => {
     const aborted: string[] = []
     setPluginInput({

@@ -173,11 +173,31 @@ async function main(): Promise<void> {
       note(Boolean(tarball && fs.existsSync(tarball)), "packed artifact exists")
       if (tarball && fs.existsSync(tarball)) {
         const v1Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v1-"))
-        const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball], v1Install)
+        const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball, "@types/node"], v1Install)
         note(v1.code === 0, `packed artifact installs for V1${v1.code === 0 ? "" : `: ${v1.stderr.slice(-1000)}`}`)
         if (v1.code === 0) {
           const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) })"], v1Install)
           note(loaded.code === 0, "packed V1 artifact loads without V2 peers")
+          const consumer = path.join(v1Install, "consumer.mts")
+          fs.writeFileSync(consumer, 'import plugin from "opencode-codex-memory"\nconst server = plugin.server\nif (typeof server !== "function") throw new Error("missing V1 server export")\n')
+          const typecheck = await runQuiet(
+            [
+              path.join(root, "node_modules", ".bin", "tsc"),
+              "--noEmit",
+              "--skipLibCheck",
+              "false",
+              "--module",
+              "NodeNext",
+              "--moduleResolution",
+              "NodeNext",
+              "--target",
+              "ES2022",
+              consumer,
+            ],
+            v1Install,
+          )
+          const typecheckOutput = typecheck.stderr || typecheck.stdout
+          note(typecheck.code === 0, `packed V1 declarations typecheck without V2 peers${typecheck.code === 0 ? "" : `: ${typecheckOutput.slice(-1000)}`}`)
         }
         fs.rmSync(v1Install, { recursive: true, force: true })
 
