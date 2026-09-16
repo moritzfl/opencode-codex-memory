@@ -253,20 +253,29 @@ async function v2promptWithWait(
   if (body.format) {
     const prompt = body.system ? `${body.system}\n\n---\n\n${text}` : text
     const parsed = body.model ? parseModelRef(`${body.model.providerID}/${body.model.modelID}`) : null
-    const gen = await (c as any).generate.text(
-      {
-        prompt,
-        ...(parsed || body.variant
-          ? {
-              model: {
-                ...(parsed ? { providerID: parsed.providerID, id: parsed.modelID } : {}),
-                ...(body.variant ? { variant: body.variant } : {}),
-              },
-            }
-          : {}),
-      },
-      signal ? { signal } : undefined,
-    )
+    const payload = {
+      prompt,
+      ...(parsed || body.variant
+        ? {
+            model: {
+              ...(parsed ? { providerID: parsed.providerID, id: parsed.modelID } : {}),
+              ...(body.variant ? { variant: body.variant } : {}),
+            },
+          }
+        : {}),
+    }
+    // V2's Promise adapter only forwards the input argument — a trailing
+    // `{ signal }` is not cancellation. Race the abort ourselves.
+    if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
+    const genP = (c as any).generate.text(payload)
+    const gen = signal
+      ? await Promise.race([
+          genP,
+          new Promise<never>((_, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("sub-agent prompt cancelled")), { once: true })
+          }),
+        ])
+      : await genP
     const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
     return { data: { parts: [{ type: "text", text: outText }] } }
   }
@@ -412,12 +421,15 @@ export function buildV1ClientShim(): unknown {
         return { error: e }
       }
     },
-    delete: async (opts: { path: { id: string } }) => {
+    delete: async (opts: { path: { id: string }; signal?: AbortSignal }) => {
       let shutdownError: unknown
       try {
         const client = await serviceOrThrow()
         if (typeof client.session.remove !== "function") throw new Error("registered service does not support session.remove")
-        const result = await client.session.remove({ sessionID: opts.path.id })
+        const result = await client.session.remove(
+          { sessionID: opts.path.id },
+          opts.signal ? { signal: opts.signal } : undefined,
+        )
         if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
         markReleased(opts.path.id)
         return {}
@@ -425,12 +437,32 @@ export function buildV1ClientShim(): unknown {
         shutdownError = error
       }
       try {
-        const result = await (ctx().session as any).interrupt({ sessionID: opts.path.id })
-        if (result?.error) throw result.error
-        markReleased(opts.path.id)
-        return {}
+        const session = ctx().session as any
+        const interrupt = await session.interrupt({ sessionID: opts.path.id })
+        if (interrupt?.error) throw interrupt.error
+        if (typeof session.wait === "function") await session.wait({ sessionID: opts.path.id })
       } catch (interruptError) {
         return { error: shutdownError ?? interruptError }
+      }
+      try {
+        const client = await ownServiceClient()
+        if (!client?.session?.get) return { error: shutdownError ?? new Error("session still exists after interrupt") }
+        const info = await client.session.get({ sessionID: opts.path.id })
+        if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
+          markReleased(opts.path.id)
+          return {}
+        }
+        const data = und(info)
+        if (data && typeof data === "object") {
+          return { error: shutdownError ?? new Error("session still exists after interrupt") }
+        }
+        return { error: shutdownError ?? new Error("session still exists after interrupt") }
+      } catch (e) {
+        if (isNotFoundError(e)) {
+          markReleased(opts.path.id)
+          return {}
+        }
+        return { error: shutdownError ?? e }
       }
     },
     get: async (opts: { path: { id: string } }) => {

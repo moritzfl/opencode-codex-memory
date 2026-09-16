@@ -342,17 +342,20 @@ describe("V1 client shim", () => {
     expect(malformed.error?.message).toMatch(/invalid message list/i)
   })
 
-  it("forwards cancellation to structured extraction", async () => {
-    const seen: { input: unknown; options: unknown }[] = []
+  it("cancels structured extraction by racing AbortSignal, not request options", async () => {
+    const seen: unknown[][] = []
+    let started!: () => void
+    const startedP = new Promise<void>((resolve) => { started = resolve })
     const { ctx } = fakeCtx()
-    ctx.generate.text = async (input: unknown, options: unknown) => {
-      seen.push({ input, options })
-      return { text: "{}" }
+    ctx.generate.text = async (...args: unknown[]) => {
+      seen.push(args)
+      started()
+      await new Promise(() => {})
     }
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
     const controller = new AbortController()
-    await client.session.prompt({
+    const resultP = client.session.prompt({
       path: { id: "ses_extract" },
       signal: controller.signal,
       body: {
@@ -361,7 +364,11 @@ describe("V1 client shim", () => {
         parts: [{ type: "text", text: "TRANSCRIPT" }],
       },
     })
-    expect(seen[0]?.options).toEqual({ signal: controller.signal })
+    await startedP
+    controller.abort()
+    const result = await resultP
+    expect(result.error?.message).toMatch(/cancelled/i)
+    expect(seen[0]?.length).toBe(1)
   })
 
   it("waits for helper cleanup after cancellation is acknowledged", async () => {
@@ -415,19 +422,35 @@ describe("V1 client shim", () => {
     expect(after.response?.status).toBe(404)
   })
 
-  it("interrupts locally when public removal fails and does not fake success if both fail", async () => {
+  it("does not treat interrupt as delete success while the session still exists", async () => {
     const { ctx, calls } = fakeCtx()
     serviceRemove = async () => { throw new Error("service unavailable") }
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
-    await expect(client.session.delete({ path: { id: "ses_fallback" } })).resolves.toEqual({})
+    const stillThere = await client.session.delete({ path: { id: "ses_fallback" } })
+    expect(stillThere.error?.message).toMatch(/still exists|service unavailable/i)
     expect(calls.some((call) => call.name === "interrupt")).toBe(true)
+    expect(calls.some((call) => call.name === "wait")).toBe(true)
+    const live = await client.session.get({ path: { id: "ses_fallback" } })
+    expect(live.data?.id).toBe("ses_fallback")
 
     ctx.session.interrupt = async () => { throw new Error("local interrupt failed") }
     const failed = await client.session.delete({ path: { id: "ses_still-running" } })
-    expect(failed.error?.message).toMatch(/service unavailable/i)
-    const live = await client.session.get({ path: { id: "ses_still-running" } })
-    expect(live.data?.id).toBe("ses_still-running")
+    expect(failed.error?.message).toMatch(/service unavailable|local interrupt failed/i)
+    const stillLive = await client.session.get({ path: { id: "ses_still-running" } })
+    expect(stillLive.data?.id).toBe("ses_still-running")
+  })
+
+  it("accepts interrupt+wait as delete only after a confirmed 404", async () => {
+    const { ctx, calls } = fakeCtx()
+    serviceRemove = async () => { throw new Error("service unavailable") }
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    await expect(client.session.delete({ path: { id: "ses_gone" } })).resolves.toEqual({})
+    expect(calls.some((call) => call.name === "interrupt")).toBe(true)
+    expect(calls.some((call) => call.name === "wait")).toBe(true)
+    const after = await client.session.get({ path: { id: "ses_gone" } })
+    expect(after.response?.status).toBe(404)
   })
 
   it("adapts context() into messages rows", async () => {
