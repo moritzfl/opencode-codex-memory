@@ -1,8 +1,6 @@
 import { Plugin } from "@opencode/plugin/tui"
-import { BoxRenderable, TextRenderable, TextAttributes, type Renderable } from "@opentui/core"
 import { createSignal, onCleanup, For } from "solid-js"
 import { MemoryStatusRpc, isMemoryStatus, type MemoryStatus } from "./status-rpc.js"
-import { CITATION_FENCE_LANG, parseCitationBody } from "../citation.js"
 
 const labels: Record<MemoryStatus["activity"], string> = {
   idle: "Idle",
@@ -290,8 +288,8 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
   // Spacing lives on <box>: marginTop on <text> overdraws the neighbours.
   const Section = (props: { title: string }) => (
     <box marginTop={1}>
-      <text fg={muted} attributes={TextAttributes.BOLD}>
-        {props.title.toUpperCase()}
+      <text fg={muted}>
+        <b>{props.title.toUpperCase()}</b>
       </text>
     </box>
   )
@@ -312,8 +310,8 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
               backgroundColor={tab() === t ? selectedBg : undefined}
               onMouseDown={() => setTab(t)}
             >
-              <text fg={tab() === t ? text : muted} attributes={tab() === t ? TextAttributes.BOLD : 0}>
-                {t}
+              <text fg={tab() === t ? text : muted}>
+                {tab() === t ? <b>{t}</b> : t}
               </text>
             </box>
           )}
@@ -363,9 +361,9 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
                       activate(i())
                     }}
                   >
-                    <text fg={fgTitle()} attributes={selected() ? TextAttributes.BOLD : 0}>
+                    <text fg={fgTitle()}>
                       <span style={{ fg: indicatorFg() }}>{indicator()}</span>
-                      {` ${c.title.padEnd(26)}`}
+                      {selected() ? <b>{` ${c.title.padEnd(26)}`}</b> : ` ${c.title.padEnd(26)}`}
                       <span style={{ fg: c.on ? ok : muted }}>{state()}</span>
                     </text>
                     <text fg={muted}>{`  ${c.hint}`}</text>
@@ -435,43 +433,6 @@ function StatusPanel(context: TuiContext, sessionID?: string) {
   )
 }
 
-/**
- * Native rendering for the ```memory-citation fence the read-path prompt asks
- * the model to emit. Returning null falls back to the plain code block.
- */
-function renderCitationBlock(context: TuiContext, body: string): Renderable | null {
-  const parsed = parseCitationBody(body)
-  if (parsed.entries.length === 0 && parsed.sessionIds.length === 0) return null
-  const ctx = context.renderer
-  const heading = themeColor(context.theme, ["text", "default"], ["text"])
-  const muted = themeColor(context.theme, ["text", "subdued"], ["textMuted"], ["text"])
-
-  const root = new BoxRenderable(ctx, { flexDirection: "column", marginTop: 1 })
-  root.add(new TextRenderable(ctx, { content: "Memory used", fg: heading, attributes: TextAttributes.DIM }))
-
-  const locations = parsed.entries.map((e) => {
-    const name = e.path.split("/").pop() ?? e.path
-    const range = e.lineStart === e.lineEnd ? `${e.lineStart}` : `${e.lineStart}–${e.lineEnd}`
-    return `${name}:${range}`
-  })
-  const pad = Math.min(36, Math.max(0, ...locations.map((l) => l.length)))
-  parsed.entries.forEach((entry, i) => {
-    const loc = locations[i]!.padEnd(pad, " ")
-    root.add(new TextRenderable(ctx, { content: `  ${loc}  ${entry.note}`, fg: muted, paddingLeft: 0 }))
-  })
-  if (parsed.sessionIds.length > 0) {
-    const n = parsed.sessionIds.length
-    root.add(
-      new TextRenderable(ctx, {
-        content: `  ${n} prior session${n === 1 ? "" : "s"}`,
-        fg: muted,
-        attributes: TextAttributes.DIM,
-      }),
-    )
-  }
-  return root
-}
-
 function KeymapLayer(context: TuiContext) {
   // keymap.layer must be invoked from a Solid component scope: its cleanup is
   // owned by this component and released automatically on unmount.
@@ -513,20 +474,7 @@ export default Plugin.define({
       StatusPanel(context, input?.sessionID),
     )
     const offApp = registerSlot(context, "app", () => KeymapLayer(context))
-    let offRenderer: () => void = () => {}
-    try {
-      offRenderer = context.markdown.registerCodeBlockRenderer(CITATION_FENCE_LANG, (token) => {
-        try {
-          return renderCitationBlock(context, token.text)
-        } catch {
-          return null
-        }
-      })
-    } catch (err) {
-      console.warn("[opencode-codex-memory] code-block renderer unavailable on this host:", err)
-    }
     return () => {
-      offRenderer()
       offSidebar()
       offApp()
     }
