@@ -7,7 +7,15 @@ import {
   adaptProviderCatalog,
   adaptMcpStatus,
 } from "../src/v2/shim.js"
-import { discoverOwnService, setV2ServiceDependenciesForTest } from "../src/v2/service.js"
+import {
+  discoverOwnService,
+  parseReadyStatus,
+  readRegisteredEndpoint,
+  setV2ServiceDependenciesForTest,
+} from "../src/v2/service.js"
+import fs from "fs"
+import os from "os"
+import path from "path"
 import { catalogVariantKeys } from "../src/reasoning-variant.js"
 
 const ASSISTANT_TOOL_MSG = {
@@ -215,6 +223,39 @@ describe("V1 client shim", () => {
         make: () => client as any,
       }),
     ).rejects.toThrow(/healthy/i)
+  })
+
+  it("accepts GET /api/status with version+pid and no healthy field", async () => {
+    const found = await discoverOwnService({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({ session: {} }) as any,
+      probe: async () => ({ version: "2.0.5", pid: process.pid }),
+    })
+    expect(found?.health).toEqual({ version: "2.0.5", pid: process.pid })
+  })
+
+  it("does not treat a non-object health body as ready", () => {
+    expect(parseReadyStatus("<!doctype html>")).toBeNull()
+    expect(parseReadyStatus(undefined)).toBeNull()
+    expect(parseReadyStatus({ pid: process.pid })).toBeNull()
+    expect(parseReadyStatus({ version: "2.0.5", pid: process.pid, healthy: false })).toBeNull()
+    expect(parseReadyStatus({ version: "2.0.5", pid: process.pid })).toEqual({
+      version: "2.0.5",
+      pid: process.pid,
+    })
+  })
+
+  it("reads the XDG service.json registration without calling Service.discover", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-svc-"))
+    const file = path.join(dir, "service.json")
+    fs.writeFileSync(file, JSON.stringify({ url: "http://127.0.0.1:49374", pid: 1, password: "secret" }))
+    expect(await readRegisteredEndpoint(file)).toEqual({
+      url: "http://127.0.0.1:49374",
+      auth: { type: "basic", username: "opencode", password: "secret" },
+    })
+    fs.writeFileSync(file, "not-json")
+    expect(await readRegisteredEndpoint(file)).toBeUndefined()
+    fs.rmSync(dir, { recursive: true, force: true })
   })
 
   it("times out health discovery and aborts the request", async () => {

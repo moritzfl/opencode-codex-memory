@@ -2,21 +2,36 @@
  * The supported OpenCode 2 connection boundary.
  *
  * Server plugins do not receive the complete public client. The registered
- * local service does: Service.discover() is read-only, Service.headers()
- * preserves authentication, and the health PID proves the client points at
- * this host rather than an unrelated OpenCode process.
+ * local service does: the XDG `service.json` file is the discovery contract
+ * (read-only — never Service.ensure()). Auth headers are preserved, and
+ * GET /api/status pid must match this process. 2.0.5 dropped JSON
+ * /api/health (404 HTML/empty); 2.0.3 Service.discover() still probes that
+ * path and throws on a non-object body, so this module never calls it.
  */
+
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 
 export interface V2ServiceEndpoint {
   url: string
   auth?: { type: "basic"; username: string; password: string }
 }
 
+export interface V2ServiceStatus {
+  version: string
+  pid: number
+}
+
 export interface V2ServiceClient {
-  health: { get: (options?: { signal?: AbortSignal }) => Promise<unknown> }
   session: Record<string, (input?: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>>
   message?: Record<string, (input?: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>>
   config?: Record<string, (input?: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>>
+  generate?: {
+    text: (input: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>
+  }
+  /** Test/legacy only. Production probes /api/status, not this. */
+  health?: { get: (options?: { signal?: AbortSignal }) => Promise<unknown> }
 }
 
 export interface V2ServiceDependencies {
@@ -25,6 +40,7 @@ export interface V2ServiceDependencies {
     headers: (endpoint: V2ServiceEndpoint) => Record<string, string> | undefined
   }
   make: (options: { baseUrl: string; headers?: Record<string, string> }) => V2ServiceClient
+  probe?: (endpoint: V2ServiceEndpoint, signal?: AbortSignal) => Promise<V2ServiceStatus>
 }
 
 let testDependencies: V2ServiceDependencies | null = null
@@ -40,6 +56,27 @@ export function setV2ServiceDependenciesForTest(dependencies: V2ServiceDependenc
 /** Forget a cached endpoint after a service restart or failed request. */
 export function invalidateOwnService(): void {
   clientPromise = null
+}
+
+export function parseReadyStatus(body: unknown): V2ServiceStatus | null {
+  const record = unwrapStatusRecord(body)
+  if (!record) return null
+  const pid = record.pid
+  const version = record.version
+  if (typeof pid !== "number" || !Number.isFinite(pid) || typeof version !== "string" || version.length === 0) {
+    return null
+  }
+  if ("healthy" in record && record.healthy !== true) return null
+  return { pid, version }
+}
+
+function unwrapStatusRecord(body: unknown): Record<string, unknown> | null {
+  if (!body || typeof body !== "object") return null
+  const record = body as Record<string, unknown>
+  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) {
+    return record.data as Record<string, unknown>
+  }
+  return record
 }
 
 async function withServiceTimeout<T>(request: Promise<T>, timeoutMs: number, controller?: AbortController): Promise<T> {
@@ -61,18 +98,83 @@ async function withServiceTimeout<T>(request: Promise<T>, timeoutMs: number, con
   }
 }
 
+function registrationPath(): string {
+  return join(process.env["XDG_STATE_HOME"] ?? join(homedir(), ".local", "state"), "opencode", "service.json")
+}
+
+export async function readRegisteredEndpoint(file = registrationPath()): Promise<V2ServiceEndpoint | undefined> {
+  const text = await readFile(file, "utf8").catch(() => undefined)
+  if (text === undefined) return undefined
+  let info: unknown
+  try {
+    info = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (!info || typeof info !== "object") return undefined
+  const record = info as Record<string, unknown>
+  if (typeof record.url !== "string" || record.url.length === 0) return undefined
+  const password = record.password
+  return {
+    url: record.url,
+    ...(typeof password === "string" && password.length > 0
+      ? { auth: { type: "basic" as const, username: "opencode", password } }
+      : {}),
+  }
+}
+
+async function fetchJson(url: URL, headers: Record<string, string> | undefined, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(url, { headers, signal })
+  const text = await response.text()
+  if (!text) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+export async function fetchServiceStatus(
+  endpoint: V2ServiceEndpoint,
+  headers: Record<string, string> | undefined,
+  signal?: AbortSignal,
+): Promise<V2ServiceStatus> {
+  const statusBody = await fetchJson(new URL("/api/status", endpoint.url), headers, signal)
+  const fromStatus = parseReadyStatus(statusBody)
+  if (fromStatus) return fromStatus
+  const healthBody = await fetchJson(new URL("/api/health", endpoint.url), headers, signal)
+  const fromHealth = parseReadyStatus(healthBody)
+  if (fromHealth) return fromHealth
+  throw new Error("registered OpenCode service is not healthy")
+}
+
 async function productionDependencies(): Promise<V2ServiceDependencies> {
-  const [{ Service }, { OpenCode }] = await Promise.all([
-    import("@opencode/client/service"),
-    import("@opencode/client"),
-  ])
+  const { Service } = await import("@opencode/client/service")
+  const { OpenCode } = await import("@opencode/client")
   return {
     service: {
-      discover: () => Service.discover(),
+      discover: () => readRegisteredEndpoint(),
       headers: (endpoint) => Service.headers(endpoint),
     },
     make: (options) => OpenCode.make(options) as unknown as V2ServiceClient,
+    probe: (endpoint, signal) => fetchServiceStatus(endpoint, Service.headers(endpoint), signal),
   }
+}
+
+async function probeEndpoint(
+  deps: V2ServiceDependencies,
+  endpoint: V2ServiceEndpoint,
+  client: V2ServiceClient,
+  signal?: AbortSignal,
+): Promise<V2ServiceStatus> {
+  if (deps.probe) return deps.probe(endpoint, signal)
+  if (client.health?.get) {
+    const raw = await client.health.get({ signal })
+    const parsed = parseReadyStatus(raw)
+    if (parsed) return parsed
+    throw new Error("registered OpenCode service is not healthy")
+  }
+  return fetchServiceStatus(endpoint, deps.service.headers(endpoint), signal)
 }
 
 /**
@@ -83,23 +185,17 @@ async function productionDependencies(): Promise<V2ServiceDependencies> {
 export async function discoverOwnService(
   dependencies?: V2ServiceDependencies,
   timeoutMs = SERVICE_REQUEST_TIMEOUT_MS,
-): Promise<{ endpoint: V2ServiceEndpoint; client: V2ServiceClient; health: { version: string; pid: number } } | null> {
+): Promise<{ endpoint: V2ServiceEndpoint; client: V2ServiceClient; health: V2ServiceStatus } | null> {
   const deps = dependencies ?? testDependencies ?? (await productionDependencies())
   const endpoint = await withServiceTimeout(deps.service.discover(), timeoutMs)
   if (!endpoint) return null
   const client = deps.make({ baseUrl: endpoint.url, headers: deps.service.headers(endpoint) })
   const controller = new AbortController()
-  const health = (await withServiceTimeout(client.health.get({ signal: controller.signal }), timeoutMs, controller)) as {
-    healthy?: unknown
-    version?: unknown
-    pid?: unknown
+  const health = await withServiceTimeout(probeEndpoint(deps, endpoint, client, controller.signal), timeoutMs, controller)
+  if (health.pid !== process.pid) {
+    throw new Error(`registered OpenCode service PID ${String(health.pid)} does not match plugin host PID ${process.pid}`)
   }
-  if (health?.healthy !== true) throw new Error("registered OpenCode service is not healthy")
-  if (typeof health?.pid !== "number" || health.pid !== process.pid) {
-    throw new Error(`registered OpenCode service PID ${String(health?.pid)} does not match plugin host PID ${process.pid}`)
-  }
-  if (typeof health.version !== "string") throw new Error("registered OpenCode service returned no version")
-  return { endpoint, client, health: { version: health.version, pid: health.pid } }
+  return { endpoint, client, health }
 }
 
 /** Resolve the registered client once per live service; never start a service. */
