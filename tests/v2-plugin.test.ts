@@ -3,7 +3,8 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { setup, waitForV2BackgroundTasks, resetV2ModuleStateForTest } from "../src/v2/plugin.js"
-import { setV2Context, clearSessionRegistryForTest } from "../src/v2/shim.js"
+import { setV2Context, resetV2ShimStateForTest } from "../src/v2/shim.js"
+import { setV2ServiceDependenciesForTest } from "../src/v2/service.js"
 import { setPluginInput } from "../src/llm.js"
 import { resetPluginOptions } from "../src/options.js"
 import { resetAgentHealth } from "../src/agent-health.js"
@@ -12,7 +13,7 @@ import { parseMemoryStatus } from "../src/v2/status-rpc.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2plugin-${process.pid}`)
 
-function fakeCtx(options: Record<string, unknown> = {}) {
+function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
   const added: any[] = []
   const hooks: Record<string, ((ev: any) => unknown)[]> = {}
   const agentUpdates: string[] = []
@@ -62,7 +63,9 @@ function fakeCtx(options: Record<string, unknown> = {}) {
     catalog: { model: { list: async () => ({ data: [] }) } },
     mcp: { list: async () => ({ data: [] }) },
     event: {
-      subscribe: async function* () {},
+      subscribe: async function* () {
+        for (const event of events) yield event
+      },
     },
   }
   return { ctx, added, hooks, agentUpdates, rpcHandlers }
@@ -76,6 +79,19 @@ beforeEach(() => {
   fs.mkdirSync(path.join(TEST_ROOT, "memories"), { recursive: true })
   resetPluginOptions()
   resetV2ModuleStateForTest()
+  setV2ServiceDependenciesForTest({
+    service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+    make: () => ({
+      health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) },
+      session: {
+        list: async () => ({ data: [], cursor: { next: null } }),
+        get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, parentID: null }),
+        remove: async () => {},
+        interrupt: async () => {},
+      },
+      message: { list: async () => ({ data: [] }) },
+    }),
+  })
 })
 
 afterEach(() => {
@@ -87,12 +103,27 @@ afterEach(() => {
   resetPluginOptions()
   resetAgentHealth()
   resetV2ModuleStateForTest()
-  clearSessionRegistryForTest()
+  setV2ServiceDependenciesForTest(null)
+  resetV2ShimStateForTest()
   setV2Context(null)
   setPluginInput({ client: undefined } as any)
 })
 
 describe("v2 setup", () => {
+  it("publishes the V2 SDK as an optional peer at the package boundary", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "..", "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>
+      exports?: Record<string, { import?: string }>
+    }
+    expect(pkg.dependencies?.["@opencode/plugin"]).toBeUndefined()
+    expect(pkg.peerDependencies?.["@opencode/plugin"]).toBe(">=2.0.0")
+    expect(pkg.peerDependenciesMeta?.["@opencode/plugin"]?.optional).toBe(true)
+    expect(pkg.exports?.["."]?.import).toBe("./dist/src/index.js")
+    expect(pkg.exports?.["./v2"]?.import).toBe("./dist/src/v2/index.js")
+  })
+
   it("serves read-only status with effective options without starting memory jobs", async () => {
     const f = fakeCtx({
       generate_memories: false,
@@ -121,7 +152,11 @@ describe("v2 setup", () => {
     const store = new MemoryStore()
     const first = store.claimGlobalPhase2Job()
     if (first.type !== "claimed") throw new Error("expected claim")
-    expect(parseMemoryStatus(await f.rpcHandlers.status()).activity).toBe("consolidating")
+    // A running row this process is not executing is a foreign/orphaned
+    // lease, not "consolidating" — it surfaces as a warning instead.
+    const leased = parseMemoryStatus(await f.rpcHandlers.status())
+    expect(leased.activity).toBe("error")
+    expect(leased.warnings.some((w) => w.startsWith("Consolidation lease held by another process"))).toBe(true)
     store.markPhase2Succeeded(first.ownershipToken, [])
     const success = parseMemoryStatus(await f.rpcHandlers.status())
     expect(success.activity).toBe("idle")
@@ -135,6 +170,36 @@ describe("v2 setup", () => {
     expect(failed.retryAt).toBeGreaterThan(Date.now())
     expect(failed.lastSuccessAt).toBeNull()
     expect(failed.warnings.length).toBeGreaterThan(0)
+    await cleanup?.()
+  })
+
+  it("serves the /memory controls: option toggles, session mode, and consolidate-now", async () => {
+    const f = fakeCtx({ generate_memories: false })
+    const cleanup = await setup(f.ctx)
+    const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
+
+    expect(parseMemoryStatus(await handlers.status()).useMemories).toBe(true)
+    expect(await handlers.setOption({ key: "use_memories", value: false })).toEqual({ ok: true })
+    expect(parseMemoryStatus(await handlers.status()).useMemories).toBe(false)
+    // Read path honours the runtime toggle.
+    const ev: any = { sessionID: "ses_ctl", system: [], messages: [] }
+    for (const h of f.hooks["context"]) await h(ev)
+    expect(ev.system).toEqual([])
+    // Unknown keys and non-boolean values are refused.
+    expect(await handlers.setOption({ key: "extract_model", value: true })).toEqual({ ok: false })
+    expect(await handlers.setOption({ key: "use_memories", value: "yes" })).toEqual({ ok: false })
+
+    expect(parseMemoryStatus(await handlers.status({ sessionID: "ses_ctl" })).sessionMode).toBeNull()
+    expect(await handlers.setSessionMode({ sessionID: "ses_ctl", mode: "disabled" })).toEqual({ ok: true })
+    expect(parseMemoryStatus(await handlers.status({ sessionID: "ses_ctl" })).sessionMode).toBe("disabled")
+    expect(new MemoryStore().getMemoryMode("ses_ctl")).toBe("disabled")
+    expect(await handlers.setSessionMode({ sessionID: "ses_ctl", mode: "polluted" })).toEqual({ ok: false })
+
+    // consolidateNow returns immediately and runs detached; with generation off
+    // it is a no-op rather than an error.
+    expect(await handlers.consolidateNow()).toEqual({ status: "started" })
+    await waitForV2BackgroundTasks()
+    expect(new MemoryStore().phase2JobSnapshot()).toBeNull()
     await cleanup?.()
   })
 
@@ -199,6 +264,34 @@ describe("v2 setup", () => {
     expect(ev.messages[0].content[0].text).not.toContain("memory-citation")
   })
 
+  it("accounts citations from durable text.ended events and reconciles later context", async () => {
+    const store = new MemoryStore()
+    store.upsertStage1Output({ session_id: "ses_cited", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    const f = fakeCtx({}, [{
+      type: "session.text.ended",
+      data: {
+        sessionID: "ses_main",
+        assistantMessageID: "msg_durable",
+        text: "answer\n```memory-citation\nsessions: ses_cited\n```",
+      },
+    }])
+    await setup(f.ctx)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(new MemoryStore().stage1Outputs().find((row) => row.session_id === "ses_cited")?.usage_count).toBe(1)
+
+    const ev: any = {
+      sessionID: "ses_main",
+      system: [],
+      messages: [{
+        id: "msg_durable",
+        type: "assistant",
+        content: [{ type: "text", text: "answer\n```memory-citation\nsessions: ses_cited\n```" }],
+      }],
+    }
+    await f.hooks.context[0](ev)
+    expect(new MemoryStore().stage1Outputs().find((row) => row.session_id === "ses_cited")?.usage_count).toBe(1)
+  })
+
   it("tool hook marks websearch sessions polluted when the guard is on", async () => {
     const f = fakeCtx()
     await setup(f.ctx)
@@ -225,18 +318,36 @@ describe("v2 tui status panel", () => {
       keymap: { layer: (fn: () => unknown) => { layers.push(fn()); return () => {} } },
       ui: {
         slot: (claim: unknown) => { claims.push(claim); return () => {} },
-        dialog: { alert: async () => {} },
+        dialog: { alert: async () => {}, show: () => {}, set: () => {} },
+        router: { current: () => ({ type: "session", sessionID: "ses_x" }) },
       },
       theme: {
         text: {
           default: "#fff",
           subdued: "#888",
           status: { running: "#0f0" },
-          feedback: { error: { default: "#f00" }, warning: { default: "#ff0" } },
+          action: { primary: { default: "#08f" } },
+          feedback: { error: { default: "#f00" }, warning: { default: "#ff0" }, success: { default: "#0f0" } },
         },
+        background: { action: { primary: { $focused: "#224" } } },
       },
     }
     return { ctx, claims, layers }
+  }
+
+  const FULL_STATUS = {
+    activity: "idle",
+    useMemories: true,
+    generateMemories: true,
+    extractModel: "m",
+    consolidationModel: "m",
+    codexImport: false,
+    lastSuccessAt: null,
+    retryAt: null,
+    warnings: ["Consolidation lease held by another process until 01:21."],
+    sessionMode: "enabled",
+    memoryRoot: "/tmp/mem",
+    injected: { sessionTokens: 4200, sessionRequests: 1, totalTokens: 8400, totalRequests: 2 },
   }
 
   it("registers sidebar + app slots in setup without touching Solid-scoped APIs", async () => {
@@ -253,12 +364,13 @@ describe("v2 tui status panel", () => {
     return f.claims.map((c) => c.append).sort()
   }
 
-  it("mounts the app layer from a component scope and serves the status command", async () => {
+  it("mounts the app layer from a component scope and opens the /memory dialog", async () => {
     const { createRoot } = await import("solid-js")
+    const { testRender } = await import("@opentui/solid")
     const tui = await import("../src/v2/tui.js")
-    const seen: any[] = []
+    const shown: Array<() => unknown> = []
     const f = fakeTuiCtx(null)
-    f.ctx.ui.dialog.alert = async (opts: unknown) => { seen.push(opts) }
+    f.ctx.ui.dialog.show = (render: () => unknown) => { shown.push(render) }
     const cleanup = await (tui.default.setup as any)(f.ctx)
     const app = f.claims.find((c) => c.append === "app")
     createRoot((dispose: () => void) => {
@@ -266,39 +378,138 @@ describe("v2 tui status panel", () => {
       dispose()
     })
     expect(f.layers).toHaveLength(1)
-    const run = f.layers[0].commands[0].run
-    expect(f.layers[0].commands[0].slash).toEqual({ name: "memory-status" })
-    await run()
-    expect((seen[0] as any).title).toBe("Memory status")
-    expect((seen[0] as any).message).toContain("Memory status is unavailable")
+    const cmd = f.layers[0].commands[0]
+    expect(cmd.slash).toEqual({ name: "memory", aliases: ["memory-status"] })
+    await cmd.run()
+    expect(shown).toHaveLength(1)
+    // Unavailable status must still render (no orphan text nodes under <box>).
+    // Tall enough for the full dialog: an overflowing 80x24 frame wraps rows
+    // over each other and produces garbled assertions.
+    const rendered: any = await testRender(() => shown[0]() as any, { width: 100, height: 40 })
+    await rendered.renderOnce()
+    const frame = rendered.captureCharFrame() as string
+    expect(frame).toContain("Overview")
+    expect(frame).toContain("Controls")
+    expect(frame).toContain("unavailable")
+    try {
+      ;(rendered.renderer as any)?.dispose?.()
+      ;(rendered.renderer as any)?.stop?.()
+    } catch {
+    }
+    await (cleanup as any)?.()
+  })
+
+  it("renders the populated /memory overview and controls", async () => {
+    const { testRender } = await import("@opentui/solid")
+    const tui = await import("../src/v2/tui.js")
+    const shown: Array<() => unknown> = []
+    const f = fakeTuiCtx(FULL_STATUS)
+    f.ctx.ui.dialog.show = (render: () => unknown) => { shown.push(render) }
+    const cleanup = await (tui.default.setup as any)(f.ctx)
+    const app = f.claims.find((c) => c.append === "app")
+    const { createRoot } = await import("solid-js")
+    createRoot((dispose: () => void) => {
+      app.render({})
+      dispose()
+    })
+    await f.layers[0].commands[0].run()
+    const rendered: any = await testRender(() => shown[0]() as any, { width: 100, height: 40 })
+    await rendered.renderOnce()
+    const frame = rendered.captureCharFrame() as string
+    expect(frame).toContain("STATUS")
+    expect(frame).toContain("Read memories")
+    expect(frame).toContain("This session")
+    expect(frame).toContain("Learning")
+    expect(frame).toContain("CONTEXT USAGE")
+    expect(frame).toContain("4.2K")
+    expect(frame).toContain("ATTENTION")
+    expect(frame).toContain("lease held")
+    expect(frame).toContain("/tmp/mem")
+    // Tabs are not numbered and digits do nothing.
+    expect(frame).not.toContain("1  Overview")
+    // The dialog owns a second keymap layer, gated to the Controls tab.
+    expect(f.layers).toHaveLength(2)
+    const dialogLayer = f.layers[1]
+    expect(typeof dialogLayer.enabled).toBe("function")
+    expect(dialogLayer.enabled()).toBe(false)
+    expect(dialogLayer.commands.map((c: any) => c.bind).sort()).toEqual(["down", "return", "space", "up"])
+    try {
+      ;(rendered.renderer as any)?.dispose?.()
+      ;(rendered.renderer as any)?.stop?.()
+    } catch {
+    }
+    await (cleanup as any)?.()
+  })
+
+  it("controls tab: arrow keys move the cursor and enter toggles via RPC", async () => {
+    const { testRender } = await import("@opentui/solid")
+    const tui = await import("../src/v2/tui.js")
+    const calls: any[] = []
+    const shown: Array<() => unknown> = []
+    const f = fakeTuiCtx(FULL_STATUS)
+    f.ctx.client.rpc = () => ({
+      status: async () => structuredClone(FULL_STATUS),
+      setOption: async (input: unknown) => { calls.push(["setOption", input]); return { ok: true } },
+      setSessionMode: async (input: unknown) => { calls.push(["setSessionMode", input]); return { ok: true } },
+      consolidateNow: async () => { calls.push(["consolidateNow"]); return { status: "started" } },
+      events: { on: () => () => {} },
+    })
+    f.ctx.ui.dialog.show = (render: () => unknown) => { shown.push(render) }
+    const cleanup = await (tui.default.setup as any)(f.ctx)
+    const app = f.claims.find((c) => c.append === "app")
+    const { createRoot } = await import("solid-js")
+    createRoot((dispose: () => void) => {
+      app.render({})
+      dispose()
+    })
+    await f.layers[0].commands[0].run()
+    const rendered: any = await testRender(() => shown[0]() as any, { width: 100, height: 40 })
+    await rendered.renderOnce()
+    const layer = f.layers[1]
+    const cmd = (bind: string) => layer.commands.find((c: any) => c.bind === bind).run
+    // Controls fire-and-forget their RPC; settle it before asserting.
+    const press = async (bind: string) => { cmd(bind)(); await new Promise((r) => setTimeout(r, 5)) }
+    // Cursor starts on "Use memories"; enter flips use_memories.
+    await press("return")
+    expect(calls[0]).toEqual(["setOption", { key: "use_memories", value: false }])
+    // Down twice -> "Learn from this session"; enter sets the session mode.
+    await press("down"); await press("down")
+    await press("return")
+    expect(calls[1]).toEqual(["setSessionMode", { sessionID: "ses_x", mode: "disabled" }])
+    // Down -> "Consolidate now"; wraps back to the top afterwards.
+    await press("down")
+    await press("return")
+    expect(calls[2]).toEqual(["consolidateNow"])
+    await press("down")
+    await press("return")
+    expect(calls[3][0]).toBe("setOption")
+    try {
+      ;(rendered.renderer as any)?.dispose?.()
+      ;(rendered.renderer as any)?.stop?.()
+    } catch {
+    }
     await (cleanup as any)?.()
   })
 
   it("renders the sidebar panel without orphan-text errors", async () => {
     const { testRender } = await import("@opentui/solid")
     const tui = await import("../src/v2/tui.js")
-    const f = fakeTuiCtx({
-      activity: "idle",
-      useMemories: true,
-      generateMemories: true,
-      extractModel: "m",
-      consolidationModel: "m",
-      codexImport: false,
-      lastSuccessAt: null,
-      retryAt: null,
-      warnings: [],
-    })
+    const f = fakeTuiCtx(FULL_STATUS)
     const cleanup = await (tui.default.setup as any)(f.ctx)
     const panel = f.claims.find((c) => c.append === "sidebar.content")
     // Threw before the <Show> placeholder fix: a bare text node under <box>.
     const rendered: any = await testRender(() => panel.render({ sessionID: "ses_x" }) as any)
-    await rendered.flush()
+    await rendered.renderOnce()
+    // The test renderer does not redraw on post-mount signal updates, so only
+    // the initial (loading) frame is asserted; the dialog tests cover the
+    // populated rows.
     const frame = rendered.captureCharFrame() as string
     expect(frame).toContain("Memory")
-    expect(frame).toContain("/memory-status")
+    expect(frame).toContain("Loading")
+    expect(frame).toContain("/memory")
     // JSX trims leading whitespace of inline literals, so the hint line must
     // be a string expression to keep its indent aligned with the labels.
-    expect(frame.split("\n").some((line) => line.startsWith("  /memory-status"))).toBe(true)
+    expect(frame.split("\n").some((line) => line.startsWith("  /memory"))).toBe(true)
     try {
       ;(rendered.renderer as any)?.dispose?.()
       ;(rendered.renderer as any)?.stop?.()

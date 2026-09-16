@@ -206,6 +206,16 @@ describe("MemoryStore stage1", () => {
     expect(outs.find((o) => o.session_id === "s2")!.usage_count).toBe(1)
   })
 
+  it("durably dedupes citation usage by assistant message and cited session", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    store.upsertStage1Output({ session_id: "s1", source_updated_at: 1, raw_memory: "m1", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    store.upsertStage1Output({ session_id: "s2", source_updated_at: 1, raw_memory: "m2", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    expect(store.recordUsageOnce("main", "assistant-1", ["s1", "s1", "s2"])).toEqual(["s1", "s2"])
+    expect(store.recordUsageOnce("main", "assistant-1", ["s1", "s2"])).toEqual([])
+    expect(store.stage1Outputs().map((o) => [o.session_id, o.usage_count]).sort()).toEqual([["s1", 1], ["s2", 1]])
+  })
+
   it("marks failed, decrements retry_remaining, and clears the lease", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
@@ -407,6 +417,44 @@ describe("MemoryStore phase2", () => {
     const b = store.claimGlobalPhase2Job()
     expect(a.type).toBe("claimed")
     expect(b.type).toBe("skipped_running")
+  })
+
+  it("keeps a running lease owned by a live pid", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    expect(claim.type).toBe("claimed")
+    expect(claim.workerId.startsWith(`pid:${process.pid}:`)).toBe(true)
+    expect(store.releaseOrphanedPhase2Job()).toBe(false)
+    expect(store.claimGlobalPhase2Job().type).toBe("skipped_running")
+  })
+
+  it("releases a running lease whose owning pid is dead", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    // Rewrite the owner to a pid that cannot exist (max pid on macOS/Linux is far lower).
+    ;(store as any).db
+      .prepare("UPDATE memory_jobs SET worker_id=? WHERE kind='memory_consolidate_global' AND job_key='global'")
+      .run("pid:2147483000:dead")
+    expect(store.releaseOrphanedPhase2Job()).toBe(true)
+    const snap = store.phase2JobSnapshot()
+    expect(snap?.status).toBe("pending")
+    expect(snap?.lease_until).toBeNull()
+    expect(snap?.last_error).toContain("2147483000")
+    expect(store.claimGlobalPhase2Job().type).toBe("claimed")
+  })
+
+  it("leaves untagged legacy running rows alone", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    ;(store as any).db
+      .prepare("UPDATE memory_jobs SET worker_id=? WHERE kind='memory_consolidate_global' AND job_key='global'")
+      .run("legacy-uuid")
+    expect(store.releaseOrphanedPhase2Job()).toBe(false)
   })
 
   it("respects cooldown after success", () => {

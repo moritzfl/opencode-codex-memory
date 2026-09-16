@@ -4,8 +4,8 @@
  * No LLM, no auth, no Docker. Safe for every PR / pre-release ritual.
  *
  * Checks:
- *   1. opencode2 binary present; version ≥ floor (OPENCODE2_MIN_VERSION,
- *      default 0.0.0-beta-19296 — the beta this adapter was verified against)
+ *   1. OpenCode 2 binary present; version ≥ floor (OPENCODE2_MIN_VERSION,
+ *      default 2.0.0)
  *   2. Live OpenAPI (/openapi.json via the background service): every
  *      operation the shim + setup depend on is present
  *   3. Built plugin dual-exports V1 server() and V2 setup()
@@ -19,7 +19,7 @@ import os from "os"
 import path from "path"
 import { $ } from "bun"
 
-const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "0.0.0-beta-19296"
+const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.0"
 
 let failed = 0
 function log(kind: string, msg: string): void {
@@ -37,22 +37,32 @@ function failSetup(msg: string): never {
   process.exit(2)
 }
 
-function betaNum(v: string): number | null {
-  const m = v.trim().match(/beta-(\d+)/)
-  return m ? Number(m[1]) : null
+async function runQuiet(command: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  return { code, stdout, stderr }
 }
 
-// Semver-ish compare with beta-suffix awareness for 0.0.0-beta-NNN.
+// Semver comparison with the historical beta-NNN format retained for an
+// explicitly pinned pre-release floor.
 function versionGte(a: string, b: string): boolean {
-  const an = betaNum(a)
-  const bn = betaNum(b)
-  if (an !== null && bn !== null) {
-    const [acore] = a.split("-beta-")
-    const [bcore] = b.split("-beta-")
-    if (acore !== bcore) return acore > bcore
-    return an >= bn
+  const parse = (value: string) => {
+    const match = value.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-beta-(\d+))?$/)
+    if (!match) return null
+    return { core: [Number(match[1]), Number(match[2]), Number(match[3])], beta: match[4] ? Number(match[4]) : null }
   }
-  return a >= b
+  const av = parse(a)
+  const bv = parse(b)
+  if (!av || !bv) return false
+  for (let i = 0; i < av.core.length; i++) {
+    if (av.core[i] !== bv.core[i]) return av.core[i] > bv.core[i]
+  }
+  if (av.beta === null || bv.beta === null) return av.beta === null
+  return av.beta >= bv.beta
 }
 
 const REQUIRED_OPS = [
@@ -65,6 +75,10 @@ const REQUIRED_OPS = [
   "v2.session.switchAgent",
   "v2.session.switchModel",
   "v2.session.interrupt",
+  "v2.session.list",
+  "v2.session.remove",
+  "v2.message.list",
+  "v2.config.get",
   "v2.generate.text",
   "v2.mcp.list",
   "v2.agent.get",
@@ -76,7 +90,7 @@ async function main(): Promise<void> {
   // --- binary ---
   let version = ""
   try {
-    version = (await $`opencode2 --version`.text()).trim()
+    version = ((await $`opencode2 --version`.text()).trim().split(/\s+/).pop() ?? "").replace(/^v/, "")
   } catch {
     failSetup("opencode2 binary not found on PATH")
   }
@@ -136,6 +150,46 @@ async function main(): Promise<void> {
     const names = tools.buildV2Tools().map((t) => t.name).sort()
     for (const t of ["memory_read", "memory_search", "memory_list", "memory_add_note", "memory_reset", "memory_inspect", "memory_mode"]) {
       note(names.includes(t), `v2 tool ${t} registered`)
+    }
+
+    const memoryRoot = path.join(testRoot, "memories")
+    for (const rule of rules.filter((r) => r.effect === "allow" && r.action !== "external_directory")) {
+      note(rule.resource === path.join(memoryRoot, "*"), `${rule.action} is scoped to the memory workspace`)
+    }
+
+    // Exercise the package as consumers receive it. The V1 install omits all
+    // V2 peers, proving the lazy entrypoint does not import them eagerly.
+    const pack = await runQuiet(["npm", "pack", "--ignore-scripts", "--json", "--pack-destination", testRoot], root)
+    if (pack.code !== 0) {
+      note(false, `npm pack failed: ${pack.stderr.slice(-1000)}`)
+    } else {
+      let tarball = ""
+      try {
+        const metadata = JSON.parse(pack.stdout) as Array<{ filename?: string }>
+        tarball = path.join(testRoot, metadata[0]?.filename ?? "")
+      } catch {
+        tarball = ""
+      }
+      note(Boolean(tarball && fs.existsSync(tarball)), "packed artifact exists")
+      if (tarball && fs.existsSync(tarball)) {
+        const v1Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v1-"))
+        const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball], v1Install)
+        note(v1.code === 0, `packed artifact installs for V1${v1.code === 0 ? "" : `: ${v1.stderr.slice(-1000)}`}`)
+        if (v1.code === 0) {
+          const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) })"], v1Install)
+          note(loaded.code === 0, "packed V1 artifact loads without V2 peers")
+        }
+        fs.rmSync(v1Install, { recursive: true, force: true })
+
+        const v2Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v2-"))
+        const v2 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball, "@opencode/plugin@2.0.3"], v2Install)
+        note(v2.code === 0, `packed artifact installs for V2${v2.code === 0 ? "" : `: ${v2.stderr.slice(-1000)}`}`)
+        if (v2.code === 0) {
+          const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory/v2').then((m) => { if (typeof m.default?.setup !== 'function') process.exit(1) })"], v2Install)
+          note(loaded.code === 0, "packed V2 artifact loads with the V2 peer")
+        }
+        fs.rmSync(v2Install, { recursive: true, force: true })
+      }
     }
   } finally {
     fs.rmSync(testRoot, { recursive: true, force: true })

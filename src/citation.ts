@@ -11,20 +11,56 @@ export interface ParsedCitation {
   raw: string
 }
 
-const CITATION_BLOCK_RE = /<memory-citation>[\s\S]*?<\/memory-citation>/gi
+/** Fence language the TUI code-block renderer is registered for. */
+export const CITATION_FENCE_LANG = "memory-citation"
+
+// Legacy bare-XML block (still accepted for persisted history) or the current
+// fenced form ```memory-citation ... ``` which markdown clients render as a
+// code block and the V2 TUI renders natively.
+const CITATION_BLOCK_RE =
+  /<memory-citation>[\s\S]*?<\/memory-citation>|```memory-citation[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*```/gi
+
+const FENCE_RE = /^```memory-citation[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```$/i
+const SESSIONS_LINE_RE = /^sessions?\s*:\s*(.*)$/i
 
 function extractSection(block: string, name: string): string | null {
   const m = block.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "i"))
   return m ? m[1] : null
 }
 
+/** Parse the fenced body: entry lines plus an optional `sessions:` line. */
+export function parseCitationBody(body: string): { entries: MemoryCitationEntry[]; sessionIds: string[] } {
+  const entries: MemoryCitationEntry[] = []
+  const sessionIds: string[] = []
+  const seen = new Set<string>()
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const sessions = trimmed.match(SESSIONS_LINE_RE)
+    if (sessions) {
+      for (const id of sessions[1].split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)) {
+        if (!seen.has(id)) {
+          seen.add(id)
+          sessionIds.push(id)
+        }
+      }
+      continue
+    }
+    const entry = parseEntry(trimmed)
+    if (entry) entries.push(entry)
+  }
+  return { entries, sessionIds }
+}
+
 function parseEntry(line: string): MemoryCitationEntry | null {
   const trimmed = line.trim()
   if (!trimmed) return null
-  const noteSplit = trimmed.lastIndexOf("|note=[")
-  if (noteSplit === -1 || !trimmed.endsWith("]")) return null
+  const noteSplit = trimmed.lastIndexOf("|note=")
+  if (noteSplit === -1) return null
   const location = trimmed.slice(0, noteSplit)
-  const note = trimmed.slice(noteSplit + "|note=[".length, -1).trim()
+  let note = trimmed.slice(noteSplit + "|note=".length).trim()
+  // Brackets are optional in the fenced form; required-and-stripped in legacy.
+  if (note.startsWith("[") && note.endsWith("]")) note = note.slice(1, -1).trim()
   const colon = location.lastIndexOf(":")
   if (colon === -1) return null
   const path = location.slice(0, colon).trim()
@@ -43,6 +79,13 @@ export function parseCitations(text: string): ParsedCitation[] {
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
     const raw = m[0]
+    const fenced = raw.match(FENCE_RE)
+    if (fenced) {
+      const parsed = parseCitationBody(fenced[1])
+      if (parsed.entries.length > 0 || parsed.sessionIds.length > 0) results.push({ ...parsed, raw })
+      continue
+    }
+
     const entries: MemoryCitationEntry[] = []
     const sessionIds: string[] = []
     const seen = new Set<string>()
@@ -79,6 +122,11 @@ export function parseCitations(text: string): ParsedCitation[] {
     }
   }
   return results
+}
+
+/** Cheap pre-check before running the full parser (either format). */
+export function hasCitationMarkup(text: string): boolean {
+  return text.includes("<memory-citation>") || text.includes("```memory-citation")
 }
 
 export function extractCitedSessionIds(text: string): string[] {

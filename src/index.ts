@@ -1,6 +1,6 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
-import { stripCitations, extractCitedSessionIds } from "./citation.js"
+import { stripCitations, extractCitedSessionIds, hasCitationMarkup } from "./citation.js"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../tools/memory.js"
 import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
@@ -12,7 +12,7 @@ import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from 
 import { hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
 import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from "./agent-health.js"
-import { setup as setupV2 } from "./v2/plugin.js"
+import type { V2Context } from "./v2/shim.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import path from "path"
 
@@ -44,6 +44,16 @@ const MCP_STATUS_TIMEOUT_MS = 1_000
 // here would hold a stale handle across closeDb() (e.g. after memory_reset).
 function getStore(): MemoryStore {
   return new MemoryStore()
+}
+
+/**
+ * Load the OpenCode 2 implementation only when a V2 host actually invokes
+ * setup(). OpenCode 1 imports this module to obtain server(); it must not need
+ * the V2 SDK or execute any V2 module initialization just to start.
+ */
+async function setupV2(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
+  const { setup } = await import("./v2/plugin.js")
+  return setup(ctx)
 }
 
 // Citation blocks are seen by both the text.complete hook (once, at
@@ -138,6 +148,13 @@ export default {
     // Finish bounded reseeding before hooks can see a surviving memory
     // sub-session after a plugin reload.
     await cleanupOldSubSessions()
+    try {
+      if (getStore().releaseOrphanedPhase2Job()) {
+        console.warn("[opencode-codex-memory] released a consolidation lease orphaned by a dead process")
+      }
+    } catch (err) {
+      console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
+    }
     return buildHooks()
   },
 }
@@ -418,7 +435,7 @@ function buildHooks() {
   ): Promise<void> {
     try {
       if (isMemorySubSession(input.sessionID)) return
-      if (!output.text.includes("<memory-citation>")) return
+      if (!hasCitationMarkup(output.text)) return
       try {
         const ids = extractCitedSessionIds(output.text)
         // Same part key as the event path: whichever hook sees the ids first
@@ -445,10 +462,10 @@ function buildHooks() {
       for (const msg of output.messages) {
         if (msg.info?.role !== "assistant") continue
         for (const part of msg.parts) {
-          if (part.type === "text" && typeof part.text === "string" && part.text.includes("<memory-citation>")) {
+          if (part.type === "text" && typeof part.text === "string" && hasCitationMarkup(part.text)) {
             const before = part.text
             part.text = stripCitations(part.text)
-            if (part.text.includes("<memory-citation>")) {
+            if (hasCitationMarkup(part.text)) {
               console.warn("[opencode-codex-memory] citation marker still present after stripCitations — hook contract may have changed")
             }
           }
@@ -520,7 +537,7 @@ function buildHooks() {
         const part = (ev.properties as { part?: { id?: string; type: string; text?: string; sessionID?: string } }).part
         if (!part || part.type !== "text" || typeof part.text !== "string") return
         if (part.sessionID && isMemorySubSession(part.sessionID)) return
-        if (!part.text.includes("<memory-citation>")) return
+        if (!hasCitationMarkup(part.text)) return
         let ids: string[] = []
         try {
           ids = extractCitedSessionIds(part.text)

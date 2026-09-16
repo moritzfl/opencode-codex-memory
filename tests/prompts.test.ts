@@ -51,9 +51,9 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     fs.writeFileSync(memorySummaryPath(), "v1\n\n## User Profile\ntest\n")
     const prompt = buildMemorySystemPrompt(true)!
     expect(prompt).not.toMatch(PLACEHOLDER_RE)
-    // citation.ts parses these exact tags — read_path must instruct them
-    expect(prompt).toContain("<memory-citation>")
-    expect(prompt).toContain("<session_ids>")
+    // citation.ts parses this exact fence — read_path must instruct it
+    expect(prompt).toContain("```memory-citation")
+    expect(prompt).toContain("sessions: ses_")
     expect(prompt).not.toContain("oai-mem-citation")
     expect(prompt).not.toContain("rollout_ids")
     // the memory dir lives outside the workspace: tools are the read/write path
@@ -77,8 +77,8 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     expect(prompt).toContain(`Search ${memoryRoot()}/MEMORY.md using those keywords.`)
     expect(prompt).toContain(`Write your update in ${memoryRoot()}/extensions/ad_hoc/notes/`)
     // citation contract is tool-independent and must survive
-    expect(prompt).toContain("<memory-citation>")
-    expect(prompt).toContain("<session_ids>")
+    expect(prompt).toContain("```memory-citation")
+    expect(prompt).toContain("sessions: ses_")
   })
 
   it("refuses to inject when the memory root is a symlink", () => {

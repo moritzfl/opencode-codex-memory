@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { parseCitations, extractCitedSessionIds, stripCitations } from "../src/citation.js"
+import { parseCitations, extractCitedSessionIds, stripCitations, hasCitationMarkup } from "../src/citation.js"
 import { takeNewCitations, waitForBackgroundTasks } from "../src/index.js"
 
 describe("takeNewCitations", () => {
@@ -47,6 +47,41 @@ ses_def456
 ses_abc123
 </session_ids>
 </memory-citation>`
+
+const FENCED = `The build command is bun run build.
+
+\`\`\`memory-citation
+MEMORY.md:12-14|note=build command for the api service
+rollout_summaries/2026-02-17T21-23-02-ln3m-example.md:10-12|note=[weekly report format]
+sessions: ses_abc123 ses_def456, ses_abc123
+\`\`\``
+
+describe("parseCitations (fenced format)", () => {
+  it("parses entries, optional note brackets, and the sessions line", () => {
+    const r = parseCitations(FENCED)
+    expect(r.length).toBe(1)
+    expect(r[0].entries).toEqual([
+      { path: "MEMORY.md", lineStart: 12, lineEnd: 14, note: "build command for the api service" },
+      {
+        path: "rollout_summaries/2026-02-17T21-23-02-ln3m-example.md",
+        lineStart: 10,
+        lineEnd: 12,
+        note: "weekly report format",
+      },
+    ])
+    expect(r[0].sessionIds).toEqual(["ses_abc123", "ses_def456"])
+  })
+
+  it("strips the fenced block from the reply", () => {
+    expect(stripCitations(FENCED)).toBe("The build command is bun run build.")
+    expect(hasCitationMarkup(FENCED)).toBe(true)
+    expect(hasCitationMarkup(NONE)).toBe(false)
+  })
+
+  it("ignores an empty fence", () => {
+    expect(parseCitations("x\n```memory-citation\n\n```")).toEqual([])
+  })
+})
 
 describe("parseCitations (rich format)", () => {
   it("parses citation entries with paths, line ranges, and notes", () => {

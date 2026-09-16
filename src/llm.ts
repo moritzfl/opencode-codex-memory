@@ -26,6 +26,7 @@ export interface ExtractionResult {
 
 let inputRef: PluginInput | null = null
 let inputGeneration = 0
+let subSessionDirectoryOverride: string | null = null
 
 export function setPluginInput(input: PluginInput): void {
   inputRef = input
@@ -38,6 +39,15 @@ export function setPluginInput(input: PluginInput): void {
 
 export function getPluginInput(): PluginInput | null {
   return inputRef
+}
+
+/**
+ * V2 agent definitions are location-scoped. The V2 setup supplies the active
+ * location so helper sessions resolve the same agent; V1 leaves this unset
+ * and continues using the dedicated memory workspace as its session root.
+ */
+export function setSubSessionDirectory(directory?: string): void {
+  subSessionDirectoryOverride = directory ?? null
 }
 
 // Sessions this plugin spawned for extraction/consolidation. The main
@@ -86,17 +96,18 @@ export function isMemorySubSession(sessionId: string): boolean {
 /**
  * Host directory for memory sub-sessions. Must exist: OpenCode resolves it in
  * SystemPrompt.environment and fails the turn with UnknownError/ENOENT when
- * missing. Prefer the memory workspace itself — global, always ours, already
- * granted to `memorize` via external_directory, and independent of whatever
- * (possibly deleted) project PluginInput.directory points at.
+ * missing. V1 uses the memory workspace; V2 supplies the active project
+ * location so its location-scoped `memorize` agent is available, with the
+ * memory workspace as the safe fallback.
  */
 function resolveSubSessionDirectory(): string {
-  const root = memoryRoot()
+  const configured = subSessionDirectoryOverride
+  const root = configured && fs.existsSync(configured) ? configured : memoryRoot()
   fs.mkdirSync(root, { recursive: true })
   return root
 }
 
-async function createSession(agent: string, title?: string): Promise<string> {
+async function createSession(title: string): Promise<string> {
   const input = getPluginInput()
   if (!input) throw new Error("plugin input not initialized")
   if (isPluginShuttingDown()) throw new SubagentCancelledError()
@@ -108,7 +119,7 @@ async function createSession(agent: string, title?: string): Promise<string> {
     hostSessionCreate(input.client, {
       directory,
       body: {
-        title: title ?? `codex-memory-${agent}`,
+        title,
         metadata: { [SUBSESSION_METADATA_KEY]: true },
       },
       signal: controller.signal,
@@ -435,7 +446,7 @@ const EXTRACTION_SCHEMA = {
  */
 export async function extractViaSubagent(sessionId: string, transcript: string, opts: ExtractOptions = {}): Promise<ExtractionResult | null> {
   const agent = "memorize-extract"
-  const subId = await createSession(agent, `codex-memory-extract-${sessionId}`)
+  const subId = await createSession(`codex-memory-extract-${sessionId}`)
   try {
     const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript)
     // extract_model option > opencode small_model > session default.
@@ -485,7 +496,7 @@ export async function consolidateViaSubagent(
   signal?: AbortSignal,
 ): Promise<void> {
   const agent = "memorize"
-  const subId = await createSession(agent, "codex-memory-consolidate")
+  const subId = await createSession("codex-memory-consolidate")
   let promptError: unknown
   let promptFailed = false
   try {

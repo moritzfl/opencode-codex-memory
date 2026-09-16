@@ -46,6 +46,24 @@ export type Phase2ClaimResult =
 function newId(): string {
   return crypto.randomUUID()
 }
+/**
+ * Phase-2 worker ids embed the owning pid so a later boot can tell a live
+ * peer's lease from one orphaned by a hard kill (host auto-update/restart).
+ */
+const PHASE2_WORKER_PREFIX = `pid:${process.pid}:`
+function phase2WorkerId(): string {
+  return `${PHASE2_WORKER_PREFIX}${crypto.randomUUID()}`
+}
+function pidAlive(pid: number): boolean {
+  if (pid === process.pid) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM: exists but not ours. Only ESRCH proves it is gone.
+    return (err as NodeJS.ErrnoException).code !== "ESRCH"
+  }
+}
 function now(): number {
   return Date.now()
 }
@@ -137,6 +155,35 @@ export class MemoryStore {
     this.db.transaction(() => {
       for (const id of sessionIds) stmt.run(ts, id)
     }).immediate()
+  }
+
+  /**
+   * Record citations from a durable assistant message exactly once. V2 can
+   * observe the same persisted text through session.text.ended and later
+   * context calls, and either observation may happen after a process restart.
+   */
+  recordUsageOnce(sessionId: string, assistantMessageId: string, citedSessionIds: string[]): string[] {
+    const ids = [...new Set(citedSessionIds)]
+    if (!sessionId || !assistantMessageId || ids.length === 0) return []
+    const fresh: string[] = []
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO memory_citation_usage
+        (session_id, assistant_message_id, cited_session_id, recorded_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    const update = this.db.prepare(
+      "UPDATE memory_stage1_outputs SET usage_count = usage_count + 1, last_usage = ? WHERE session_id = ?",
+    )
+    const ts = now()
+    this.db.transaction(() => {
+      for (const citedSessionId of ids) {
+        const result = insert.run(sessionId, assistantMessageId, citedSessionId, ts)
+        if (result.changes === 0) continue
+        update.run(ts, citedSessionId)
+        fresh.push(citedSessionId)
+      }
+    }).immediate()
+    return fresh
   }
 
   claimStage1Jobs(sessions: ClaimableSession[], excludeSession?: string, maxClaimed?: number): Stage1Claim[] {
@@ -345,8 +392,8 @@ export class MemoryStore {
       .run(DEFAULT_RETRY_REMAINING, inputWatermark)
   }
 
-  claimGlobalPhase2Job(): Phase2ClaimResult {
-    const workerId = newId()
+  claimGlobalPhase2Job(opts: { bypassCooldown?: boolean } = {}): Phase2ClaimResult {
+    const workerId = phase2WorkerId()
     const ownershipToken = newId()
     const tNow = nowSec()
     const lease = tNow + PHASE2_LEASE_SECONDS
@@ -378,7 +425,12 @@ export class MemoryStore {
         }
         // codex: cooldown after a clean success (last_error IS NULL AND
         // finished_at within the window); failures fall through to retry_at.
-        if (row.last_error == null && row.finished_at != null && tNow - row.finished_at < PHASE2_COOLDOWN_MS / 1000) {
+        if (
+          !opts.bypassCooldown &&
+          row.last_error == null &&
+          row.finished_at != null &&
+          tNow - row.finished_at < PHASE2_COOLDOWN_MS / 1000
+        ) {
           return { type: "skipped_cooldown" }
         }
         // codex gates on retry_at regardless of status and never exhausts
@@ -459,12 +511,13 @@ export class MemoryStore {
     last_error: string | null
     finished_at: number | null
     retry_at: number | null
+    lease_until: number | null
     success_finished_at: number | null
     last_success_watermark: number | null
   } | null {
     const row = this.db
       .prepare(
-        `SELECT status, finished_at, last_error, retry_at, last_success_watermark FROM memory_jobs
+        `SELECT status, finished_at, last_error, retry_at, lease_until, last_success_watermark FROM memory_jobs
          WHERE kind='memory_consolidate_global' AND job_key='global'`,
       )
       .get() as {
@@ -472,6 +525,7 @@ export class MemoryStore {
         finished_at: number | null
         last_error: string | null
         retry_at: number | null
+        lease_until: number | null
         last_success_watermark: number | null
       } | null
     if (!row) return null
@@ -492,6 +546,7 @@ export class MemoryStore {
       last_error: row.last_error,
       finished_at: row.finished_at,
       retry_at: row.retry_at,
+      lease_until: row.lease_until,
       // Codex preserves last_success_watermark across later attempts, while the
       // job finished_at describes only the latest attempt. Never label a failure
       // timestamp as a success finish time.
@@ -546,6 +601,37 @@ export class MemoryStore {
    * Plugin dispose/reload: release the global phase-2 job without retry backoff
    * so the next process can reclaim immediately. Ownership-token guarded.
    */
+  /**
+   * Boot-time sweep: a `running` global row whose owning pid is dead can never
+   * be finished by anyone; release it so the next pass can reclaim instead of
+   * waiting the full lease out. Rows from live pids (a peer instance) and rows
+   * without a pid tag (older schema) are left alone.
+   */
+  releaseOrphanedPhase2Job(): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT worker_id FROM memory_jobs
+         WHERE kind='memory_consolidate_global' AND job_key='global' AND status='running'`,
+      )
+      .get() as { worker_id: string | null } | null
+    const m = row?.worker_id?.match(/^pid:(\d+):/)
+    if (!m) return false
+    if (pidAlive(Number(m[1]))) return false
+    const res = this.db
+      .prepare(
+        `UPDATE memory_jobs SET
+           status = 'pending',
+           last_error = ?,
+           retry_at = NULL,
+           finished_at = ?,
+           lease_until = NULL,
+           ownership_token = NULL
+         WHERE kind='memory_consolidate_global' AND job_key='global' AND status='running' AND worker_id=?`,
+      )
+      .run(`owner pid ${m[1]} exited before finishing`, nowSec(), row!.worker_id)
+    return res.changes > 0
+  }
+
   releasePhase2OnShutdown(ownershipToken: string): void {
     this.db
       .prepare(
