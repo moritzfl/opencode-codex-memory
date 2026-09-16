@@ -46,21 +46,13 @@ export function parseCitationBody(body: string): { entries: MemoryCitationEntry[
       }
       continue
     }
-    const entry = parseEntry(trimmed)
+    const entry = parseFenceEntry(trimmed)
     if (entry) entries.push(entry)
   }
   return { entries, sessionIds }
 }
 
-function parseEntry(line: string): MemoryCitationEntry | null {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-  const noteSplit = trimmed.lastIndexOf("|note=")
-  if (noteSplit === -1) return null
-  const location = trimmed.slice(0, noteSplit)
-  let note = trimmed.slice(noteSplit + "|note=".length).trim()
-  // Brackets are optional in the fenced form; required-and-stripped in legacy.
-  if (note.startsWith("[") && note.endsWith("]")) note = note.slice(1, -1).trim()
+function parseLocation(location: string, note: string): MemoryCitationEntry | null {
   const colon = location.lastIndexOf(":")
   if (colon === -1) return null
   const path = location.slice(0, colon).trim()
@@ -71,6 +63,25 @@ function parseEntry(line: string): MemoryCitationEntry | null {
   const lineEnd = Number.parseInt(range.slice(dash + 1).trim(), 10)
   if (!path || Number.isNaN(lineStart) || Number.isNaN(lineEnd)) return null
   return { path, lineStart, lineEnd, note }
+}
+
+function parseXmlEntry(line: string): MemoryCitationEntry | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  const noteSplit = trimmed.lastIndexOf("|note=[")
+  if (noteSplit === -1 || !trimmed.endsWith("]")) return null
+  const note = trimmed.slice(noteSplit + "|note=[".length, -1).trim()
+  return parseLocation(trimmed.slice(0, noteSplit), note)
+}
+
+function parseFenceEntry(line: string): MemoryCitationEntry | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  const noteSplit = trimmed.lastIndexOf("|note=")
+  if (noteSplit === -1) return null
+  let note = trimmed.slice(noteSplit + "|note=".length).trim()
+  if (note.startsWith("[") && note.endsWith("]")) note = note.slice(1, -1).trim()
+  return parseLocation(trimmed.slice(0, noteSplit), note)
 }
 
 export function parseCitations(text: string): ParsedCitation[] {
@@ -93,7 +104,7 @@ export function parseCitations(text: string): ParsedCitation[] {
     const entriesBlock = extractSection(raw, "citation_entries")
     if (entriesBlock) {
       for (const line of entriesBlock.split(/\r?\n/)) {
-        const entry = parseEntry(line)
+        const entry = parseXmlEntry(line)
         if (entry) entries.push(entry)
       }
     }

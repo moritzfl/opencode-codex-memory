@@ -100,6 +100,21 @@ describe("parseCitations (fenced format)", () => {
 })
 
 describe("parseCitations (rich format)", () => {
+  it("rejects XML entries without |note=[...] brackets", () => {
+    const text = `<memory-citation>
+<citation_entries>
+MEMORY.md:1-2|note=no brackets
+</citation_entries>
+<session_ids>
+ses_abc123
+</session_ids>
+</memory-citation>`
+    const r = parseCitations(text)
+    expect(r.length).toBe(1)
+    expect(r[0].entries).toEqual([])
+    expect(r[0].sessionIds).toEqual(["ses_abc123"])
+  })
+
   it("parses citation entries with paths, line ranges, and notes", () => {
     const r = parseCitations(RICH)
     expect(r.length).toBe(1)

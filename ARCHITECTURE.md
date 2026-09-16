@@ -87,8 +87,9 @@ Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `llm`, `reasoning-variant`, `ratelimit`, `paths`, `path-guard`, `host-client`,
 `lifecycle`, `options`, `diagnostics`, `agent-health`) plus external-agent exchange
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
-model-facing tools (`memory.ts`, `control.ts`). Per-file upstream provenance
-lives in `codex-map.yaml`.
+model-facing tools (`memory.ts`, `control.ts`). OpenCode2 host adapter lives in
+`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped; see
+`docs/opencode2.md`. Per-file upstream provenance lives in `codex-map.yaml`.
 
 ---
 
@@ -150,14 +151,23 @@ poisoned transcript still cannot induce file reads or any side effect. This also
 blocks IDE and MCP tools that could otherwise bypass a narrower `bash` deny.
 Tool-permission-level, not process-level — accepted trade-off.
 
-Helper sessions are created with `directory` = the memory workspace
-(`resolveSubSessionDirectory` in `src/llm.ts`), not the user's project. OpenCode
-treats that path as the session project boundary (`containsPath` /
-`external_directory`): in-bounds file tools freely touch the memory root only.
-Paths under the user's real project are outside that boundary and hit
-`external_directory`, which the wildcard deny blocks. So the consolidator is
-effectively memory-root-scoped without Seatbelt — residual is still
-tool-permission-level (not process-level), not "can edit the originating repo."
+Helper-session `directory` (`resolveSubSessionDirectory` in `src/llm.ts`)
+differs by host:
+
+- **V1:** the memory workspace, not the user's project. OpenCode treats that
+  path as the session project boundary (`containsPath` /
+  `external_directory`): in-bounds file tools freely touch the memory root
+  only. Paths under the user's real project are outside that boundary and hit
+  `external_directory`, which the wildcard deny blocks.
+- **OpenCode2:** V2 agents are location-scoped, so helpers spawn in the
+  active plugin location (`setSubSessionDirectory`). Session boundary is the
+  project; memory-root scoping is permission-only (`read`/`edit`/`glob`/`grep`
+  + `external_directory` under the memory workspace, everything else denied).
+  See `docs/opencode2.md`.
+
+Either way the consolidator is memory-root-scoped without Seatbelt — residual
+is still tool-permission-level (not process-level), not "can edit the
+originating repo."
 
 `injectAgentDefinitions` still appends
 `external_directory: { "<memory root>/*": "allow" }` as a belt-and-suspenders
