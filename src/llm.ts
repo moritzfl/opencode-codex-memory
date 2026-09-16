@@ -323,6 +323,7 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
   const model = opts.model ? parseModelRef(opts.model) : null
   const promptPromise = hostSessionPrompt(input.client, {
     sessionId,
+    signal: opts.signal,
     body: {
       agent,
       ...(opts.system ? { system: opts.system } : {}),

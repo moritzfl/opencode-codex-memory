@@ -127,15 +127,17 @@ async function main() {
     const healthVer = (health.json as { version?: string } | null)?.version
     if (healthVer) note(healthVer === version, `health.version ${healthVer} matches CLI ${version}`)
 
-    const docRes = await api(serve, sandbox, "GET", "/doc")
-    note(docRes.status === 200, `GET /doc → ${docRes.status}`)
-    const doc = docRes.json as OpenAPI
-    if (!doc?.paths) {
+    if (version.startsWith("2.")) {
       // OpenCode 2 moved its machine-readable contract to /openapi.json and
       // is checked by contract:v2; /doc is the V1-only surface.
-      if (version.startsWith("2.")) log("skip", "/doc has no V1 paths on OpenCode 2; see contract:v2")
-      else note(false, "/doc missing paths")
+      log("skip", "/doc is a V1-only surface on OpenCode 2; see contract:v2")
     } else {
+      const docRes = await api(serve, sandbox, "GET", "/doc")
+      note(docRes.status === 200, `GET /doc → ${docRes.status}`)
+      const doc = docRes.json as OpenAPI
+      if (!doc?.paths) {
+        note(false, "/doc missing paths")
+      } else {
       const listOp = getPathOp(doc, "/session", "get")
       note(!!listOp, "GET /session present")
       if (listOp) {
@@ -194,6 +196,7 @@ async function main() {
         note(names.has("limit"), "experimental.session.list query param 'limit'")
         note(names.has("cursor"), "experimental.session.list query param 'cursor'")
         note(names.has("search"), "experimental.session.list query param 'search'")
+      }
       }
     }
   } finally {

@@ -81,6 +81,22 @@ describe("parseCitations (fenced format)", () => {
   it("ignores an empty fence", () => {
     expect(parseCitations("x\n```memory-citation\n\n```")).toEqual([])
   })
+
+  it("requires a complete matching Markdown fence", () => {
+    const valid = "````memory-citation\nsessions: ses_long\n````"
+    expect(parseCitations(valid)[0].sessionIds).toEqual(["ses_long"])
+    expect(stripCitations(valid)).toBe("")
+
+    const malformed = "inline ```memory-citation\nsessions: ses_bad\n```not-a-close"
+    expect(parseCitations(malformed)).toEqual([])
+    expect(stripCitations(malformed)).toBe(malformed)
+  })
+
+  it("guards mixed-case citation fences", () => {
+    const mixed = "```Memory-Citation\nsessions: ses_mixed\n```"
+    expect(hasCitationMarkup(mixed)).toBe(true)
+    expect(extractCitedSessionIds(mixed)).toEqual(["ses_mixed"])
+  })
 })
 
 describe("parseCitations (rich format)", () => {

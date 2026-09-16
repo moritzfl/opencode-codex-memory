@@ -203,6 +203,17 @@ describe("v2 setup", () => {
     await cleanup?.()
   })
 
+  it("provisions V2 agents before enabling generation at runtime", async () => {
+    const f = fakeCtx({ generate_memories: false })
+    const cleanup = await setup(f.ctx)
+    const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
+    expect(f.agentUpdates).toEqual([])
+    expect(await handlers.setOption({ key: "generate_memories", value: true })).toEqual({ ok: true })
+    expect(f.agentUpdates).toEqual(["memorize", "memorize-extract"])
+    expect(parseMemoryStatus(await handlers.status()).generateMemories).toBe(true)
+    await cleanup?.()
+  })
+
   it("reports extraction claims and distinguishes disabled memory from read-only", async () => {
     const f = fakeCtx({ generate_memories: false, use_memories: false })
     const cleanup = await setup(f.ctx)
@@ -427,9 +438,9 @@ describe("v2 tui status panel", () => {
     expect(frame).toContain("/tmp/mem")
     // Tabs are not numbered and digits do nothing.
     expect(frame).not.toContain("1  Overview")
-    // The dialog owns a second keymap layer, gated to the Controls tab.
-    expect(f.layers).toHaveLength(2)
-    const dialogLayer = f.layers[1]
+    // The dialog owns a tab layer plus a control layer gated to Controls.
+    expect(f.layers).toHaveLength(3)
+    const dialogLayer = f.layers[2]
     expect(typeof dialogLayer.enabled).toBe("function")
     expect(dialogLayer.enabled()).toBe(false)
     expect(dialogLayer.commands.map((c: any) => c.bind).sort()).toEqual(["down", "return", "space", "up"])
@@ -465,7 +476,7 @@ describe("v2 tui status panel", () => {
     await f.layers[0].commands[0].run()
     const rendered: any = await testRender(() => shown[0]() as any, { width: 100, height: 40 })
     await rendered.renderOnce()
-    const layer = f.layers[1]
+    const layer = f.layers[2]
     const cmd = (bind: string) => layer.commands.find((c: any) => c.bind === bind).run
     // Controls fire-and-forget their RPC; settle it before asserting.
     const press = async (bind: string) => { cmd(bind)(); await new Promise((r) => setTimeout(r, 5)) }

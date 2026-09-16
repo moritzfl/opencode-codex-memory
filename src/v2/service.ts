@@ -29,6 +29,7 @@ export interface V2ServiceDependencies {
 
 let testDependencies: V2ServiceDependencies | null = null
 let clientPromise: Promise<V2ServiceClient | null> | null = null
+const SERVICE_REQUEST_TIMEOUT_MS = 1_000
 
 /** Test seam: replace discovery without changing the production connection path. */
 export function setV2ServiceDependenciesForTest(dependencies: V2ServiceDependencies | null): void {
@@ -39,6 +40,25 @@ export function setV2ServiceDependenciesForTest(dependencies: V2ServiceDependenc
 /** Forget a cached endpoint after a service restart or failed request. */
 export function invalidateOwnService(): void {
   clientPromise = null
+}
+
+async function withServiceTimeout<T>(request: Promise<T>, timeoutMs: number, controller?: AbortController): Promise<T> {
+  request.catch(() => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller?.abort()
+          reject(new Error(`OpenCode service request timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function productionDependencies(): Promise<V2ServiceDependencies> {
@@ -62,12 +82,18 @@ async function productionDependencies(): Promise<V2ServiceDependencies> {
  */
 export async function discoverOwnService(
   dependencies?: V2ServiceDependencies,
+  timeoutMs = SERVICE_REQUEST_TIMEOUT_MS,
 ): Promise<{ endpoint: V2ServiceEndpoint; client: V2ServiceClient; health: { version: string; pid: number } } | null> {
   const deps = dependencies ?? testDependencies ?? (await productionDependencies())
-  const endpoint = await deps.service.discover()
+  const endpoint = await withServiceTimeout(deps.service.discover(), timeoutMs)
   if (!endpoint) return null
   const client = deps.make({ baseUrl: endpoint.url, headers: deps.service.headers(endpoint) })
-  const health = (await client.health.get()) as { healthy?: unknown; version?: unknown; pid?: unknown }
+  const controller = new AbortController()
+  const health = (await withServiceTimeout(client.health.get({ signal: controller.signal }), timeoutMs, controller)) as {
+    healthy?: unknown
+    version?: unknown
+    pid?: unknown
+  }
   if (health?.healthy !== true) throw new Error("registered OpenCode service is not healthy")
   if (typeof health?.pid !== "number" || health.pid !== process.pid) {
     throw new Error(`registered OpenCode service PID ${String(health?.pid)} does not match plugin host PID ${process.pid}`)

@@ -266,6 +266,16 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     setOption: async (input: unknown) => {
       const { key, value } = (input ?? {}) as { key?: unknown; value?: unknown }
       if ((key !== "use_memories" && key !== "generate_memories") || typeof value !== "boolean") return { ok: false }
+      if (key === "generate_memories" && value && !pluginOptions.generate_memories) {
+        pluginOptions.generate_memories = true
+        try {
+          await ensureV2Agents(ctx as any)
+        } catch (error) {
+          pluginOptions.generate_memories = false
+          console.error("[opencode-codex-memory] failed to provision V2 agents while enabling memory:", error)
+          return { ok: false }
+        }
+      }
       pluginOptions[key] = value
       invalidateCache()
       notifyStatusChanged()

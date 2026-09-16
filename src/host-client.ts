@@ -128,7 +128,7 @@ export interface HostPromptBody {
 /** session.prompt including `format` for json_schema structured output. */
 export async function hostSessionPrompt(
   client: PluginInput["client"],
-  opts: { sessionId: string; body: HostPromptBody },
+  opts: { sessionId: string; body: HostPromptBody; signal?: AbortSignal },
 ): Promise<{ error?: unknown; data?: unknown }> {
   return client.session.prompt({
     path: { id: opts.sessionId },
@@ -140,6 +140,7 @@ export async function hostSessionPrompt(
       ...(opts.body.variant ? { variant: opts.body.variant } : {}),
       parts: opts.body.parts,
     } as never,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   } as never) as Promise<{ error?: unknown; data?: unknown }>
 }
 
