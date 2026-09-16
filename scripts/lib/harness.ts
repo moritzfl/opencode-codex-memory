@@ -269,6 +269,43 @@ export async function freePort(): Promise<number> {
   })
 }
 
+async function fetchJson(url: string, sandbox: Sandbox, timeoutMs = 2000): Promise<{ ok: boolean; status: number; json: unknown }> {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { headers: basicAuth(sandbox), signal: ac.signal })
+    const text = await res.text()
+    let json: unknown = null
+    try {
+      json = text ? JSON.parse(text) : null
+    } catch {
+      json = null
+    }
+    return { ok: res.ok, status: res.status, json }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function serveIsReady(baseUrl: string, sandbox: Sandbox): Promise<boolean> {
+  const global = await fetchJson(`${baseUrl}/global/health`, sandbox).catch(() => null)
+  if (global?.ok && global.json && typeof global.json === "object" && (global.json as { healthy?: unknown }).healthy === true) {
+    return true
+  }
+  if (global?.ok && global.json && typeof (global.json as { version?: unknown }).version === "string") {
+    return true
+  }
+  const status = await fetchJson(`${baseUrl}/api/status`, sandbox).catch(() => null)
+  const body = status?.json
+  return Boolean(
+    status?.ok &&
+      body &&
+      typeof body === "object" &&
+      typeof (body as { pid?: unknown }).pid === "number" &&
+      typeof (body as { version?: unknown }).version === "string",
+  )
+}
+
 export async function startServe(
   sandbox: Sandbox,
   opts: { port?: number; bin?: string; extraArgs?: string[] } = {},
@@ -299,11 +336,8 @@ export async function startServe(
       )
     }
     try {
-      const res = await fetch(`${baseUrl}/global/health`, {
-        headers: basicAuth(sandbox),
-      })
-      if (res.ok) break
-      lastErr = `HTTP ${res.status}`
+      if (await serveIsReady(baseUrl, sandbox)) break
+      lastErr = "not ready"
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e)
     }
