@@ -76,10 +76,10 @@ V2 plugin syntax:
 }
 ```
 
-Behavior is identical; see [docs/opencode2.md](./docs/opencode2.md) for the
-few platform adaptations and current limitations. On opencode2 you also get a
-**Memory** section in the session sidebar plus a `/memory-status` command,
-served live from the same state as `memory_inspect`.
+Same pipeline, not the same host APIs — see [docs/opencode2.md](./docs/opencode2.md)
+for the limits (registered service, retained citation markup, no `small_model`).
+On opencode2 you also get a **Memory** section in the session sidebar plus a
+`/memory-status` command, served live from the same state as `memory_inspect`.
 
 ### Installation hints
 

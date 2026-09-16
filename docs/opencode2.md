@@ -49,13 +49,16 @@ translation (`src/v2/plugin.ts`):
 
 ## Deliberate V2 differences
 
-- **Registered service is required for global reads.** V2 discovers the
-  local service with `Service.discover()`, preserves its auth headers, and
-  accepts it only when `/health` reports the plugin host's own PID. It never
-  starts a service with `Service.ensure()`. If no matching service is
-  registered, global discovery reports a clear unavailable error.
+- **Registered service is required for global reads.** V2 reads the XDG
+  `service.json` registration (never `Service.ensure()`, never 2.0.3
+  `Service.discover()` which still probes `/api/health`). It preserves
+  basic-auth headers and accepts the endpoint only when `GET /api/status`
+  reports this process's PID (`version` + `pid`; 2.0.5 `/api/health` is
+  404). Legacy JSON `/api/health` `{healthy:true,pid,version}` still
+  counts. If no matching service is registered, global discovery reports
+  unavailable — including plain `opencode serve` talking to another host.
 - **Global discovery is complete.** The adapter follows public
-  `session.list` cursors and uses public `message.list` for full persisted
+  `session.list` cursors and uses public `session.message.list` for full persisted
   history. Helper sessions are excluded by durable metadata and the cleanup
   sweep reclaims them after a restart; `session.context` is not used for
   transcript capture.
@@ -77,10 +80,10 @@ translation (`src/v2/plugin.ts`):
   the shared resolver. V2 configs do not provide V1's `small_model` field;
   unset `extract_model` uses the session default, while
   `consolidation_model` uses the configured `model` when present. Set both
-  plugin options explicitly for deterministic routing. Cancellation races
-  the host `AbortSignal` (V2 request-option signals are not assumed to
-  cancel) and then interrupt-and-wait; helper delete succeeds only after
-  `session.remove` or a confirmed 404.
+  plugin options explicitly for deterministic routing. Extraction cancel
+  uses the public client's `generate.text(input, { signal })` when the
+  registered service is available; otherwise it races the host AbortSignal.
+  Helper delete succeeds only after `session.remove` plus a confirmed 404.
 - **Both agents ship; only `memorize` works.** Extraction runs sessionless
   through `generate.text`, so `memorize-extract` is provisioned hidden and
   unused (V1 likewise skips injecting unused agents).
@@ -107,9 +110,10 @@ read/write settings, import status, retry eligibility, and warnings.
   children directly under `<box>` — its empty placeholder is a bare text node
   and the renderer rejects it. Use unconditional lines with placeholders.
 - The TUI bundle must import only `@opencode/plugin/tui`, `solid-js`, and
-  `@opentui/solid`: the CLI sandbox does not resolve `zod` or
-  `@opencode/plugin/rpc`, so the status contract (`src/v2/status-rpc.ts`) is
-  plain JSON Schema with a hand-written guard.
+  `@opentui/solid` (not `@opentui/core`): the CLI sandbox does not resolve
+  `zod`, `@opencode/plugin/rpc`, or core. Status RPC (`src/v2/status-rpc.ts`)
+  is plain JSON Schema with a hand-written guard. Citation fences render as
+  ordinary code blocks.
 
 For a local wrapper, add `tui.ts` beside its `index.ts`, re-exporting the built
 `dist/src/v2/tui.js` default export, then run `bun run build` in this repository.
