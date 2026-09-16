@@ -20,6 +20,12 @@ describe("hook wiring", () => {
     expect(typeof hooks.event).toBe("function")
   })
 
+  it("setup() is a no-op unless the host passed a V2 plugin context", async () => {
+    expect(typeof plugin.setup).toBe("function")
+    await expect(plugin.setup({ client: {} } as any)).resolves.toBeUndefined()
+    await expect(plugin.setup(undefined as any)).resolves.toBeUndefined()
+  })
+
   it("finishes sub-session reseeding before exposing hooks", async () => {
     let resolveList!: (value: unknown) => void
     const listResult = new Promise((resolve) => {

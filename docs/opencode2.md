@@ -3,6 +3,8 @@
 This plugin runs on both hosts from a single package entry:
 
 - opencode 1.x reads `server()` (V1 hooks, `opencode.json` → `agent` map).
+  If 1.x also invokes `setup`, it is a no-op unless the argument is a V2
+  `Plugin.Context` (`session.hook` + `location.directory`).
 - opencode2 reads `id` + `setup()` (V2 context API, `src/v2/*` adapter).
 
 Install for opencode2:

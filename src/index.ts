@@ -52,7 +52,18 @@ function getStore(): MemoryStore {
  */
 type PluginSetup = (() => void | Promise<void>) | void
 
+function isV2PluginContext(ctx: unknown): boolean {
+  if (!ctx || typeof ctx !== "object") return false
+  const session = (ctx as { session?: { hook?: unknown } }).session
+  const directory = (ctx as { location?: { directory?: unknown } }).location?.directory
+  return typeof session?.hook === "function" && typeof directory === "string"
+}
+
 async function setupV2(ctx: unknown): Promise<PluginSetup> {
+  // OpenCode 1.x may still invoke a `setup` export if present. Running the
+  // V2 adapter there replaces the V1 client with the shim and breaks
+  // discovery/consolidation. Only a V2 Plugin.Context has session.hook.
+  if (!isV2PluginContext(ctx)) return
   const { setup } = await import("./v2/plugin.js")
   return (setup as (context: unknown) => Promise<PluginSetup> | PluginSetup)(ctx)
 }
