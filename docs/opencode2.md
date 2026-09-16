@@ -24,23 +24,24 @@ apply unchanged — option parsing is shared (`applyPluginOptions`).
 
 ## How it works
 
-The entire memory pipeline (extraction → consolidation → injection →
-citation feedback against the global `~/.local/share/opencode` workspace)
-runs byte-identical on both hosts. `src/v2/shim.ts` presents a V1-shaped
-client façade over the V2 plugin context, so `phase1/phase2/capture/llm`
-execute the same code paths. Only genuinely missing V2 surfaces are
-adapted; everything else is hook translation (`src/v2/plugin.ts`):
+The memory pipeline (extraction → consolidation → injection → citation
+feedback against the global `~/.local/share/opencode` workspace) runs the
+same V1 modules on both hosts. `src/v2/shim.ts` presents a V1-shaped client
+façade over the V2 plugin context, so `phase1/phase2/capture/llm` execute
+the same code paths. Missing V2 surfaces are adapted in `src/v2/*`; a few
+shared files also gained dual-format parsers (citation XML + fence). Hook
+translation (`src/v2/plugin.ts`):
 
 | V1 | V2 |
 | --- | --- |
 | `config` hook agent injection | `agent.transform` ensure (update creates) |
 | returned `tool` map | `tool.transform` (same `tools/*` logic via adapter) |
 | `chat.message` pump | `prompt` hook |
-| `system.transform` injection | `context` hook (`system.push({type:"text",…})`) |
-| `text.complete` + `messages.transform` citations | `session.text.ended` durable accounting + `context` reconciliation/strip |
+| `system.transform` injection | `context` hook (`system.push({type:"text",…})`) with a V2-only fenced citation overlay |
+| `text.complete` + `messages.transform` citations | `session.text.ended` durable accounting + `context`/`compaction`/`generate` strip |
 | `tool.execute.before` pollution | `tool.execute.before` (same hook name) |
 | `session.status idle` / `session.idle` pump | `session.execution.succeeded` event |
-| `session.deleted` cleanup | public `session.remove` with liveness fallback |
+| `session.deleted` cleanup | `session.deleted` event → same `handleSessionDeleted` as V1; helpers via public `session.remove` |
 | `experimental/session` global discovery | authenticated public `session.list` with cursor pagination |
 | V1 `session.messages` | authenticated public `message.list` (full persisted history) |
 
@@ -66,14 +67,18 @@ adapted; everything else is hook translation (`src/v2/plugin.ts`):
   hook because it contains the completed text after durable commit. A SQLite
   reconciliation table deduplicates `(assistant message, cited session)`
   pairs across duplicate events, context calls, and process restarts. The
-  context hook strips citation markup before the next model call; retained
-  markup in persisted history is harmless and can be rendered by the TUI.
+  `context`, `compaction`, and `generate` hooks strip citation markup before
+  the next model call; retained markup in persisted history is harmless and
+  can be rendered by the TUI. V1 still instructs XML citations; V2 overlays
+  the fenced form used by the sidebar renderer.
 - **Config and models are explicit.** V2 adapts public config documents for
   the shared resolver. V2 configs do not provide V1's `small_model` field;
   unset `extract_model` uses the session default, while
   `consolidation_model` uses the configured `model` when present. Set both
-  plugin options explicitly for deterministic routing. Cancellation is
-  verified through request signals plus interrupt-and-wait cleanup.
+  plugin options explicitly for deterministic routing. Cancellation races
+  the host `AbortSignal` (V2 request-option signals are not assumed to
+  cancel) and then interrupt-and-wait; helper delete succeeds only after
+  `session.remove` or a confirmed 404.
 - **Both agents ship; only `memorize` works.** Extraction runs sessionless
   through `generate.text`, so `memorize-extract` is provisioned hidden and
   unused (V1 likewise skips injecting unused agents).

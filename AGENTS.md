@@ -53,18 +53,18 @@ via the drift script before proposing structural changes.
   first, followed only by the built-in opencode file tools it requires. Never
   allow shell, network, task delegation, IDE, or MCP tools; that is the sandbox
   (D2), and `tests/agents.test.ts` enforces it.
-- opencode2 support lives in `src/v2/` and reuses the V1 pipeline unchanged
-  via a V1-client shim (`src/v2/shim.ts`); see `docs/opencode2.md` for the
+- opencode2 support lives in `src/v2/` and reuses the V1 pipeline via a
+  V1-client shim (`src/v2/shim.ts`); see `docs/opencode2.md` for the
   deliberate V2 adaptations. Rules: never edit V1 behavior for V2 needs (adapt
-  in `src/v2/`), the `agents` map in `opencode.json` follows the same
-  allowlist rule as `agent` (V2 action names: `edit` covers write/patch;
-  `tests/v2-agents.test.ts` enforces it), and `bun run contract:v2` must pass
-  alongside `bun run contract`. The `./tui` entry (`src/v2/tui.tsx`, RPC in
-  `src/v2/status-rpc.ts`) adds the sidebar section: `setup()` must only claim
-  slots (Solid-scoped APIs like `keymap.layer` belong in slot components),
-  the TUI bundle may import only `@opencode/plugin/tui` + `solid-js` +
-  `@opentui/solid`, and `bun run build` compiles the JSX via
-  `scripts/build-tui.ts`.
+  in `src/v2/`); `opencode.json` stays the V1 `agent` bundle (same D2
+  allowlist; V2 agents are provisioned at runtime; V2 action names: `edit`
+  covers write/patch; `tests/v2-agents.test.ts` enforces it); `bun run
+  contract:v2` must pass alongside `bun run contract`. The `./tui` entry
+  (`src/v2/tui.tsx`, RPC in `src/v2/status-rpc.ts`) adds the sidebar section:
+  `setup()` must only claim slots (Solid-scoped APIs like `keymap.layer`
+  belong in slot components), the TUI bundle may import only
+  `@opencode/plugin/tui` + `solid-js` + `@opentui/solid`, and `bun run build`
+  compiles the JSX via `scripts/build-tui.ts`.
 
 ## Packaging & releases
 
