@@ -19,7 +19,7 @@ import os from "os"
 import path from "path"
 import { $ } from "bun"
 
-const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.0"
+const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.3"
 
 let failed = 0
 function log(kind: string, msg: string): void {

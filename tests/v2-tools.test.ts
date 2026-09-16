@@ -52,7 +52,8 @@ describe("adapted tool execution", () => {
   it("memory_read returns content through the V2 shape", async () => {
     fs.writeFileSync(path.join(TEST_ROOT, "memories", "READ.md"), "# hi\n")
     const def = buildV2Tools().find((t) => t.name === "memory_read")!
-    const res = await def.execute({ path: "READ.md" }, TCTX)
+    const abort = new AbortController().signal
+    const res = await def.execute({ path: "READ.md" }, { ...TCTX, abort })
     expect(res.content).toContain("# hi")
   })
 

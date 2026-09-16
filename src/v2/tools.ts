@@ -24,7 +24,7 @@ interface V2ToolDefinition {
   name: string
   description: string
   input: z.ZodTypeAny
-  execute: (input: any, ctx: { sessionID: string; messageID: string; agent: string }) => Promise<{ content: string | unknown[]; metadata?: unknown }>
+  execute: (input: any, ctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal }) => Promise<{ content: string | unknown[]; metadata?: unknown }>
 }
 
 function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
@@ -32,17 +32,14 @@ function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
     name,
     description: v1.description,
     input: z.object(v1.args),
-    async execute(input: any, tctx: { sessionID: string; messageID: string; agent: string }) {
-      // V1 execute ctx ({sessionID, messageID, agent, directory, worktree,
-      // abort, metadata(), ask()}). Only sessionID is consumed (add_note,
-      // memory_mode); the rest is a faithful shim.
+    async execute(input: any, tctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal }) {
       const v1ctx = {
         sessionID: tctx.sessionID,
         messageID: tctx.messageID,
         agent: tctx.agent,
         directory: "",
         worktree: "",
-        abort: new AbortController().signal,
+        abort: tctx.abort instanceof AbortSignal ? tctx.abort : new AbortController().signal,
         metadata: () => {},
         ask: async () => {},
       }

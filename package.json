@@ -64,12 +64,12 @@
     "@opencode-ai/plugin": "^1.18.0",
     "diff": "^9.0.0",
     "isomorphic-git": "^1.38.6",
-    "xdg-basedir": "^5.1.0",
-    "zod": "4.1.8"
+    "xdg-basedir": "^5.1.0"
   },
   "devDependencies": {
     "@opencode/client": "2.0.3",
     "@opencode/plugin": "2.0.3",
+    "zod": "4.1.8",
     "@opencode/theme": "2.0.3",
     "@opentui/core": "0.5.10",
     "@opentui/solid": "0.5.10",
@@ -78,18 +78,20 @@
     "@types/bun": "^1.1.0"
   },
   "peerDependencies": {
-    "@opencode/client": ">=2.0.0",
-    "@opencode/plugin": ">=2.0.0",
+    "@opencode/client": ">=2.0.3",
+    "@opencode/plugin": ">=2.0.3",
     "@opentui/core": ">=0.5.10",
     "@opentui/solid": ">=0.5.10",
-    "solid-js": ">=1.9.0"
+    "solid-js": ">=1.9.0",
+    "zod": ">=4"
   },
   "peerDependenciesMeta": {
     "@opencode/client": { "optional": true },
     "@opencode/plugin": { "optional": true },
     "@opentui/core": { "optional": true },
     "@opentui/solid": { "optional": true },
-    "solid-js": { "optional": true }
+    "solid-js": { "optional": true },
+    "zod": { "optional": true }
   },
   "engines": {
     "bun": ">=1.1.0"

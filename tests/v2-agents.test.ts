@@ -109,6 +109,21 @@ describe("ensureV2Agents", () => {
     expect(getAgentHealth().agents["memorize-extract"]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
   })
 
+  it("patches a shipped memorize that is missing the memory-root grant", async () => {
+    const incomplete = {
+      id: "memorize",
+      mode: "subagent",
+      description: "Memory consolidation agent (opencode-codex-memory)",
+      system: MEMORIZE_SYSTEM,
+      permissions: [{ action: "*", resource: "*", effect: "deny" }],
+    }
+    const f = fakeAgentCtx({ memorize: incomplete })
+    await ensureV2Agents(f.ctx as any)
+    expect(f.updates.map((u) => u.id)).toContain("memorize")
+    const applied = f.updates.find((u) => u.id === "memorize")!.applied as { permissions?: { action?: string }[] }
+    expect(applied.permissions?.some((r) => r.action === "external_directory")).toBe(true)
+  })
+
   it("leaves a user-defined memorize untouched and records override health", async () => {
     const userDef = { id: "memorize", mode: "subagent", system: "custom", permissions: [{ action: "*", resource: "*", effect: "allow" }] }
     const f = fakeAgentCtx({ memorize: userDef })

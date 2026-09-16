@@ -149,13 +149,16 @@ export async function ensureV2Agents(ctx: {
       existing = null
     }
     if (existing && typeof existing === "object") {
-      // Present (ours or a user override): never overwrite, just record health.
       const cur = existing as Record<string, unknown>
-      effective[id] = {
-        mode: cur.mode,
-        prompt: cur.system,
-        description: cur.description,
-        permission: v2PermissionsToV1Map(cur.permissions),
+      if (isShippedIncomplete(id, cur, def)) {
+        missing.push([id, def])
+      } else {
+        effective[id] = {
+          mode: cur.mode,
+          prompt: cur.system,
+          description: cur.description,
+          permission: v2PermissionsToV1Map(cur.permissions),
+        }
       }
     } else {
       missing.push([id, def])
@@ -178,6 +181,20 @@ export async function ensureV2Agents(ctx: {
     }
   }
   recordAgentConfig({ agent: effective }, true, shippedV1AgentForHealth())
+}
+
+function isShippedIncomplete(id: string, existing: Record<string, unknown>, shipped: V2AgentDefinition): boolean {
+  const system = typeof existing.system === "string"
+    ? existing.system
+    : typeof existing.prompt === "string"
+      ? existing.prompt
+      : ""
+  if (system !== shipped.system) return false
+  if (typeof existing.description === "string" && existing.description !== shipped.description) return false
+  if (id !== MEMORIZE_AGENT_ID) return false
+  const perms = existing.permissions
+  if (!Array.isArray(perms)) return true
+  return !perms.some((rule) => rule && typeof rule === "object" && (rule as { action?: unknown }).action === "external_directory")
 }
 
 function v2PermissionsToV1Map(permissions: unknown): Record<string, unknown> {
