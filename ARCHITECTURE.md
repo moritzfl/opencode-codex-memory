@@ -88,7 +88,7 @@ Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `lifecycle`, `options`, `diagnostics`, `agent-health`) plus external-agent exchange
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
 model-facing tools (`memory.ts`, `control.ts`). OpenCode2 host adapter lives in
-`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped; see
+`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. User-facing notes:
 `docs/opencode2.md`. Per-file upstream provenance lives in `codex-map.yaml`.
 
 ---
@@ -163,7 +163,6 @@ differs by host:
   active plugin location (`setSubSessionDirectory`). Session boundary is the
   project; memory-root scoping is permission-only (`read`/`edit`/`glob`/`grep`
   + `external_directory` under the memory workspace, everything else denied).
-  See `docs/opencode2.md`.
 
 Either way the consolidator is memory-root-scoped without Seatbelt — residual
 is still tool-permission-level (not process-level), not "can edit the
