@@ -118,7 +118,10 @@ describe("v2 setup", () => {
       exports?: Record<string, { import?: string }>
     }
     expect(pkg.dependencies?.["@opencode/plugin"]).toBeUndefined()
-    expect(pkg.peerDependencies?.["@opencode/plugin"]).toBe(">=2.0.0")
+    expect(pkg.peerDependencies?.["@opencode/plugin"]).toBe(">=2.0.3")
+    expect(pkg.dependencies?.zod).toBeUndefined()
+    expect(pkg.peerDependencies?.zod).toBe(">=4")
+    expect(pkg.peerDependenciesMeta?.zod?.optional).toBe(true)
     expect(pkg.peerDependenciesMeta?.["@opencode/plugin"]?.optional).toBe(true)
     expect(pkg.exports?.["."]?.import).toBe("./dist/src/index.js")
     expect(pkg.exports?.["./v2"]?.import).toBe("./dist/src/v2/index.js")
@@ -231,7 +234,8 @@ describe("v2 setup", () => {
     expect(f.added.map((t) => t.name).sort()).toEqual(
       ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_reset", "memory_search"].sort(),
     )
-    expect(Object.keys(f.hooks).sort()).toEqual(["context", "execute.before", "prompt"])
+    expect(Object.keys(f.hooks).sort()).toEqual(["compaction", "context", "execute.before", "generate", "prompt"])
+    expect(f.hooks.title).toBeUndefined()
     expect(f.agentUpdates).toEqual([])
     await (cleanup as () => unknown)?.()
     await waitForV2BackgroundTasks()
@@ -254,6 +258,8 @@ describe("v2 setup", () => {
     expect(ev.system).toHaveLength(1)
     expect(ev.system[0].type).toBe("text")
     expect(ev.system[0].text).toContain("v2 memory")
+    expect(ev.system[0].text).toContain("```memory-citation")
+    expect(ev.system[0].text).not.toContain("<citation_entries>")
   })
 
   it("context hook strips citations from assistant parts", async () => {
@@ -273,6 +279,35 @@ describe("v2 setup", () => {
     await f.hooks.context[0](ev)
     expect(ev.messages[0].content[0].text).toBe("x")
     expect(ev.messages[0].content[0].text).not.toContain("memory-citation")
+  })
+
+  it("compaction hook strips citations without injecting memory", async () => {
+    fs.writeFileSync(path.join(TEST_ROOT, "memories", "memory_summary.md"), "- v2 memory [[ses_x]]\n")
+    const f = fakeCtx()
+    await setup(f.ctx)
+    const ev: any = {
+      sessionID: "ses_x",
+      system: [],
+      messages: [
+        {
+          id: "m1",
+          type: "assistant",
+          content: [{ type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" }],
+        },
+      ],
+    }
+    await f.hooks.compaction[0](ev)
+    expect(ev.messages[0].content[0].text).toBe("x")
+    expect(ev.system).toEqual([])
+  })
+
+  it("session.deleted drops extracted memory like V1", async () => {
+    const store = new MemoryStore()
+    store.upsertStage1Output({ session_id: "ses_gone_user", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    const f = fakeCtx({}, [{ type: "session.deleted", data: { info: { id: "ses_gone_user" } } }])
+    await setup(f.ctx)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(new MemoryStore().stage1Outputs().some((row) => row.session_id === "ses_gone_user")).toBe(false)
   })
 
   it("accounts citations from durable text.ended events and reconciles later context", async () => {

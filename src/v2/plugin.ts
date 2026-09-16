@@ -35,7 +35,7 @@ import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from 
 import { hostMcpStatus } from "../host-client.js"
 import { recordDiagnostic } from "../diagnostics.js"
 import { resetAgentHealth } from "../agent-health.js"
-import { applyPluginOptions } from "../index.js"
+import { applyPluginOptions, handleSessionDeleted } from "../index.js"
 import {
   setV2Context,
   buildV1ClientShim,
@@ -46,6 +46,7 @@ import { buildV2Tools } from "./tools.js"
 import { MemoryStatusRpc } from "./status-rpc.js"
 import { readMemoryStatus } from "./status.js"
 import { recordInjection, resetInjectionStats } from "./injection.js"
+import { overlayV2CitationInstructions } from "./citation-overlay.js"
 import { estimateTokens } from "../token.js"
 
 let phase1InFlight = false
@@ -89,6 +90,29 @@ function recordV2Citations(sessionId: string, assistantMessageId: string, text: 
   if (!hasCitationMarkup(text)) return
   const ids = extractCitedSessionIds(text)
   if (ids.length > 0) getStore().recordUsageOnce(sessionId, assistantMessageId, ids)
+}
+
+function stripAndReconcileCitations(sessionId: string, messages: any[] | undefined): void {
+  for (const [i, msg] of (messages ?? []).entries()) {
+    if (msg?.type !== "assistant" || !Array.isArray(msg.content)) continue
+    for (const part of msg.content) {
+      if (part?.type !== "text" || typeof part.text !== "string") continue
+      if (!hasCitationMarkup(part.text)) continue
+      try {
+        recordV2Citations(sessionId, String(msg.id ?? `context-part-${i}`), part.text)
+      } catch (e) {
+        console.error("[opencode-codex-memory] citation recording failed:", e)
+      }
+      part.text = stripCitations(part.text)
+    }
+  }
+}
+
+function sessionIdFromV2Event(data: Record<string, any>): string {
+  if (typeof data.sessionID === "string") return data.sessionID
+  if (typeof data.info?.id === "string") return data.info.id
+  if (typeof data.id === "string") return data.id
+  return ""
 }
 
 function lruSet<K, V>(map: Map<K, V>, key: K, value: V, max: number): V {
@@ -316,42 +340,46 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     }
   })
 
+  const handleModelBoundSession = (ev: any, inject: boolean): void => {
+    const sid = ev?.sessionID
+    if (!sid || isMemorySubSession(sid)) return
+    try {
+      stripAndReconcileCitations(sid, ev.messages)
+    } catch (e) {
+      console.error("[opencode-codex-memory] v2 citation handling failed:", e)
+    }
+    if (!inject || !pluginOptions.use_memories) return
+    ensureMemoryLayout()
+    const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+    if (!memoryPrompt) return
+    const text = overlayV2CitationInstructions(memoryPrompt)
+    if (!Array.isArray(ev.system)) ev.system = []
+    ev.system.push({ type: "text", text })
+    recordInjection(sid, estimateTokens(text))
+    notifyStatusChanged()
+  }
+
   await ctx.session.hook("context", (ev: any) => {
     try {
-      const sid = ev?.sessionID
-      if (!sid || isMemorySubSession(sid)) return
-      // Citation feedback (write path): reconcile against the durable
-      // session.text.ended accounting and strip the block from the
-      // model-bound transcript. V2 has no pre-persist hook, so this is also
-      // the recovery path when the durable event was missed during restart.
-      try {
-        for (const [i, msg] of (ev.messages ?? []).entries()) {
-          if (msg?.type !== "assistant" || !Array.isArray(msg.content)) continue
-          for (const part of msg.content) {
-            if (part?.type !== "text" || typeof part.text !== "string") continue
-            if (!hasCitationMarkup(part.text)) continue
-            try {
-              recordV2Citations(sid, String(msg.id ?? `context-part-${i}`), part.text)
-            } catch (e) {
-              console.error("[opencode-codex-memory] citation recording failed:", e)
-            }
-            part.text = stripCitations(part.text)
-          }
-        }
-      } catch (e) {
-        console.error("[opencode-codex-memory] v2 citation handling failed:", e)
-      }
-      // Read path: inject the memory summary block.
-      if (!pluginOptions.use_memories) return
-      ensureMemoryLayout()
-      const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
-      if (memoryPrompt) {
-        ev.system.push({ type: "text", text: memoryPrompt })
-        recordInjection(sid, estimateTokens(memoryPrompt))
-        notifyStatusChanged()
-      }
+      handleModelBoundSession(ev, true)
     } catch (err) {
       console.error("[opencode-codex-memory] v2 context hook error:", err)
+    }
+  })
+
+  await ctx.session.hook("compaction", (ev: any) => {
+    try {
+      handleModelBoundSession(ev, false)
+    } catch (err) {
+      console.error("[opencode-codex-memory] v2 compaction hook error:", err)
+    }
+  })
+
+  await ctx.session.hook("generate", (ev: any) => {
+    try {
+      handleModelBoundSession(ev, false)
+    } catch (err) {
+      console.error("[opencode-codex-memory] v2 generate hook error:", err)
     }
   })
 
@@ -386,9 +414,21 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
               }
             }
             if (e.type === "session.execution.succeeded" || e.type === "session.execution.ended") {
-              const sid = typeof data.sessionID === "string" ? data.sessionID : ""
+              const sid = sessionIdFromV2Event(data)
               if (sid && !isMemorySubSession(sid)) {
                 trackBackgroundTask(triggerPhase1(sid))
+              }
+            }
+            if (e.type === "session.deleted") {
+              const sid = sessionIdFromV2Event(data)
+              if (sid) {
+                try {
+                  handleSessionDeleted(sid, getStore(), () => {
+                    if (pluginOptions.generate_memories) trackBackgroundTask(triggerPhase2().then(() => {}))
+                  })
+                } catch (err) {
+                  console.error("[opencode-codex-memory] v2 session.deleted handling failed:", err)
+                }
               }
             }
           } catch (err) {
