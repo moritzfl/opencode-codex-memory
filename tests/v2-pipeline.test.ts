@@ -10,7 +10,8 @@ import { DEFAULT_PHASE2_OPTIONS, runPhase2 } from "../src/phase2.js"
 import { resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
 import { MemoryStore } from "../src/store.js"
-import { setV2Context, buildV1ClientShim, recordSessionSighting, clearSessionRegistryForTest } from "../src/v2/shim.js"
+import { setV2Context, buildV1ClientShim, resetV2ShimStateForTest } from "../src/v2/shim.js"
+import { setV2ServiceDependenciesForTest } from "../src/v2/service.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2pipeline-${process.pid}-${Date.now()}`)
 const SESSION_ID = "ses_v2pipeline"
@@ -19,7 +20,7 @@ beforeEach(() => {
   closeDb()
   resetPluginLifecycle()
   resetDiscoveryCacheForTest()
-  clearSessionRegistryForTest()
+  resetV2ShimStateForTest()
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
@@ -28,7 +29,8 @@ afterEach(() => {
   closeDb()
   resetPluginLifecycle()
   resetDiscoveryCacheForTest()
-  clearSessionRegistryForTest()
+  resetV2ShimStateForTest()
+  setV2ServiceDependenciesForTest(null)
   setV2Context(null)
   setPluginInput({ client: undefined } as any)
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
@@ -42,6 +44,7 @@ describe("v2 fake-context write pipeline", () => {
     const switched: { agent?: string; model?: unknown }[] = []
     const generated: unknown[] = []
     const interrupted: string[] = []
+    const removed: string[] = []
     const memoryDir = path.join(TEST_ROOT, "memories")
 
     const ctx: any = {
@@ -103,7 +106,25 @@ describe("v2 fake-context write pipeline", () => {
     }
     setV2Context(ctx)
     setPluginInput({ client: buildV1ClientShim() } as any)
-    recordSessionSighting(SESSION_ID, { title: "pipe", directory: "/project", updated: updatedAt })
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({
+        health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) },
+        session: {
+          list: async () => ({
+            data: [{ id: SESSION_ID, title: "pipe", directory: "/project", parentID: null, time: { created: 1, updated: updatedAt } }],
+            cursor: { next: null },
+          }),
+          create: async () => ({ id: "unused" }),
+          get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, parentID: null }),
+          remove: async ({ sessionID }: { sessionID: string }) => { removed.push(sessionID) },
+          interrupt: async () => {},
+        },
+        message: {
+          list: async () => ({ data: await ctx.session.context({ sessionID: SESSION_ID }) }),
+        },
+      }),
+    })
 
     const store = new MemoryStore()
     await runPhase1(store, {
@@ -135,8 +156,9 @@ describe("v2 fake-context write pipeline", () => {
     expect(created).toEqual(["sub-consolidate"])
     expect(switched).toContainEqual({ agent: "memorize" })
     expect(switched).toContainEqual({ model: { providerID: "test", id: "consolidator", variant: "medium" } })
-    // Helper turn was stopped and released after the run.
-    expect(interrupted).toContain("sub-consolidate")
+    // The public service owns helper shutdown and deletion.
+    expect(removed).toContain("sub-consolidate")
+    expect(interrupted).toEqual([])
 
     const prompt = buildMemorySystemPrompt(true)
     expect(prompt).toContain("CSV parser uses strict typed rows.")

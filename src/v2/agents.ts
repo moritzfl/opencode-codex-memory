@@ -3,7 +3,9 @@
  *
  * V1 ships memorize/memorize-extract via the config hook (opencode.json
  * `agent` map). V2 has no config hook, but agent.transform's update() creates
- * a missing agent, so setup() ensures them here instead.
+ * a missing agent in the active plugin location, so setup() ensures them here
+ * instead. Helper sessions must run in that same location because V2 agent
+ * registration is location-scoped.
  *
  * Both agents ship for parity, with the V1 prompts verbatim. `memorize` does
  * consolidation work; `memorize-extract` is hidden and unused — extraction
@@ -43,10 +45,10 @@ export function buildMemorizeAgent(): V2AgentDefinition {  return {
     system: MEMORIZE_SYSTEM,
     permissions: [
       { action: "*", resource: "*", effect: "deny" },
-      { action: "read", resource: "*", effect: "allow" },
-      { action: "edit", resource: "*", effect: "allow" },
-      { action: "glob", resource: "*", effect: "allow" },
-      { action: "grep", resource: "*", effect: "allow" },
+      { action: "read", resource: path.join(memoryRoot(), "*"), effect: "allow" },
+      { action: "edit", resource: path.join(memoryRoot(), "*"), effect: "allow" },
+      { action: "glob", resource: path.join(memoryRoot(), "*"), effect: "allow" },
+      { action: "grep", resource: path.join(memoryRoot(), "*"), effect: "allow" },
       // Memories live outside every project: without this grant the wildcard
       // deny blocks consolidation from touching the memory workspace (same
       // role as external_directory in the V1 definition).
@@ -152,6 +154,7 @@ export async function ensureV2Agents(ctx: {
       effective[id] = {
         mode: cur.mode,
         prompt: cur.system,
+        description: cur.description,
         permission: v2PermissionsToV1Map(cur.permissions),
       }
     } else {
@@ -192,7 +195,12 @@ function v2PermissionsToV1Map(permissions: unknown): Record<string, unknown> {
       out.external_directory = cur
       continue
     }
-    out[rule.action] = rule.effect
+    if (rule.action === "edit") {
+      out.edit = rule.effect
+      out.write = rule.effect
+    } else {
+      out[rule.action] = rule.effect
+    }
   }
   return out
 }

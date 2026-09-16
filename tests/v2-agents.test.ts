@@ -1,13 +1,15 @@
 import { describe, it, expect, afterEach } from "bun:test"
-import fs from "fs"
 import path from "path"
 import { buildMemorizeAgent, buildMemorizeExtractAgent, ensureV2Agents, toV1AgentDefinition, MEMORIZE_SYSTEM, MEMORIZE_EXTRACT_SYSTEM } from "../src/v2/agents.js"
+import { memoryRoot } from "../src/paths.js"
 import { getAgentHealth, resetAgentHealth } from "../src/agent-health.js"
 import { resetPluginOptions } from "../src/options.js"
 import { applyPluginOptions } from "../src/index.js"
 
-const OPENCODE_JSON = path.join(import.meta.dirname, "..", "opencode.json")
-const SHIPPED_V2 = (JSON.parse(fs.readFileSync(OPENCODE_JSON, "utf8")).agents ?? {}) as Record<string, any>
+const SHIPPED_V2 = {
+  memorize: buildMemorizeAgent(),
+  "memorize-extract": buildMemorizeExtractAgent(),
+}
 const ALLOWED_V2_ACTIONS = new Set(["read", "edit", "glob", "grep", "external_directory"])
 
 function fakeAgentCtx(existing: Record<string, any> = {}) {
@@ -46,7 +48,7 @@ afterEach(() => {
   resetPluginOptions()
 })
 
-describe("v2 agent definitions (opencode.json agents)", () => {
+describe("v2 agent definitions", () => {
   it("ships both agents in V2 form (extract is hidden: extraction uses generate.text)", () => {
     expect(Object.keys(SHIPPED_V2).sort()).toEqual(["memorize", "memorize-extract"])
     expect(SHIPPED_V2["memorize-extract"].hidden).toBe(true)
@@ -63,6 +65,9 @@ describe("v2 agent definitions (opencode.json agents)", () => {
     for (const rule of rules) {
       if (rule.effect === "allow") {
         expect(ALLOWED_V2_ACTIONS.has(rule.action), `unexpected allowed action ${rule.action}`).toBe(true)
+        if (rule.action !== "external_directory") {
+          expect(rule.resource).toBe(path.join(memoryRoot(), "*"))
+        }
       }
     }
     const allows = new Set(rules.filter((r) => r.effect === "allow").map((r) => r.action))
@@ -76,7 +81,6 @@ describe("v2 agent definitions (opencode.json agents)", () => {
   })
 
   it("built memorize agent adds the memory-root external_directory grant", () => {
-    const { memoryRoot } = require("../src/paths.js")
     const def = buildMemorizeAgent()
     expect(def.system).toBe(SHIPPED_V2.memorize.system)
     const grant = def.permissions.find((r) => r.action === "external_directory")

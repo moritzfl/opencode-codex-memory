@@ -9,6 +9,10 @@
       "import": "./dist/src/index.js",
       "types": "./dist/src/index.d.ts"
     },
+    "./server": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+    },
     "./v2": {
       "import": "./dist/src/v2/index.js",
       "types": "./dist/src/v2/index.d.ts"
@@ -58,14 +62,15 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.0",
-    "@opencode/plugin": "0.0.0-beta-19296",
     "diff": "^9.0.0",
     "isomorphic-git": "^1.38.6",
     "xdg-basedir": "^5.1.0",
     "zod": "4.1.8"
   },
   "devDependencies": {
-    "@opencode/theme": "0.0.0-beta-19296",
+    "@opencode/client": "2.0.3",
+    "@opencode/plugin": "2.0.3",
+    "@opencode/theme": "2.0.3",
     "@opentui/core": "0.5.10",
     "@opentui/solid": "0.5.10",
     "solid-js": "1.9.15",
@@ -73,11 +78,15 @@
     "@types/bun": "^1.1.0"
   },
   "peerDependencies": {
+    "@opencode/client": ">=2.0.0",
+    "@opencode/plugin": ">=2.0.0",
     "@opentui/core": ">=0.5.10",
     "@opentui/solid": ">=0.5.10",
     "solid-js": ">=1.9.0"
   },
   "peerDependenciesMeta": {
+    "@opencode/client": { "optional": true },
+    "@opencode/plugin": { "optional": true },
     "@opentui/core": { "optional": true },
     "@opentui/solid": { "optional": true },
     "solid-js": { "optional": true }

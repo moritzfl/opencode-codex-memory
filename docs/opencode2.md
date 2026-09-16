@@ -37,30 +37,43 @@ adapted; everything else is hook translation (`src/v2/plugin.ts`):
 | returned `tool` map | `tool.transform` (same `tools/*` logic via adapter) |
 | `chat.message` pump | `prompt` hook |
 | `system.transform` injection | `context` hook (`system.push({type:"text",…})`) |
-| `text.complete` + `messages.transform` citations | `context` hook record + strip |
+| `text.complete` + `messages.transform` citations | `session.text.ended` durable accounting + `context` reconciliation/strip |
 | `tool.execute.before` pollution | `tool.execute.before` (same hook name) |
 | `session.status idle` / `session.idle` pump | `session.execution.succeeded` event |
-| `session.deleted` cleanup | liveness (`session.get` → NotFound) in phase 2 |
-| `experimental/session` global discovery | process-local session registry |
+| `session.deleted` cleanup | public `session.remove` with liveness fallback |
+| `experimental/session` global discovery | authenticated public `session.list` with cursor pagination |
+| V1 `session.messages` | authenticated public `message.list` (full persisted history) |
 
 ## Deliberate V2 differences
 
-- **No session deletion.** V2 has no remove API. Helper sessions are
-  interrupted and released; their rows remain as inert, clearly titled
-  (`codex-memory-*`) history. Extraction uses `generate.text` and creates
-  no session at all.
-- **Registry-based discovery.** `ctx` exposes no session list and raw HTTP
-  is unauthenticated from plugins, so discovery reads sessions observed via
-  `session.created` + the prompt hook (with `parentID` backfill to keep
-  excluding subagent children). A cold boot sees sessions from admission
-  on; prior extraction rows still drive consolidation.
-- **Citations stripped from model context only.** V2 has no pre-persist
-  hook, so `<memory-citation>` markup stays in stored history (visible in
-  the UI) while the context hook removes it before every model call.
-  Usage counts are exact within a process (per-message dedupe).
-- **No `small_model`/`model` config defaults.** V2 exposes no config API
-  to plugins, so unset `extract_model`/`consolidation_model` fall back to
-  the session default. Set them explicitly to mirror V1 model routing.
+- **Registered service is required for global reads.** V2 discovers the
+  local service with `Service.discover()`, preserves its auth headers, and
+  accepts it only when `/health` reports the plugin host's own PID. It never
+  starts a service with `Service.ensure()`. If no matching service is
+  registered, global discovery reports a clear unavailable error.
+- **Global discovery is complete.** The adapter follows public
+  `session.list` cursors and uses public `message.list` for full persisted
+  history. Helper sessions are excluded by durable metadata and the cleanup
+  sweep reclaims them after a restart; `session.context` is not used for
+  transcript capture.
+- **Agents are location-scoped.** V2 provisions the agents in the active
+  plugin location and creates helper sessions in that same location. The
+  consolidation agent's read/edit/search/glob permissions are allowlisted
+  only under the memory workspace; all other actions remain denied. A global
+  OpenCode plugin install therefore provisions the agents as each active
+  location loads the plugin.
+- **Citations are accounted durably.** `session.text.ended` is the primary
+  hook because it contains the completed text after durable commit. A SQLite
+  reconciliation table deduplicates `(assistant message, cited session)`
+  pairs across duplicate events, context calls, and process restarts. The
+  context hook strips citation markup before the next model call; retained
+  markup in persisted history is harmless and can be rendered by the TUI.
+- **Config and models are explicit.** V2 adapts public config documents for
+  the shared resolver. V2 configs do not provide V1's `small_model` field;
+  unset `extract_model` uses the session default, while
+  `consolidation_model` uses the configured `model` when present. Set both
+  plugin options explicitly for deterministic routing. Cancellation is
+  verified through request signals plus interrupt-and-wait cleanup.
 - **Both agents ship; only `memorize` works.** Extraction runs sessionless
   through `generate.text`, so `memorize-extract` is provisioned hidden and
   unused (V1 likewise skips injecting unused agents).
@@ -79,7 +92,8 @@ read/write settings, import status, retry eligibility, and warnings.
 - **Last success** is shown only when the latest recorded consolidation attempt
   succeeded; `—` means no clean success timestamp is available for that attempt.
 - TUI dependencies are optional peers supplied by OpenCode2; V1 loads only the
-  server entry. The build compiles Solid JSX and ships the result under `dist/`.
+  `./server` entry and does not import V2 runtime dependencies. The build
+  compiles Solid JSX and ships the result under `dist/`.
 - TUI rules learned the hard way: `setup()` must only claim slots —
   `keymap.layer` throws outside a Solid component scope, so it lives in an
   `app`-slot component; never render `<Show>` (or any conditional) with element

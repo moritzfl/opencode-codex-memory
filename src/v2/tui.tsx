@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin/tui"
-import { createSignal, onCleanup } from "solid-js"
+import { BoxRenderable, TextRenderable, TextAttributes, type Renderable } from "@opentui/core"
+import { createSignal, onCleanup, For } from "solid-js"
 import { MemoryStatusRpc, isMemoryStatus, type MemoryStatus } from "./status-rpc.js"
+import { CITATION_FENCE_LANG, parseCitationBody } from "../citation.js"
 
 const labels: Record<MemoryStatus["activity"], string> = {
   idle: "Idle",
@@ -61,9 +63,15 @@ function themeColor(theme: unknown, ...paths: readonly (readonly string[])[]): a
   return undefined
 }
 
-async function fetchStatus(rpc: RpcClient, context: TuiContext): Promise<MemoryStatus> {
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+async function fetchStatus(rpc: RpcClient, context: TuiContext, sessionID?: string): Promise<MemoryStatus> {
   const result = await rpc.status(
-    {},
+    sessionID ? { sessionID } : {},
     {
       location: context.location ?? context.data.location.default(),
       signal: AbortSignal.timeout(5_000),
@@ -74,82 +82,374 @@ async function fetchStatus(rpc: RpcClient, context: TuiContext): Promise<MemoryS
   return result
 }
 
-function formatDetails(current: MemoryStatus): string {
+type Row = { label: string; value: string; tone?: "ok" | "warn" | "muted" }
+
+function statusRows(s: MemoryStatus, now: number): Row[] {
   return [
-    `Status: ${labels[current.activity]}`,
-    "Scope: Global",
-    `Use memories: ${current.useMemories ? "Enabled" : "Disabled"}`,
-    `Generate memories: ${current.generateMemories ? "Enabled" : "Disabled"}`,
-    `Extraction: ${current.extractModel ?? "Host default"}`,
-    `Consolidation: ${current.consolidationModel ?? "Host default"}`,
-    `Codex import: ${current.codexImport ? "Enabled" : "Disabled"}`,
-    `Last successful consolidation: ${current.lastSuccessAt == null ? "Not recorded for the latest attempt" : new Date(current.lastSuccessAt).toLocaleString()}`,
-    ...(current.retryAt == null ? [] : [`Retry eligible: ${new Date(current.retryAt).toLocaleString()}`]),
-    ...current.warnings,
-    "",
-    "Use memory_inspect for full diagnostics.",
-  ].join("\n")
+    { label: "Activity", value: labels[s.activity] },
+    { label: "Read memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
+    { label: "Write memories", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },
+    ...(s.sessionMode
+      ? [
+          {
+            label: "This session",
+            value: s.sessionMode === "enabled" ? "Learning" : s.sessionMode === "disabled" ? "Not learning" : "Excluded (external context)",
+            tone: (s.sessionMode === "enabled" ? "ok" : "muted") as Row["tone"],
+          },
+        ]
+      : []),
+    { label: "Last consolidated", value: s.lastSuccessAt == null ? "Never" : elapsed(s.lastSuccessAt, now) },
+    ...(s.retryAt == null ? [] : [{ label: "Next retry", value: elapsed(s.retryAt, now).replace(" ago", ""), tone: "warn" as const }]),
+  ]
 }
 
-function StatusPanel(context: TuiContext) {
+function usageRows(s: MemoryStatus): Row[] {
+  const inj = s.injected
+  const per = inj.sessionRequests > 0
+    ? Math.round(inj.sessionTokens / inj.sessionRequests)
+    : inj.totalRequests > 0
+      ? Math.round(inj.totalTokens / inj.totalRequests)
+      : 0
+  return [
+    { label: "Block size", value: per ? `~${formatTokens(per)} tokens / request` : "—" },
+    { label: "This session", value: `~${formatTokens(inj.sessionTokens)} tokens · ${inj.sessionRequests} req` },
+    { label: "Since start", value: `~${formatTokens(inj.totalTokens)} tokens · ${inj.totalRequests} req` },
+  ]
+}
+
+function configRows(s: MemoryStatus): Row[] {
+  return [
+    { label: "Extraction", value: s.extractModel ?? "Host default" },
+    { label: "Consolidation", value: s.consolidationModel ?? "Host default" },
+    { label: "Codex import", value: s.codexImport ? "On" : "Off", tone: s.codexImport ? "ok" : "muted" },
+    { label: "Location", value: s.memoryRoot },
+  ]
+}
+
+const TABS = ["Overview", "Controls"] as const
+type Tab = (typeof TABS)[number]
+
+type Control = {
+  id: string
+  title: string
+  hint: string
+  /** Toggle state; undefined for one-shot actions. */
+  on?: boolean
+  enabled: boolean
+  run: () => void
+}
+
+/**
+ * /memory dialog. Tabs switch by mouse click. Controls: ↑/↓ move, Enter or
+ * click toggles/runs. Esc closes (host-owned).
+ */
+function MemoryDialog(context: TuiContext, sessionID: string | undefined, initial: MemoryStatus | null) {
   const rpc = context.client.rpc(MemoryStatusRpc)
-  const [status, setStatus] = createSignal<MemoryStatus>()
-  const [unavailable, setUnavailable] = createSignal(false)
-  const [now, setNow] = createSignal(Date.now())
+  const [status, setStatus] = createSignal<MemoryStatus | null>(initial)
+  const [tab, setTab] = createSignal<Tab>("Overview")
+  const [cursor, setCursor] = createSignal(0)
+  const [notice, setNotice] = createSignal("")
+  const [busy, setBusy] = createSignal(false)
+  const now = Date.now()
 
   const refresh = async () => {
     try {
-      setStatus(await fetchStatus(rpc, context))
+      setStatus(await fetchStatus(rpc, context, sessionID))
+    } catch {
+      setStatus(null)
+    }
+  }
+  const unsubscribe = rpc.events.on("changed", () => void refresh())
+  onCleanup(unsubscribe)
+
+  const call = async (method: string, input: Record<string, unknown>, done: string) => {
+    if (busy()) return
+    setBusy(true)
+    try {
+      await (rpc as any)[method](input, {
+        location: context.location ?? context.data.location.default(),
+        signal: AbortSignal.timeout(5_000),
+      })
+      setNotice(done)
+      await refresh()
+    } catch (err) {
+      setNotice(`Failed: ${(err as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const controls = (): Control[] => {
+    const s = status()
+    if (!s) return []
+    const list: Control[] = [
+      {
+        id: "read",
+        title: "Use memories",
+        hint: "Inject the memory summary into every model request",
+        on: s.useMemories,
+        enabled: true,
+        run: () => void call("setOption", { key: "use_memories", value: !s.useMemories }, s.useMemories ? "Memories are no longer injected." : "Memories are injected again."),
+      },
+      {
+        id: "learn",
+        title: "Learn from sessions",
+        hint: "Background extraction and consolidation of finished conversations",
+        on: s.generateMemories,
+        enabled: true,
+        run: () => void call("setOption", { key: "generate_memories", value: !s.generateMemories }, s.generateMemories ? "Learning paused." : "Learning resumed."),
+      },
+    ]
+    if (sessionID) {
+      const learning = s.sessionMode !== "disabled" && s.sessionMode !== "polluted"
+      list.push({
+        id: "session",
+        title: "Learn from this session",
+        hint: s.sessionMode === "polluted"
+          ? "Auto-excluded: this session pulled in external context"
+          : "Whether this conversation may be extracted into memory",
+        on: learning,
+        enabled: s.generateMemories,
+        run: () => void call("setSessionMode", { sessionID, mode: learning ? "disabled" : "enabled" }, learning ? "This session will not be learned from." : "This session will be learned from."),
+      })
+    }
+    const running = s.activity === "consolidating" || s.activity === "extracting"
+    list.push({
+      id: "now",
+      title: "Consolidate now",
+      hint: running ? "Already running" : s.generateMemories ? "Extract idle sessions and rebuild the summary, skipping the 6h cooldown" : "Turn on learning first",
+      enabled: s.generateMemories && !running,
+      run: () => void call("consolidateNow", {}, "Consolidation started in the background."),
+    })
+    return list
+  }
+
+  const activate = (i: number) => {
+    const c = controls()[i]
+    if (c && c.enabled) c.run()
+  }
+  const move = (d: number) => {
+    const n = controls().length
+    if (n === 0) return
+    setCursor((cursor() + d + n) % n)
+  }
+
+  // Keyboard is only claimed on the Controls tab; nothing is bound to digits
+  // or arrows elsewhere so the host's own dialog keys keep working.
+  context.keymap.layer(() => ({
+    enabled: () => tab() === "Controls",
+    commands: [
+      { title: "Previous control", bind: "up", run: () => move(-1) },
+      { title: "Next control", bind: "down", run: () => move(1) },
+      { title: "Toggle control", bind: "return", run: () => activate(cursor()) },
+      { title: "Toggle control", bind: "space", run: () => activate(cursor()) },
+    ],
+  }))
+
+  const th = context.theme as any
+  const text = themeColor(th, ["text", "default"], ["text"])
+  const muted = themeColor(th, ["text", "subdued"], ["textMuted"], ["text"])
+  const ok = themeColor(th, ["text", "feedback", "success"], ["text"])
+  const warn = themeColor(th, ["text", "feedback", "warning"], ["text"])
+  const err = themeColor(th, ["text", "feedback", "error"], ["text"])
+  const accent = themeColor(th, ["text", "action", "primary"], ["text"])
+  const selectedBg = themeColor(th, ["background", "action", "primary", "$focused"], ["background", "action", "primary", "focused"])
+  const toneColor = (t: Row["tone"]) => (t === "ok" ? ok : t === "warn" ? warn : t === "muted" ? muted : text)
+
+  const LABEL_W = 18
+  const Rows = (props: { rows: Row[] }) => (
+    <For each={props.rows}>
+      {(r) => (
+        <text fg={toneColor(r.tone)}>
+          <span style={{ fg: muted }}>{r.label.padEnd(LABEL_W)}</span>
+          {r.value}
+        </text>
+      )}
+    </For>
+  )
+  // Spacing lives on <box>: marginTop on <text> overdraws the neighbours.
+  const Section = (props: { title: string }) => (
+    <box marginTop={1}>
+      <text fg={muted} attributes={TextAttributes.BOLD}>
+        {props.title.toUpperCase()}
+      </text>
+    </box>
+  )
+  const Note = (props: { fg: unknown; children: string }) => (
+    <box marginTop={1}>
+      <text fg={props.fg as any}>{props.children}</text>
+    </box>
+  )
+
+  return (
+    <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+      <box flexDirection="row" gap={2}>
+        <For each={TABS}>
+          {(t) => (
+            <box
+              paddingLeft={1}
+              paddingRight={1}
+              backgroundColor={tab() === t ? selectedBg : undefined}
+              onMouseDown={() => setTab(t)}
+            >
+              <text fg={tab() === t ? text : muted} attributes={tab() === t ? TextAttributes.BOLD : 0}>
+                {t}
+              </text>
+            </box>
+          )}
+        </For>
+      </box>
+
+      {/* No <Show>: its empty placeholder is a bare text node under <box>. */}
+      <box flexDirection="column">
+        {status() === null ? (
+          <Note fg={err}>Memory status unavailable — is the server plugin loaded?</Note>
+        ) : tab() === "Overview" ? (
+          <box flexDirection="column">
+            <Section title="Status" />
+            <Rows rows={statusRows(status()!, now)} />
+            <Section title="Context usage" />
+            <Rows rows={usageRows(status()!)} />
+            <Section title="Setup" />
+            <Rows rows={configRows(status()!)} />
+            {status()!.warnings.length > 0 ? (
+              <box flexDirection="column">
+                <Section title="Attention" />
+                <For each={status()!.warnings}>{(w) => <text fg={warn}>{`! ${w}`}</text>}</For>
+              </box>
+            ) : (
+              <box />
+            )}
+            <Note fg={muted}>Token figures are chars/4 estimates; the block is re-sent each request and normally served from the prompt cache.</Note>
+          </box>
+        ) : (
+          <box flexDirection="column" marginTop={1}>
+            <For each={controls()}>
+              {(c, i) => {
+                const selected = () => cursor() === i()
+                const fgTitle = () => (!c.enabled ? muted : text)
+                const indicator = () =>
+                  c.on === undefined ? "▸" : c.on ? "●" : "○"
+                const indicatorFg = () => (!c.enabled ? muted : c.on === undefined ? accent : c.on ? ok : muted)
+                const state = () => (c.on === undefined ? "" : c.on ? "On" : "Off")
+                return (
+                  <box
+                    flexDirection="column"
+                    paddingLeft={1}
+                    paddingRight={1}
+                    backgroundColor={selected() ? selectedBg : undefined}
+                    onMouseDown={() => {
+                      setCursor(i())
+                      activate(i())
+                    }}
+                  >
+                    <text fg={fgTitle()} attributes={selected() ? TextAttributes.BOLD : 0}>
+                      <span style={{ fg: indicatorFg() }}>{indicator()}</span>
+                      {` ${c.title.padEnd(26)}`}
+                      <span style={{ fg: c.on ? ok : muted }}>{state()}</span>
+                    </text>
+                    <text fg={muted}>{`  ${c.hint}`}</text>
+                  </box>
+                )
+              }}
+            </For>
+            <Note fg={muted}>Global settings last until the server restarts; edit opencode.json to make them permanent.</Note>
+          </box>
+        )}
+      </box>
+
+      <Note fg={ok}>{notice()}</Note>
+      <Note fg={muted}>
+        {tab() === "Controls" ? "↑↓ move · enter toggle · click a tab or control · esc close" : "click a tab · esc close · ask the assistant for memory_inspect for raw diagnostics"}
+      </Note>
+    </box>
+  )
+}
+
+function StatusPanel(context: TuiContext, sessionID?: string) {
+  const rpc = context.client.rpc(MemoryStatusRpc)
+  const [status, setStatus] = createSignal<MemoryStatus>()
+  const [unavailable, setUnavailable] = createSignal(false)
+
+  const refresh = async () => {
+    try {
+      setStatus(await fetchStatus(rpc, context, sessionID))
       setUnavailable(false)
     } catch {
       setUnavailable(true)
-    } finally {
-      setNow(Date.now())
     }
   }
 
   const unsubscribe = rpc.events.on("changed", () => void refresh())
-  // Reconcile missed events, cross-process jobs, and relative timestamps.
-  const timer = setInterval(() => void refresh(), 5_000)
+  // Reconcile missed events (e.g. options changed by memory_mode / reload).
+  const timer = setInterval(() => void refresh(), 30_000)
   onCleanup(() => {
     clearInterval(timer)
     unsubscribe()
   })
   void refresh()
 
-  const title = () => (unavailable() ? "Unavailable" : status() ? labels[status()!.activity] : "Loading…")
+  // Enabled/disabled only; activity and diagnostics live in /memory.
+  const title = () => {
+    if (unavailable()) return "Unavailable"
+    const s = status()
+    if (!s) return "Loading…"
+    return s.useMemories ? "Enabled" : "Disabled"
+  }
   const color = () => {
-    if (unavailable() || status()?.activity === "error") {
-      return themeColor(context.theme, ["text", "feedback", "error"], ["text"])
-    }
-    if (status()?.activity === "retrying") {
-      return themeColor(context.theme, ["text", "feedback", "warning"], ["text"])
-    }
-    if (status()?.activity === "extracting" || status()?.activity === "consolidating") {
-      return themeColor(context.theme, ["text", "status", "running"], ["text"])
-    }
+    if (unavailable()) return themeColor(context.theme, ["text", "feedback", "error"], ["text"])
+    if (status()?.useMemories) return themeColor(context.theme, ["text", "feedback", "success"], ["text"])
     return themeColor(context.theme, ["text", "subdued"], ["textMuted"], ["text"])
   }
   const muted = () => themeColor(context.theme, ["text", "subdued"], ["textMuted"], ["text"])
   const heading = () => themeColor(context.theme, ["text", "default"], ["text"])
 
-  // No <Show>: its empty placeholder is a bare text node under <box>,
-  // which the renderer rejects. Unconditional lines with placeholders instead.
-  const scopeLine = () => "  Scope        Global"
-  const successLine = () => `  Last success ${status() ? elapsed(status()?.lastSuccessAt, now()) : "…"}` as string
-  const importLine = () =>
-    `  Codex import ${status() ? (status()!.codexImport ? "Enabled" : "Disabled") : "…"}` as string
-
+  // Status only; details live in /memory-status. No <Show>: its empty
+  // placeholder is a bare text node under <box>, which the renderer rejects.
   return (
     <box flexDirection="column">
       <text fg={heading()}>Memory</text>
       <text fg={color()}>● {title()}</text>
-      <text fg={muted()}>{scopeLine()}</text>
-      <text fg={muted()}>{successLine()}</text>
-      <text fg={muted()}>{importLine()}</text>
-      <text fg={muted()}>{"  /memory-status"}</text>
+      <text fg={muted()}>{"  /memory"}</text>
     </box>
   )
+}
+
+/**
+ * Native rendering for the ```memory-citation fence the read-path prompt asks
+ * the model to emit. Returning null falls back to the plain code block.
+ */
+function renderCitationBlock(context: TuiContext, body: string): Renderable | null {
+  const parsed = parseCitationBody(body)
+  if (parsed.entries.length === 0 && parsed.sessionIds.length === 0) return null
+  const ctx = context.renderer
+  const heading = themeColor(context.theme, ["text", "default"], ["text"])
+  const muted = themeColor(context.theme, ["text", "subdued"], ["textMuted"], ["text"])
+
+  const root = new BoxRenderable(ctx, { flexDirection: "column", marginTop: 1 })
+  root.add(new TextRenderable(ctx, { content: "Memory used", fg: heading, attributes: TextAttributes.DIM }))
+
+  const locations = parsed.entries.map((e) => {
+    const name = e.path.split("/").pop() ?? e.path
+    const range = e.lineStart === e.lineEnd ? `${e.lineStart}` : `${e.lineStart}–${e.lineEnd}`
+    return `${name}:${range}`
+  })
+  const pad = Math.min(36, Math.max(0, ...locations.map((l) => l.length)))
+  parsed.entries.forEach((entry, i) => {
+    const loc = locations[i]!.padEnd(pad, " ")
+    root.add(new TextRenderable(ctx, { content: `  ${loc}  ${entry.note}`, fg: muted, paddingLeft: 0 }))
+  })
+  if (parsed.sessionIds.length > 0) {
+    const n = parsed.sessionIds.length
+    root.add(
+      new TextRenderable(ctx, {
+        content: `  ${n} prior session${n === 1 ? "" : "s"}`,
+        fg: muted,
+        attributes: TextAttributes.DIM,
+      }),
+    )
+  }
+  return root
 }
 
 function KeymapLayer(context: TuiContext) {
@@ -160,19 +460,23 @@ function KeymapLayer(context: TuiContext) {
     commands: [
       {
         id: "opencode-codex-memory.status",
-        title: "Show memory status",
+        title: "Memory",
+        description: "Memory status and controls",
         group: "Memory",
         palette: true,
-        slash: { name: "memory-status" },
+        slash: { name: "memory", aliases: ["memory-status"] },
         run: async () => {
           const rpc = context.client.rpc(MemoryStatusRpc)
-          let message: string
+          const route = context.ui.router.current()
+          const sessionID = route.type === "session" ? route.sessionID : undefined
+          let initial: MemoryStatus | null = null
           try {
-            message = formatDetails(await fetchStatus(rpc, context))
+            initial = await fetchStatus(rpc, context, sessionID)
           } catch {
-            message = "Memory status is unavailable. Check that the server memory plugin is enabled and connected."
+            initial = null
           }
-          await context.ui.dialog.alert({ title: "Memory status", message })
+          context.ui.dialog.show(() => MemoryDialog(context, sessionID, initial))
+          context.ui.dialog.set({ size: "medium" })
         },
       },
     ],
@@ -185,9 +489,24 @@ export default Plugin.define({
   setup(context) {
     // setup() itself must stay free of Solid-scoped APIs: only slot claims
     // here, everything reactive lives in the slot components above.
-    const offSidebar = registerSlot(context, "sidebar.content", () => StatusPanel(context))
+    const offSidebar = registerSlot(context, "sidebar.content", (input: { sessionID?: string } | undefined) =>
+      StatusPanel(context, input?.sessionID),
+    )
     const offApp = registerSlot(context, "app", () => KeymapLayer(context))
+    let offRenderer: () => void = () => {}
+    try {
+      offRenderer = context.markdown.registerCodeBlockRenderer(CITATION_FENCE_LANG, (token) => {
+        try {
+          return renderCitationBlock(context, token.text)
+        } catch {
+          return null
+        }
+      })
+    } catch (err) {
+      console.warn("[opencode-codex-memory] code-block renderer unavailable on this host:", err)
+    }
     return () => {
+      offRenderer()
       offSidebar()
       offApp()
     }

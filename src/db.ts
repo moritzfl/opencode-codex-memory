@@ -79,6 +79,16 @@ function runMigrations(db: Database): void {
       for (const stmt of SCHEMA_V1) db.run(stmt)
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(1, Date.now())
     }
+    if (currentVersion < 2) {
+      db.run(`CREATE TABLE IF NOT EXISTS memory_citation_usage (
+        session_id TEXT NOT NULL,
+        assistant_message_id TEXT NOT NULL,
+        cited_session_id TEXT NOT NULL,
+        recorded_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, assistant_message_id, cited_session_id)
+      )`)
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(2, Date.now())
+    }
   }).immediate()
 }
 

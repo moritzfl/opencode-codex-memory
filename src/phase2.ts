@@ -37,6 +37,8 @@ export interface Phase2Options {
   claudeImport?: ClaudeImportOptions
   /** Override the 90s heartbeat interval (tests / advanced). */
   heartbeatIntervalMs?: number
+  /** User-requested run: skip the 6h success cooldown (lease/retry gates still apply). */
+  bypassCooldown?: boolean
 }
 
 export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
@@ -150,7 +152,7 @@ export async function runPhase2(
     const rl = await checkRateLimit("phase2", consolidationModel)
     if (!rl.ok) return { status: "skipped_rate_limit" }
 
-    const claim = store.claimGlobalPhase2Job()
+    const claim = store.claimGlobalPhase2Job({ bypassCooldown: opts.bypassCooldown })
     if (claim.type !== "claimed") return { status: claim.type }
 
     // Abort scope covers prep + consolidator so dispose during baseline/diff

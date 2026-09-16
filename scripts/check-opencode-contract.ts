@@ -131,7 +131,10 @@ async function main() {
     note(docRes.status === 200, `GET /doc → ${docRes.status}`)
     const doc = docRes.json as OpenAPI
     if (!doc?.paths) {
-      note(false, "/doc missing paths")
+      // OpenCode 2 moved its machine-readable contract to /openapi.json and
+      // is checked by contract:v2; /doc is the V1-only surface.
+      if (version.startsWith("2.")) log("skip", "/doc has no V1 paths on OpenCode 2; see contract:v2")
+      else note(false, "/doc missing paths")
     } else {
       const listOp = getPathOp(doc, "/session", "get")
       note(!!listOp, "GET /session present")

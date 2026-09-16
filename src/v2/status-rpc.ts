@@ -29,13 +29,40 @@ export interface MemoryStatus {
   lastSuccessAt: number | null
   retryAt: number | null
   warnings: string[]
+  /** Per-session read/write mode when a sessionID was supplied. */
+  sessionMode: "enabled" | "disabled" | "polluted" | null
+  /** Root directory of the memory workspace. */
+  memoryRoot: string
+  /** Estimated memory tokens injected into model requests (chars/4). */
+  injected: {
+    sessionTokens: number
+    sessionRequests: number
+    totalTokens: number
+    totalRequests: number
+  }
 }
+
+const INJECTED_SCHEMA = {
+  type: "object",
+  properties: {
+    sessionTokens: { type: "number" },
+    sessionRequests: { type: "number" },
+    totalTokens: { type: "number" },
+    totalRequests: { type: "number" },
+  },
+  required: ["sessionTokens", "sessionRequests", "totalTokens", "totalRequests"],
+  additionalProperties: false,
+} as const
 
 export const MemoryStatusRpc = {
   id: "opencode-codex-memory",
   methods: {
     status: {
-      input: { type: "object", properties: {}, additionalProperties: false },
+      input: {
+        type: "object",
+        properties: { sessionID: { type: "string" } },
+        additionalProperties: false,
+      },
       output: {
         type: "object",
         properties: {
@@ -48,6 +75,9 @@ export const MemoryStatusRpc = {
           lastSuccessAt: { type: ["number", "null"] },
           retryAt: { type: ["number", "null"] },
           warnings: { type: "array", items: { type: "string" } },
+          sessionMode: { type: ["string", "null"], enum: ["enabled", "disabled", "polluted", null] },
+          memoryRoot: { type: "string" },
+          injected: INJECTED_SCHEMA,
         },
         required: [
           "activity",
@@ -59,7 +89,46 @@ export const MemoryStatusRpc = {
           "lastSuccessAt",
           "retryAt",
           "warnings",
+          "sessionMode",
+          "memoryRoot",
+          "injected",
         ],
+        additionalProperties: false,
+      },
+    },
+    /** Runtime-only toggle of a boolean plugin option (until server restart). */
+    setOption: {
+      input: {
+        type: "object",
+        properties: {
+          key: { type: "string", enum: ["use_memories", "generate_memories"] },
+          value: { type: "boolean" },
+        },
+        required: ["key", "value"],
+        additionalProperties: false,
+      },
+      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false },
+    },
+    /** Same effect as the memory_mode tool. */
+    setSessionMode: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          mode: { type: "string", enum: ["enabled", "disabled"] },
+        },
+        required: ["sessionID", "mode"],
+        additionalProperties: false,
+      },
+      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false },
+    },
+    /** Run extraction + consolidation now, bypassing the success cooldown (not the lease). */
+    consolidateNow: {
+      input: { type: "object", properties: {}, additionalProperties: false },
+      output: {
+        type: "object",
+        properties: { status: { type: "string" } },
+        required: ["status"],
         additionalProperties: false,
       },
     },
@@ -91,9 +160,24 @@ export function isMemoryStatus(value: unknown): value is MemoryStatus {
       return false
     }
   }
-  return (
-    Array.isArray(value.warnings) && value.warnings.every((w): w is string => typeof w === "string")
-  )
+  if (!Array.isArray(value.warnings) || !value.warnings.every((w): w is string => typeof w === "string")) {
+    return false
+  }
+  if (
+    value.sessionMode !== null &&
+    value.sessionMode !== "enabled" &&
+    value.sessionMode !== "disabled" &&
+    value.sessionMode !== "polluted"
+  ) {
+    return false
+  }
+  if (typeof value.memoryRoot !== "string") return false
+  const injected = value.injected
+  if (!isRecord(injected)) return false
+  for (const key of ["sessionTokens", "sessionRequests", "totalTokens", "totalRequests"] as const) {
+    if (typeof injected[key] !== "number") return false
+  }
+  return true
 }
 
 /** Throwing parser for tests and call sites that want a typed value. */

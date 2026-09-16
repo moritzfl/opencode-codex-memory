@@ -5,18 +5,16 @@
  * run byte-identical) by presenting a V1-shaped client façade backed by the
  * V2 plugin context. Only genuinely missing V2 surfaces are adapted:
  *
- * - session list/discovery → process-local session registry (ctx has no
- *   list API; raw HTTP is 401 from inside plugins). Fed by session.created
- *   events + the prompt hook; pruned on observed NotFound.
+ * - session list/discovery → the authenticated public service client
+ *   discovered through the registered local service.
  * - session.prompt agent/system/model/format/variant → V2 create-time
  *   agent/model (via switchAgent/switchModel) + generate.text for the
  *   json_schema extraction path (V2 prompts carry text only).
- * - session.messages → session.context with V1-shaped row adaptation.
- * - session.delete → interrupt + released-set (V2 has no delete; the row
- *   remains as inert history). get() on a released id reports 404 so the
- *   V1 shutdown/liveness logic keeps working.
- * - config.get → unavailable (V2 exposes no config API to plugins); callers
- *   fall back to session defaults, exactly like a V1 host without config.
+ * - session.messages → public message.list with V1-shaped row adaptation.
+ * - session.delete → public session.remove, with a released-set fallback so
+ *   the V1 shutdown/liveness logic keeps working across hosts.
+ * - config.get → public service config documents adapted for the V1 resolver;
+ *   callers fall back to session defaults if the service is unavailable.
  * - provider.list → catalog.model.list adapted to the V1 catalog shape for
  *   reasoning-variant mapping.
  * - mcp.status → mcp.list adapted to the V1 status map.
@@ -25,6 +23,7 @@
  */
 import type { Plugin } from "@opencode/plugin"
 import { memoryRoot } from "../paths.js"
+import { invalidateOwnService, ownServiceClient, type V2ServiceClient } from "./service.js"
 
 export type V2Context = Plugin.Context
 
@@ -32,10 +31,6 @@ let v2ctx: V2Context | null = null
 
 export function setV2Context(ctx: V2Context | null): void {
   v2ctx = ctx
-}
-
-export function getV2Context(): V2Context | null {
-  return v2ctx
 }
 
 function ctx(): V2Context {
@@ -76,90 +71,13 @@ export function isReleasedSubSession(id: string): boolean {
   return releasedSubSessions.has(id)
 }
 
-// ---------------------------------------------------------------------------
-// Session registry (V2 discovery replacement)
-// ---------------------------------------------------------------------------
-
-export interface RegistryEntry {
-  id: string
-  title?: string
-  directory: string | null
-  parentID?: string | null
-  created: number
-  updated: number
-}
-
-const registry = new Map<string, RegistryEntry>()
-const REGISTRY_CAP = 5000
-
-export function recordSessionSighting(
-  id: string,
-  opts: { title?: string; directory?: string | null; parentID?: string | null; updated?: number } = {},
-): void {
-  const now = Date.now()
-  const prev = registry.get(id)
-  registry.set(id, {
-    id,
-    title: opts.title ?? prev?.title,
-    directory: opts.directory ?? prev?.directory ?? null,
-    parentID: opts.parentID ?? prev?.parentID,
-    created: prev?.created ?? now,
-    updated: opts.updated ?? now,
-  })
-  if (registry.size > REGISTRY_CAP) {
-    let oldestKey: string | undefined
-    let oldest = Infinity
-    for (const [k, v] of registry) {
-      if (v.updated < oldest) {
-        oldest = v.updated
-        oldestKey = k
-      }
-    }
-    if (oldestKey !== undefined) registry.delete(oldestKey)
-  }
-  // Backfill parentID once (excludes subagent children like V1 roots=true).
-  if (registry.get(id)?.parentID === undefined) {
-    void (async () => {
-      try {
-        const info = und(await (ctx().session as any).get({ sessionID: id }))
-        if (info?.parentID !== undefined) {
-          const cur = registry.get(id)
-          if (cur) cur.parentID = info.parentID ?? null
-        } else {
-          const cur = registry.get(id)
-          if (cur && cur.parentID === undefined) cur.parentID = null
-        }
-      } catch {
-        // Best-effort backfill; a later liveness check prunes gone rows.
-      }
-    })()
-  }
-}
-
-export function dropSessionFromRegistry(id: string): void {
-  registry.delete(id)
-}
-
 /** Stable synthetic id for extraction helpers (see create below). */
 export const EXTRACT_STUB_SESSION_ID = "codex-memory-extract-stub"
 
 /** Test seam. */
-export function clearSessionRegistryForTest(): void {
-  registry.clear()
+export function resetV2ShimStateForTest(): void {
   releasedSubSessions.clear()
-}
-
-function registryRows(limit: number, cursor?: number, search?: string): RegistryEntry[] {
-  let rows = [...registry.values()]
-  if (cursor !== undefined) rows = rows.filter((r) => r.updated < cursor)
-  if (search) {
-    const q = search.toLowerCase()
-    rows = rows.filter(
-      (r) => r.id.toLowerCase().includes(q) || (r.title ?? "").toLowerCase().includes(q),
-    )
-  }
-  rows.sort((a, b) => b.updated - a.updated)
-  return rows.slice(0, limit)
+  invalidateOwnService()
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +98,7 @@ function joinTextParts(content: unknown): string {
 }
 
 /**
- * V2 context()/transcript messages → V1 session.messages rows
+ * V2 public transcript messages → V1 session.messages rows
  * ({info:{role}, parts:[...]}) consumed by capture.ts extractText.
  */
 export function adaptV2Messages(msgs: unknown): Array<{ info?: { role?: string }; parts?: unknown[] }> {
@@ -306,17 +224,20 @@ async function v2promptWithWait(
   if (body.format) {
     const prompt = body.system ? `${body.system}\n\n---\n\n${text}` : text
     const parsed = body.model ? parseModelRef(`${body.model.providerID}/${body.model.modelID}`) : null
-    const gen = await (c as any).generate.text({
-      prompt,
-      ...(parsed || body.variant
-        ? {
-            model: {
-              ...(parsed ? { providerID: parsed.providerID, id: parsed.modelID } : {}),
-              ...(body.variant ? { variant: body.variant } : {}),
-            },
-          }
-        : {}),
-    })
+    const gen = await (c as any).generate.text(
+      {
+        prompt,
+        ...(parsed || body.variant
+          ? {
+              model: {
+                ...(parsed ? { providerID: parsed.providerID, id: parsed.modelID } : {}),
+                ...(body.variant ? { variant: body.variant } : {}),
+              },
+            }
+          : {}),
+      },
+      signal ? { signal } : undefined,
+    )
     const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
     return { data: { parts: [{ type: "text", text: outText }] } }
   }
@@ -341,6 +262,7 @@ async function v2promptWithWait(
   if (signal) {
     if (signal.aborted) {
       await (c.session as any).interrupt({ sessionID }).catch(() => {})
+      await waitP.catch(() => {})
       throw new Error("sub-agent prompt cancelled")
     }
     await Promise.race([
@@ -350,6 +272,7 @@ async function v2promptWithWait(
       }),
     ]).catch(async (e) => {
       await (c.session as any).interrupt({ sessionID }).catch(() => {})
+      await waitP.catch(() => {})
       throw e
     })
   } else {
@@ -360,13 +283,46 @@ async function v2promptWithWait(
 
 /** Build the V1-shaped client. Passed to setPluginInput() by V2 setup(). */
 export function buildV1ClientShim(): unknown {
+  async function serviceOrThrow(): Promise<V2ServiceClient> {
+    const client = await ownServiceClient()
+    if (!client) throw new Error("no healthy registered OpenCode 2 service for global memory operations")
+    return client
+  }
+
+  async function listGlobalSessions(limit: number, cursor?: string): Promise<{ data: unknown[] }> {
+    const client = await serviceOrThrow()
+    const pageSize = Math.min(Math.max(limit, 1), 5000)
+    const out: unknown[] = []
+    const seenCursors = new Set<string>()
+    let next = cursor
+    while (out.length < limit) {
+      const response = (await client.session.list?.({
+        limit: pageSize,
+        order: "desc",
+        parentID: null,
+        ...(next ? { cursor: next } : {}),
+      })) as any
+      const payload = und(response)
+      let rows = response
+      if (!Array.isArray(rows)) rows = response?.data
+      if (!Array.isArray(rows)) rows = Array.isArray(payload) ? payload : payload?.data
+      if (!Array.isArray(rows)) throw new Error("registered service returned an invalid session list")
+      out.push(...rows)
+      const candidate = response?.cursor?.next ?? payload?.cursor?.next
+      if (typeof candidate !== "string" || candidate.length === 0 || seenCursors.has(candidate) || rows.length === 0) break
+      seenCursors.add(candidate)
+      next = candidate
+    }
+    return { data: out.slice(0, limit) }
+  }
+
   const session = {
     create: async (opts: { query?: { directory?: string }; body?: { title?: string; metadata?: Record<string, unknown> } }) => {
       try {
         // Extraction turns run through generate.text (see prompt below) and
         // never touch a session, so hand out a stable synthetic id instead
-        // of creating a server row per extraction (V2 has no session
-        // delete; without this each extraction would litter one dead
+        // of creating a server row per extraction (without this each
+        // extraction would litter one dead
         // `codex-memory-extract-*` session). Skip/tracking logic keys off
         // the id string only, so behavior is unchanged.
         if (opts?.body?.title?.startsWith("codex-memory-extract-")) {
@@ -393,17 +349,18 @@ export function buildV1ClientShim(): unknown {
     messages: async (opts: { path: { id: string } }) => {
       try {
         if (isReleasedSubSession(opts.path.id)) throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
-        const rows = und(await (ctx().session as any).context({ sessionID: opts.path.id }))
-        return { data: adaptV2Messages(rows) }
+        const client = await serviceOrThrow()
+        const response = await client.message?.list({ sessionID: opts.path.id, order: "asc" })
+        const payload = und(response)
+        return { data: adaptV2Messages(Array.isArray(payload) ? payload : payload?.data ?? []) }
       } catch (e) {
         return { error: e }
       }
     },
     delete: async (opts: { path: { id: string } }) => {
-      // V2 has no session delete: stop the turn and treat the id as
-      // released so get()-based checks report 404 from here on.
       try {
-        await (ctx().session as any).interrupt({ sessionID: opts.path.id }).catch(() => {})
+        const client = await serviceOrThrow()
+        await client.session.remove?.({ sessionID: opts.path.id })
       } finally {
         markReleased(opts.path.id)
       }
@@ -414,7 +371,8 @@ export function buildV1ClientShim(): unknown {
         if (isReleasedSubSession(opts.path.id)) {
           return { response: { status: 404 }, error: { _tag: "SessionNotFoundError" } }
         }
-        const info = und(await (ctx().session as any).get({ sessionID: opts.path.id }))
+        const client = await serviceOrThrow()
+        const info = und(await client.session.get?.({ sessionID: opts.path.id }))
         return { data: info }
       } catch (e) {
         if (isNotFoundError(e)) return { response: { status: 404 }, error: e }
@@ -423,7 +381,8 @@ export function buildV1ClientShim(): unknown {
     },
     abort: async (opts: { path: { id: string } }) => {
       try {
-        await (ctx().session as any).interrupt({ sessionID: opts.path.id })
+        const client = await serviceOrThrow()
+        await client.session.interrupt?.({ sessionID: opts.path.id })
       } catch {
         // Best-effort, mirrors V1.
       }
@@ -431,7 +390,29 @@ export function buildV1ClientShim(): unknown {
     },
   }
   const config = {
-    get: async () => ({ error: { message: "config unavailable to V2 plugins; using session defaults" } }),
+    get: async () => {
+      try {
+        const client = await serviceOrThrow()
+        const response = await client.config?.get({ location: { directory: ctx().location.directory } })
+        const documents = und(response)
+        let document = null
+        if (Array.isArray(documents)) {
+          document = documents.find((entry) => entry?.type === "document")
+        } else if (documents?.type === "document") {
+          document = documents
+        }
+        const info = document?.info
+        if (!info || typeof info !== "object") return { data: {} }
+        const model = (info as any).model
+        let normalizedModel = model
+        if (model && typeof model === "object" && typeof model.providerID === "string" && typeof model.model === "string") {
+          normalizedModel = `${model.providerID}/${model.model}`
+        }
+        return { data: { ...info, ...(normalizedModel !== undefined ? { model: normalizedModel } : {}) } }
+      } catch (e) {
+        return { error: e }
+      }
+    },
   }
   const provider = {
     list: async () => {
@@ -457,20 +438,7 @@ export function buildV1ClientShim(): unknown {
     get: async (opts: { url: string; query?: Record<string, unknown> }) => {
       if (opts.url === "/experimental/session") {
         const q = opts.query ?? {}
-        const rows = registryRows(
-          typeof q.limit === "number" ? q.limit : 5000,
-          typeof q.cursor === "number" ? q.cursor : undefined,
-          typeof q.search === "string" ? q.search : undefined,
-        )
-        return {
-          data: rows.map((r) => ({
-            id: r.id,
-            ...(r.parentID ? { parentID: r.parentID } : {}),
-            ...(r.title ? { title: r.title } : {}),
-            time: { created: r.created, updated: r.updated },
-            ...(r.directory ? { directory: r.directory } : {}),
-          })),
-        }
+        return listGlobalSessions(typeof q.limit === "number" ? q.limit : 5000, typeof q.cursor === "string" ? q.cursor : undefined)
       }
       if (opts.url === "/provider") {
         return provider.list()
