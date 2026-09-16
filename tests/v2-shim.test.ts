@@ -383,6 +383,48 @@ describe("V1 client shim", () => {
     expect(malformed.error?.message).toMatch(/invalid message list/i)
   })
 
+  it("cancels structured extraction via public generate.text request options when available", async () => {
+    const seen: unknown[][] = []
+    let started!: () => void
+    const startedP = new Promise<void>((resolve) => { started = resolve })
+    const { ctx } = fakeCtx()
+    setV2Context(ctx as any)
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({
+        health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid }) },
+        session: { list: async () => ({ data: [] }), get: async () => ({ id: "x" }), remove: async () => {}, interrupt: async () => {} },
+        generate: {
+          text: async (...args: unknown[]) => {
+            seen.push(args)
+            const opts = args[1] as { signal?: AbortSignal } | undefined
+            await new Promise((_, reject) => {
+              opts?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+              started()
+            })
+          },
+        },
+      }) as any,
+    })
+    const client = buildV1ClientShim() as any
+    const controller = new AbortController()
+    const resultP = client.session.prompt({
+      path: { id: "ses_extract" },
+      signal: controller.signal,
+      body: {
+        agent: "memorize-extract",
+        format: { type: "json_schema" },
+        parts: [{ type: "text", text: "TRANSCRIPT" }],
+      },
+    })
+    await startedP
+    controller.abort()
+    const result = await resultP
+    expect(result.error?.message).toMatch(/abort|cancelled/i)
+    expect(seen[0]?.length).toBe(2)
+    expect((seen[0]?.[1] as { signal?: AbortSignal })?.signal).toBe(controller.signal)
+  })
+
   it("cancels structured extraction by racing AbortSignal, not request options", async () => {
     const seen: unknown[][] = []
     let started!: () => void

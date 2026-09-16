@@ -393,6 +393,17 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     }
   })
 
+  // Bounded reseed before the event loop can see leftover helpers as user sessions.
+  await cleanupOldSubSessions()
+  try {
+    if (getStore().releaseOrphanedPhase2Job()) {
+      console.warn("[opencode-codex-memory] released a consolidation lease orphaned by a dead process")
+    }
+  } catch (err) {
+    console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
+  }
+  statusListeners.add(publishStatus)
+
   // Event loop: execution.succeeded pumps phase 1 the way V1's idle events did.
   const eventAbort = new AbortController()
   void (async () => {
@@ -443,17 +454,6 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       }
     }
   })().catch((err) => console.error("[opencode-codex-memory] v2 event loop error:", err))
-
-  // Bounded reseed before hooks observe traffic (mirrors server()).
-  await cleanupOldSubSessions()
-  try {
-    if (getStore().releaseOrphanedPhase2Job()) {
-      console.warn("[opencode-codex-memory] released a consolidation lease orphaned by a dead process")
-    }
-  } catch (err) {
-    console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
-  }
-  statusListeners.add(publishStatus)
 
   return () => {
     statusListeners.delete(publishStatus)

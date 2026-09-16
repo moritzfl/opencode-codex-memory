@@ -278,9 +278,14 @@ async function v2promptWithWait(
           }
         : {}),
     }
-    // V2's Promise adapter only forwards the input argument — a trailing
-    // `{ signal }` is not cancellation. Race the abort ourselves.
     if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
+    const publicClient = await ownServiceClient()
+    if (typeof publicClient?.generate?.text === "function") {
+      const gen = await publicClient.generate.text(payload, signal ? { signal } : undefined)
+      const outText = typeof (gen as { text?: unknown })?.text === "string" ? (gen as { text: string }).text : JSON.stringify(gen)
+      return { data: { parts: [{ type: "text", text: outText }] } }
+    }
+    // ctx.generate.text ignores request-option signals. Race AbortSignal.
     const genP = (c as any).generate.text(payload)
     const gen = signal
       ? await Promise.race([
