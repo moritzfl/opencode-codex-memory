@@ -7,19 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-16
+
 ### Added
 
-- OpenCode 2 dual-host adapter (`src/v2/`): `setup()` on 2.x, V1 `server()`
-  unchanged. Memory sidebar + `/memory-status`. See `docs/opencode2.md`.
-
-### Fixed
-
-- V2 service discovery reads `service.json` and probes `GET /api/status`
-  (2.0.5 404s `/api/health`; 2.0.3 `Service.discover()` throws on that body).
-- Helper delete waits for a confirmed 404 after `session.remove`.
-- Event subscribe starts only after leftover helper reseed.
-- Extraction cancel prefers public `generate.text(..., { signal })`.
-- TUI no longer imports `@opentui/core` (sandbox cannot resolve it).
+- The plugin now runs on OpenCode 2 as well as 1.x. Pin `0.7.0` and, on
+  OpenCode 2, use the `plugins` package form. Same memory pipeline; V1
+  `server()` is unchanged. OpenCode 2 also gets a Memory sidebar and
+  `/memory-status`. Host limits (registered service, citations, models)
+  are in `docs/opencode2.md`.
 
 ## [0.6.5] - 2026-08-31
 
