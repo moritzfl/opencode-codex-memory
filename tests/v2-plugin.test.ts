@@ -85,7 +85,10 @@ beforeEach(() => {
       health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) },
       session: {
         list: async () => ({ data: [], cursor: { next: null } }),
-        get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, parentID: null }),
+        get: async (input?: unknown) => ({
+          id: (input as { sessionID?: string } | undefined)?.sessionID ?? "",
+          parentID: null,
+        }),
         remove: async () => {},
         interrupt: async () => {},
       },

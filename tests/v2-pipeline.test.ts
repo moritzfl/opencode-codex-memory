@@ -116,11 +116,14 @@ describe("v2 fake-context write pipeline", () => {
             cursor: { next: null },
           }),
           create: async () => ({ id: "unused" }),
-          get: async ({ sessionID }: { sessionID: string }) => {
+          get: async (input?: unknown) => {
+            const sessionID = (input as { sessionID?: string } | undefined)?.sessionID ?? ""
             if (removed.includes(sessionID)) throw { _tag: "SessionNotFoundError" }
             return { id: sessionID, parentID: null }
           },
-          remove: async ({ sessionID }: { sessionID: string }) => { removed.push(sessionID) },
+          remove: async (input?: unknown) => {
+            removed.push((input as { sessionID?: string } | undefined)?.sessionID ?? "")
+          },
           interrupt: async () => {},
         },
         message: {
