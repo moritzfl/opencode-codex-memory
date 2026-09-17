@@ -62,12 +62,12 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.0",
+    "@opencode/client": "2.0.5",
     "diff": "^9.0.0",
     "isomorphic-git": "^1.38.6",
     "xdg-basedir": "^5.1.0"
   },
   "devDependencies": {
-    "@opencode/client": "2.0.3",
     "@opencode/plugin": "2.0.3",
     "zod": "4.1.8",
     "@opencode/theme": "2.0.3",

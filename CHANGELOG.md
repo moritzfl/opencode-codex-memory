@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode 2 background learning ships `@opencode/client` as a runtime
+  dependency so the plugin cache can import it. Discovery still reads
+  `service.json` and probes `/api/status` (not `Service.discover()`, which
+  hits the 2.0.5-removed `/api/health`). Failures now surface the real error.
+
 ## [0.7.0] - 2026-09-16
 
 ### Added

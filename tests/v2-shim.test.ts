@@ -9,8 +9,12 @@ import {
 } from "../src/v2/shim.js"
 import {
   discoverOwnService,
+  fetchServiceStatus,
+  lastServiceFailure,
+  ownServiceClient,
   parseReadyStatus,
   readRegisteredEndpoint,
+  serviceHeaders,
   setV2ServiceDependenciesForTest,
 } from "../src/v2/service.js"
 import fs from "fs"
@@ -256,6 +260,52 @@ describe("V1 client shim", () => {
     fs.writeFileSync(file, "not-json")
     expect(await readRegisteredEndpoint(file)).toBeUndefined()
     fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("builds Basic auth headers via the bundled client", () => {
+    expect(serviceHeaders({
+      url: "http://127.0.0.1:4096",
+      auth: { type: "basic", username: "opencode", password: "secret" },
+    })).toEqual({
+      authorization: `Basic ${Buffer.from("opencode:secret").toString("base64")}`,
+    })
+  })
+
+  it("surfaces GET /api/status HTTP failures instead of a generic unhealthy", async () => {
+    const orig = globalThis.fetch
+    globalThis.fetch = (async () => new Response("denied", { status: 401 })) as typeof fetch
+    try {
+      await expect(fetchServiceStatus({ url: "http://127.0.0.1:9" }, undefined)).rejects.toThrow(/401/)
+    } finally {
+      globalThis.fetch = orig
+    }
+  })
+
+  it("records the real discovery error when the registered PID is not this process", async () => {
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({
+        health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid + 1 }) },
+        session: {},
+      }) as any,
+    })
+    expect(await ownServiceClient()).toBeNull()
+    expect(lastServiceFailure()).toMatch(/PID/i)
+  })
+
+  it("uses ctx.session.list when the plugin context exposes it", async () => {
+    const { ctx } = fakeCtx()
+    const listed: unknown[] = []
+    ;(ctx.session as any).list = async (input: unknown) => {
+      listed.push(input)
+      return { data: [{ id: "ses_ctx", title: "from-ctx", directory: "/p", time: { updated: 9 }, parentID: null }] }
+    }
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    const res = await client._client.get({ url: "/experimental/session", query: { limit: 10, directory: "" } })
+    expect(res.data.map((row: { id: string }) => row.id)).toEqual(["ses_ctx"])
+    expect(listed[0]).toEqual({ limit: 10, order: "desc", parentID: null })
+    expect(serviceListInputs).toEqual([])
   })
 
   it("times out health discovery and aborts the request", async () => {

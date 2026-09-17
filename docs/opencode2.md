@@ -45,8 +45,9 @@ retry eligibility, and warnings.
 
 Same memories, not the same host. These are the limits that show up in use:
 
-**Background learning needs this app’s local service.** The plugin only lists
-sessions from the OpenCode 2 instance that registered itself for this process.
+**Background learning needs this app’s local service.** The plugin lists
+sessions through the documented HTTP client (`@opencode/client`, bundled)
+against the OpenCode 2 instance that registered itself for this process.
 A plain `opencode serve` talking to some other host will not see those sessions,
 so extraction across projects will not run there. Injection of an already-built
 summary still works.

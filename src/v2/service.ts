@@ -1,17 +1,19 @@
 /**
  * The supported OpenCode 2 connection boundary.
  *
- * Server plugins do not receive the complete public client. The registered
- * local service does: the XDG `service.json` file is the discovery contract
- * (read-only — never Service.ensure()). Auth headers are preserved, and
- * GET /api/status pid must match this process. 2.0.5 dropped JSON
- * /api/health (404 HTML/empty); 2.0.3 Service.discover() still probes that
- * path and throws on a non-object body, so this module never calls it.
+ * Server plugins do not receive the complete public client. `ctx` is the
+ * documented plugin API; global session list is missing there, so we talk
+ * HTTP via `@opencode/client` (a runtime dependency so the plugin cache
+ * actually installs it). Discovery reads XDG `service.json` (never
+ * Service.ensure() / Service.discover() — those still probe /api/health,
+ * which 2.0.5 404s). GET /api/status pid must match this process.
  */
 
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { OpenCode } from "@opencode/client"
+import { Service } from "@opencode/client/service"
 
 export interface V2ServiceEndpoint {
   url: string
@@ -45,7 +47,8 @@ export interface V2ServiceDependencies {
 
 let testDependencies: V2ServiceDependencies | null = null
 let clientPromise: Promise<V2ServiceClient | null> | null = null
-const SERVICE_REQUEST_TIMEOUT_MS = 1_000
+let lastFailure: string | null = null
+const SERVICE_REQUEST_TIMEOUT_MS = 3_000
 
 /** Test seam: replace discovery without changing the production connection path. */
 export function setV2ServiceDependenciesForTest(dependencies: V2ServiceDependencies | null): void {
@@ -56,6 +59,17 @@ export function setV2ServiceDependenciesForTest(dependencies: V2ServiceDependenc
 /** Forget a cached endpoint after a service restart or failed request. */
 export function invalidateOwnService(): void {
   clientPromise = null
+  lastFailure = null
+}
+
+/** Last discoverOwnService failure, if ownServiceClient returned null. */
+export function lastServiceFailure(): string | null {
+  return lastFailure
+}
+
+/** Auth headers for the registered local service. */
+export function serviceHeaders(endpoint: V2ServiceEndpoint): Record<string, string> | undefined {
+  return Service.headers(endpoint)
 }
 
 export function parseReadyStatus(body: unknown): V2ServiceStatus | null {
@@ -123,15 +137,23 @@ export async function readRegisteredEndpoint(file = registrationPath()): Promise
   }
 }
 
-async function fetchJson(url: URL, headers: Record<string, string> | undefined, signal?: AbortSignal): Promise<unknown> {
+async function fetchJson(
+  url: URL,
+  headers: Record<string, string> | undefined,
+  signal?: AbortSignal,
+): Promise<{ ok: boolean; status: number; body: unknown }> {
   const response = await fetch(url, { headers, signal })
   const text = await response.text()
-  if (!text) return undefined
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
+  let body: unknown
+  if (!text) body = undefined
+  else {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = text
+    }
   }
+  return { ok: response.ok, status: response.status, body }
 }
 
 export async function fetchServiceStatus(
@@ -139,25 +161,24 @@ export async function fetchServiceStatus(
   headers: Record<string, string> | undefined,
   signal?: AbortSignal,
 ): Promise<V2ServiceStatus> {
-  const statusBody = await fetchJson(new URL("/api/status", endpoint.url), headers, signal)
-  const fromStatus = parseReadyStatus(statusBody)
+  const statusRes = await fetchJson(new URL("/api/status", endpoint.url), headers, signal)
+  const fromStatus = parseReadyStatus(statusRes.body)
   if (fromStatus) return fromStatus
-  const healthBody = await fetchJson(new URL("/api/health", endpoint.url), headers, signal)
-  const fromHealth = parseReadyStatus(healthBody)
+  if (!statusRes.ok) throw new Error(`GET /api/status ${String(statusRes.status)}`)
+  const healthRes = await fetchJson(new URL("/api/health", endpoint.url), headers, signal)
+  const fromHealth = parseReadyStatus(healthRes.body)
   if (fromHealth) return fromHealth
   throw new Error("registered OpenCode service is not healthy")
 }
 
-async function productionDependencies(): Promise<V2ServiceDependencies> {
-  const { Service } = await import("@opencode/client/service")
-  const { OpenCode } = await import("@opencode/client")
+function productionDependencies(): V2ServiceDependencies {
   return {
     service: {
       discover: () => readRegisteredEndpoint(),
-      headers: (endpoint) => Service.headers(endpoint),
+      headers: serviceHeaders,
     },
     make: (options) => OpenCode.make(options) as unknown as V2ServiceClient,
-    probe: (endpoint, signal) => fetchServiceStatus(endpoint, Service.headers(endpoint), signal),
+    probe: (endpoint, signal) => fetchServiceStatus(endpoint, serviceHeaders(endpoint), signal),
   }
 }
 
@@ -186,7 +207,7 @@ export async function discoverOwnService(
   dependencies?: V2ServiceDependencies,
   timeoutMs = SERVICE_REQUEST_TIMEOUT_MS,
 ): Promise<{ endpoint: V2ServiceEndpoint; client: V2ServiceClient; health: V2ServiceStatus } | null> {
-  const deps = dependencies ?? testDependencies ?? (await productionDependencies())
+  const deps = dependencies ?? testDependencies ?? productionDependencies()
   const endpoint = await withServiceTimeout(deps.service.discover(), timeoutMs)
   if (!endpoint) return null
   const client = deps.make({ baseUrl: endpoint.url, headers: deps.service.headers(endpoint) })
@@ -201,10 +222,16 @@ export async function discoverOwnService(
 /** Resolve the registered client once per live service; never start a service. */
 export async function ownServiceClient(): Promise<V2ServiceClient | null> {
   if (!clientPromise) {
-    const request = discoverOwnService().then((found) => found?.client ?? null).catch((err) => {
-      console.warn("[opencode-codex-memory] registered OpenCode service unavailable:", err)
-      return null
-    })
+    const request = discoverOwnService()
+      .then((found) => {
+        lastFailure = found ? null : "no registered OpenCode 2 service.json"
+        return found?.client ?? null
+      })
+      .catch((err) => {
+        lastFailure = err instanceof Error ? err.message : String(err)
+        console.warn("[opencode-codex-memory] registered OpenCode service unavailable:", err)
+        return null
+      })
     clientPromise = request
     const result = await request
     if (!result) clientPromise = null

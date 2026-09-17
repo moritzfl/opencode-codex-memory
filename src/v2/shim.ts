@@ -23,7 +23,7 @@
  */
 import type { Plugin } from "@opencode/plugin"
 import { memoryRoot } from "../paths.js"
-import { invalidateOwnService, ownServiceClient, type V2ServiceClient } from "./service.js"
+import { invalidateOwnService, lastServiceFailure, ownServiceClient, type V2ServiceClient } from "./service.js"
 
 export type V2Context = Plugin.Context
 
@@ -342,19 +342,25 @@ async function v2promptWithWait(
 export function buildV1ClientShim(): unknown {
   async function serviceOrThrow(): Promise<V2ServiceClient> {
     const client = await ownServiceClient()
-    if (!client) throw new Error("no healthy registered OpenCode 2 service for global memory operations")
+    if (!client) {
+      throw new Error(lastServiceFailure() ?? "no healthy registered OpenCode 2 service for global memory operations")
+    }
     return client
   }
 
-  async function listGlobalSessions(limit: number, cursor?: string | number, search?: string): Promise<{ data: unknown[] }> {
-    const client = await serviceOrThrow()
+  async function paginateSessionList(
+    listFn: (input: Record<string, unknown>) => Promise<unknown>,
+    limit: number,
+    cursor?: string | number,
+    search?: string,
+  ): Promise<{ data: unknown[] }> {
     const pageSize = Math.min(Math.max(limit, 1), 5000)
     const out: unknown[] = []
     const seenCursors = new Set<string>()
     const timestampCursor = typeof cursor === "number" ? cursor : undefined
     let next = typeof cursor === "string" ? cursor : undefined
     while (out.length < limit) {
-      const response = (await client.session.list?.({
+      const response = (await listFn({
         limit: pageSize,
         order: "desc",
         parentID: null,
@@ -383,6 +389,16 @@ export function buildV1ClientShim(): unknown {
       next = candidate
     }
     return { data: out.slice(0, limit) }
+  }
+
+  async function listGlobalSessions(limit: number, cursor?: string | number, search?: string): Promise<{ data: unknown[] }> {
+    const localList = v2ctx ? (v2ctx.session as { list?: unknown }).list : undefined
+    if (typeof localList === "function") {
+      return paginateSessionList((input) => localList(input), limit, cursor, search)
+    }
+    const client = await serviceOrThrow()
+    if (typeof client.session.list !== "function") throw new Error("registered service does not support session.list")
+    return paginateSessionList((input) => client.session.list(input), limit, cursor, search)
   }
 
   const session = {
