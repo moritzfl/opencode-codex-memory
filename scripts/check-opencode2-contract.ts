@@ -130,6 +130,15 @@ async function main(): Promise<void> {
     note(typeof mod.default?.setup === "function", "default export adds V2 setup()")
     note(mod.default?.id === "opencode-codex-memory", "plugin id unchanged")
 
+    const tuiEntry = path.resolve(root, pkg.exports?.["./tui"]?.import ?? "./dist/src/tui.js")
+    if (!fs.existsSync(tuiEntry)) failSetup(`tui entry missing — run build first`)
+    const tuiSrc = fs.readFileSync(tuiEntry, "utf8")
+    note(!tuiSrc.includes("@opencode/plugin"), "./tui JS does not import the V2 TUI SDK")
+    const tuimod = await import(tuiEntry + `?t=${Date.now()}`)
+    note(typeof tuimod.default?.tui === "function", "./tui entry exports tui() for OpenCode 1.18.29+")
+    note(typeof tuimod.default?.setup === "function", "./tui entry exports setup() for OpenCode 2")
+    note(typeof tuimod.default?.server !== "function", "./tui entry has no server() (1.18.30 forbids both)")
+
     const v2entry = path.resolve(root, pkg.exports?.["./v2"]?.import ?? "./dist/src/v2/index.js")
     if (!fs.existsSync(v2entry)) failSetup(`v2 entry missing — run build first`)
     const v2mod = await import(v2entry + `?t=${Date.now()}`)
@@ -177,8 +186,8 @@ async function main(): Promise<void> {
         const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball, "@types/node"], v1Install)
         note(v1.code === 0, `packed artifact installs for V1${v1.code === 0 ? "" : `: ${v1.stderr.slice(-1000)}`}`)
         if (v1.code === 0) {
-          const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) })"], v1Install)
-          note(loaded.code === 0, "packed V1 artifact loads without V2 peers")
+          const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) }).then(() => import('opencode-codex-memory/tui')).then(async (m) => { if (typeof m.default?.tui !== 'function' || typeof m.default?.setup !== 'function' || typeof m.default?.server === 'function') process.exit(1); await m.default.tui() })"], v1Install)
+          note(loaded.code === 0, "packed V1 artifact loads server+tui without V2 peers")
           const consumer = path.join(v1Install, "consumer.mts")
           fs.writeFileSync(consumer, 'import plugin from "opencode-codex-memory"\nconst server = plugin.server\nif (typeof server !== "function") throw new Error("missing V1 server export")\n')
           const typecheck = await runQuiet(

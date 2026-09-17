@@ -28,6 +28,18 @@ try {
   const v1 = mod.default
   if (typeof v1?.server !== "function") fail("default export is not a V1 plugin module ({ id, server() })")
 
+  const tuiPath = pkg.exports?.["./tui"]?.import
+  if (typeof tuiPath !== "string") fail("package.json missing exports['./tui'].import")
+  const tuiEntry = path.resolve(root, tuiPath)
+  if (!fs.existsSync(tuiEntry)) fail(`tui entry ${tuiPath} does not exist — run build first`)
+  const tuiSrc = fs.readFileSync(tuiEntry, "utf8")
+  if (tuiSrc.includes("@opencode/plugin")) fail("tui entry must not mention @opencode/plugin (1.x has no V2 TUI SDK)")
+  const tui = (await import(tuiEntry)).default
+  if (typeof tui?.tui !== "function") fail("tui export missing tui() — OpenCode 1.18.29+ TUI loader requires it")
+  if (typeof tui?.setup !== "function") fail("tui export missing setup() — OpenCode 2 TUI loader requires it")
+  if (typeof tui?.server === "function") fail("tui export must not also have server() — 1.18.30 forbids both")
+  await tui.tui()
+
   const stubClient = {
     session: { list: async () => ({ data: [] }) },
     mcp: { status: async () => ({ data: {} }) },

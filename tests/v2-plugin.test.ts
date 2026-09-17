@@ -124,7 +124,9 @@ describe("v2 setup", () => {
     expect(pkg.peerDependenciesMeta?.zod?.optional).toBe(true)
     expect(pkg.peerDependenciesMeta?.["@opencode/plugin"]?.optional).toBe(true)
     expect(pkg.exports?.["."]?.import).toBe("./dist/src/index.js")
+    expect(pkg.exports?.["./server"]?.import).toBe("./dist/src/index.js")
     expect(pkg.exports?.["./v2"]?.import).toBe("./dist/src/v2/index.js")
+    expect(pkg.exports?.["./tui"]?.import).toBe("./dist/src/tui.js")
   })
 
   it("serves read-only status with effective options without starting memory jobs", async () => {

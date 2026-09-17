@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode 1.18.29+ loads `exports["./tui"]` and requires `default.tui()`.
+  0.7.x pointed that export at the OpenCode 2 sidebar, which imports
+  `@opencode/plugin/tui` — missing on 1.x, so the TUI reported the plugin
+  unable to load. `./tui` is now a dual-host wrapper: 1.x gets a no-op
+  `tui()`, OpenCode 2 still lazy-loads the sidebar via `setup()`.
+
 ## [0.7.1] - 2026-09-17
 
 ### Fixed

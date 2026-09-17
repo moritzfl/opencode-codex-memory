@@ -59,10 +59,12 @@ via the drift script before proposing structural changes.
   in `src/v2/`); `opencode.json` stays the V1 `agent` bundle (same D2
   allowlist; V2 agents are provisioned at runtime; V2 action names: `edit`
   covers write/patch; `tests/v2-agents.test.ts` enforces it); `bun run
-  contract:v2` must pass alongside `bun run contract`. The `./tui` entry
-  (`src/v2/tui.tsx`, RPC in `src/v2/status-rpc.ts`) adds the sidebar section:
-  `setup()` must only claim slots (Solid-scoped APIs like `keymap.layer`
-  belong in slot components), the TUI bundle may import only
+  contract:v2` must pass alongside `bun run contract`. The package `./tui`
+  export is `src/tui.ts` (OpenCode 1.18.29+ requires `default.tui()` and
+  must not import the V2 TUI SDK). The sidebar itself is `src/v2/tui.tsx`
+  (RPC in `src/v2/status-rpc.ts`), lazy-loaded from that wrapper's
+  `setup()`: `setup()` must only claim slots (Solid-scoped APIs like
+  `keymap.layer` belong in slot components), the TUI bundle may import only
   `@opencode/plugin/tui` + `solid-js` + `@opentui/solid`, and `bun run build`
   compiles the JSX via `scripts/build-tui.ts`.
 

@@ -18,8 +18,8 @@
       "types": "./dist/src/v2/index.d.ts"
     },
     "./tui": {
-      "types": "./dist/src/v2/tui.d.ts",
-      "import": "./dist/src/v2/tui.js"
+      "types": "./dist/src/tui.d.ts",
+      "import": "./dist/src/tui.js"
     },
     "./tools/*": {
       "import": "./dist/tools/*.js",

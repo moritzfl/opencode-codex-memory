@@ -25,6 +25,9 @@ All V1 options apply unchanged: `generate_memories`, `use_memories`,
 
 ## What you get
 
+On OpenCode 1.x the plugin still loads; there is no Memory sidebar there (that
+UI is OpenCode 2 only).
+
 On OpenCode 2 the session sidebar grows a **Memory** section. `/memory-status`
 (also **Show memory status** in the command palette) opens the same snapshot
 `memory_inspect` uses: effective models, read/write settings, import status,
