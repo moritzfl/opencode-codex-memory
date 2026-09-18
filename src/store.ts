@@ -515,6 +515,7 @@ export class MemoryStore {
   phase2JobSnapshot(): {
     status: string
     last_error: string | null
+    started_at: number | null
     finished_at: number | null
     retry_at: number | null
     lease_until: number | null
@@ -523,11 +524,12 @@ export class MemoryStore {
   } | null {
     const row = this.db
       .prepare(
-        `SELECT status, finished_at, last_error, retry_at, lease_until, last_success_watermark FROM memory_jobs
+        `SELECT status, started_at, finished_at, last_error, retry_at, lease_until, last_success_watermark FROM memory_jobs
          WHERE kind='memory_consolidate_global' AND job_key='global'`,
       )
       .get() as {
         status: string
+        started_at: number | null
         finished_at: number | null
         last_error: string | null
         retry_at: number | null
@@ -550,6 +552,7 @@ export class MemoryStore {
     return {
       status: row.status,
       last_error: row.last_error,
+      started_at: row.started_at,
       finished_at: row.finished_at,
       retry_at: row.retry_at,
       lease_until: row.lease_until,

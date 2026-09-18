@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Phase 2 no longer walks every file under `memories/.git` looking for
+  symlinks. A nested junction or symlink cycle (common on Windows) could
+  hang consolidation as "in-flight" with no error. Only the `.git` entry
+  itself is checked. Git baseline/diff/reset also time out after 2 minutes.
+  `memory_inspect` now shows how long a running consolidation has been
+  going and when its lease expires.
+
 ## [0.7.2] - 2026-09-17
 
 ### Fixed

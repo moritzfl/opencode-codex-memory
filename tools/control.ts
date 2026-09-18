@@ -208,6 +208,14 @@ function fmtUnixSec(sec: number | null | undefined): string {
   return sec ? new Date(sec * 1000).toISOString() : "none"
 }
 
+function fmtElapsedSec(startedAtSec: number | null | undefined): string {
+  if (!startedAtSec) return "unknown"
+  const sec = Math.max(0, Math.floor(Date.now() / 1000) - startedAtSec)
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
+}
+
 function fmtWatermarkMs(ms: number | null | undefined): string {
   if (ms === 0) return "0 (no consumed inputs)"
   if (ms === null || ms === undefined) return "none"
@@ -245,6 +253,9 @@ export const memory_inspect = tool({
         ? [
             `phase2_status: ${phase2.status}`,
             `phase2_last_error: ${phase2.last_error ?? "none"}`,
+            `phase2_started_at: ${fmtUnixSec(phase2.started_at)}`,
+            `phase2_running_for: ${phase2.status === "running" ? fmtElapsedSec(phase2.started_at) : "n/a"}`,
+            `phase2_lease_until: ${fmtUnixSec(phase2.lease_until)}`,
             `phase2_retry_at: ${fmtUnixSec(phase2.retry_at)}`,
             `phase2_last_attempt_finished_at: ${fmtUnixSec(phase2.finished_at)}`,
             `phase2_last_success_watermark: ${fmtWatermarkMs(phase2.last_success_watermark)}`,
@@ -254,6 +265,9 @@ export const memory_inspect = tool({
         : [
             "phase2_status: none",
             "phase2_last_error: none",
+            "phase2_started_at: none",
+            "phase2_running_for: n/a",
+            "phase2_lease_until: none",
             "phase2_retry_at: none",
             "phase2_last_attempt_finished_at: none",
             "phase2_last_success_watermark: none",

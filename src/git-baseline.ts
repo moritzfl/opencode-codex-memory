@@ -43,7 +43,7 @@ async function ensureInit(dir: string): Promise<void> {
   const gitDir = path.join(dir, ".git")
   let recreate = false
   try {
-    recreate = containsSymlink(gitDir) || !fs.lstatSync(gitDir).isDirectory()
+    recreate = gitMetadataUnusable(gitDir)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
   }
@@ -53,14 +53,14 @@ async function ensureInit(dir: string): Promise<void> {
   }
 }
 
-function containsSymlink(root: string): boolean {
-  const st = fs.lstatSync(root)
-  if (st.isSymbolicLink()) return true
-  if (!st.isDirectory()) return false
-  for (const name of fs.readdirSync(root)) {
-    if (containsSymlink(path.join(root, name))) return true
-  }
-  return false
+/**
+ * Only the `.git` entry itself. A recursive walk of git objects hangs on
+ * Windows junctions / symlink cycles and is not needed: we only refuse a
+ * `.git` that is a symlink or a non-directory.
+ */
+function gitMetadataUnusable(gitDir: string): boolean {
+  const st = fs.lstatSync(gitDir)
+  return st.isSymbolicLink() || !st.isDirectory()
 }
 
 // statusMatrix rows are [filepath, head, workdir, stage]; head !== workdir

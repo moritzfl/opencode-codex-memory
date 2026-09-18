@@ -129,6 +129,18 @@ describe("git-baseline", () => {
     expect(diff.changes).toEqual([])
   })
 
+  it("does not recurse into .git (symlink cycles / Windows junctions hang phase 2)", async () => {
+    const { ensureBaseline } = require("../src/git-baseline.js")
+    fs.writeFileSync(memFile("a.md"), "x\n")
+    expect(await ensureBaseline()).toBe(true)
+    const objects = path.join(TEST_ROOT, "memories", ".git", "objects")
+    fs.mkdirSync(objects, { recursive: true })
+    fs.symlinkSync(TEST_ROOT, path.join(objects, "loop"))
+    const started = Date.now()
+    expect(await ensureBaseline()).toBe(true)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  })
+
   it("replaces symlinked git metadata without writing through it", async () => {
     const { ensureBaseline } = require("../src/git-baseline.js")
     const outside = path.join(TEST_ROOT, "outside-git")

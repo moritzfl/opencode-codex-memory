@@ -16,7 +16,7 @@ import {
   SubagentCancelledError,
   SubagentShutdownError,
 } from "./llm.js"
-import { hostSessionLiveness } from "./host-client.js"
+import { hostSessionLiveness, withHostTimeout } from "./host-client.js"
 import { invalidateCache } from "./source.js"
 import { memoryRoot } from "./paths.js"
 import {
@@ -50,6 +50,7 @@ export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
 // Export runs only after a successful phase 2 (fresh, validated artifacts) and
 // must never fail the run — Codex's workspace is best-effort foreign territory.
 const PHASE2_LIVE_CHECK_CONCURRENCY = 8
+const GIT_TIMEOUT_MS = 120_000
 
 /**
  * Codex get_phase2_input_selection re-validates each row against the live
@@ -175,7 +176,7 @@ export async function runPhase2(
       // ad-hoc notes added since then reach consolidation. Stale stage-1
       // output pruning happens in phase 1, before the rate gate (codex
       // start.rs ordering).
-      if (!await ensureBaseline()) {
+      if (!await withHostTimeout(ensureBaseline(), GIT_TIMEOUT_MS, "ensureBaseline")) {
         store.markPhase2Failed(claim.ownershipToken, "git baseline failed")
         return { status: "baseline_failed" }
       }
@@ -215,7 +216,7 @@ export async function runPhase2(
         }
       }
 
-      const diff = await captureWorkspaceDiff()
+      const diff = await withHostTimeout(captureWorkspaceDiff(), GIT_TIMEOUT_MS, "captureWorkspaceDiff")
       if (releaseIfShuttingDown(store, claim.ownershipToken)) {
         return { status: "shutting_down" }
       }
@@ -326,7 +327,7 @@ export async function runPhase2(
         return { status: "failed_invalid_artifacts" }
       }
 
-      if (!await resetBaseline()) {
+      if (!await withHostTimeout(resetBaseline(), GIT_TIMEOUT_MS, "resetBaseline")) {
         store.markPhase2Failed(claim.ownershipToken, "baseline reset failed")
         return { status: "baseline_reset_failed" }
       }
