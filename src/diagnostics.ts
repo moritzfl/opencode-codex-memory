@@ -31,10 +31,15 @@ export function recordDiagnostic(level: DiagnosticLevel, kind: string, message: 
 }
 
 export function recordDiscoveryStatus(status: Omit<DiscoveryStatus, "at">): void {
+  const prev = discovery
   discovery = { ...status, at: Date.now() }
   if (!status.ok) {
     recordDiagnostic("warn", "discovery", status.error ?? "session discovery failed")
-  } else {
+    return
+  }
+  // Same count every 30s cache hit is not a pipeline event — only log
+  // changes (or the first success) so inspect is not 12× "listed 1".
+  if (!prev || !prev.ok || prev.count !== status.count) {
     recordDiagnostic("info", "discovery", `listed ${status.count} session(s)`)
   }
 }
