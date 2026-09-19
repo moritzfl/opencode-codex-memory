@@ -779,10 +779,16 @@ export class MemoryStore {
   /**
    * Stage-1 job counts + recent failures for memory_inspect. Helps diagnose
    * "nothing is learning" without reading the raw jobs table.
+   *
+   * `staleBeforeSec`: exhausted jobs finished before this unix-seconds cutoff
+   * (typically now − max_rollout_age_days) are counted in `stale_exhausted`
+   * and omitted from `recent_errors` so leftover rows from old plugin
+   * versions do not bury live due/backoff failures.
    */
-  stage1JobSnapshot(): {
+  stage1JobSnapshot(staleBeforeSec?: number): {
     by_status: Record<string, number>
-    by_failure_class: { backoff: number; provider_capacity: number; other_exhausted: number }
+    by_failure_class: { backoff: number; provider_capacity: number; other_exhausted: number; due: number }
+    stale_exhausted: number
     recent_errors: Stage1RecentError[]
   } {
     const rows = this.db
@@ -793,7 +799,7 @@ export class MemoryStore {
     const tNow = nowSec()
     const errorRows = this.db
       .prepare(
-        `SELECT job_key AS session_id, last_error, retry_at, status, retry_remaining FROM memory_jobs
+        `SELECT job_key AS session_id, last_error, retry_at, status, retry_remaining, finished_at FROM memory_jobs
          WHERE kind='memory_stage1' AND last_error IS NOT NULL
          ORDER BY COALESCE(finished_at, started_at, 0) DESC`,
       )
@@ -803,28 +809,34 @@ export class MemoryStore {
         retry_at: number | null
         status: string
         retry_remaining: number
+        finished_at: number | null
       }[]
-    const by_failure_class = { backoff: 0, provider_capacity: 0, other_exhausted: 0 }
-    const recent_errors: Stage1RecentError[] = []
+    const by_failure_class = { backoff: 0, provider_capacity: 0, other_exhausted: 0, due: 0 }
+    const live: Stage1RecentError[] = []
+    let stale_exhausted = 0
     for (const row of errorRows) {
       const failure_class = classifyStage1Failure(row, tNow)
       if (failure_class) by_failure_class[failure_class]++
-      if (recent_errors.length < 5) {
-        recent_errors.push({
-          session_id: row.session_id,
-          last_error: row.last_error,
-          retry_at: row.retry_at,
-          status: row.status,
-          retry_remaining: row.retry_remaining,
-          failure_class,
-        })
+      const entry: Stage1RecentError = {
+        session_id: row.session_id,
+        last_error: row.last_error,
+        retry_at: row.retry_at,
+        status: row.status,
+        retry_remaining: row.retry_remaining,
+        failure_class,
       }
+      if (isStaleExhausted(row, staleBeforeSec)) {
+        stale_exhausted++
+        continue
+      }
+      live.push(entry)
     }
-    return { by_status, by_failure_class, recent_errors }
+    live.sort((a, b) => liveErrorRank(a.failure_class) - liveErrorRank(b.failure_class))
+    return { by_status, by_failure_class, stale_exhausted, recent_errors: live.slice(0, 5) }
   }
 }
 
-export type Stage1FailureClass = "backoff" | "provider_capacity" | "other_exhausted"
+export type Stage1FailureClass = "backoff" | "provider_capacity" | "other_exhausted" | "due"
 
 export interface Stage1RecentError {
   session_id: string
@@ -835,6 +847,24 @@ export interface Stage1RecentError {
   failure_class: Stage1FailureClass | null
 }
 
+function liveErrorRank(klass: Stage1FailureClass | null): number {
+  if (klass === "due") return 0
+  if (klass === "backoff") return 1
+  if (klass === "provider_capacity") return 2
+  if (klass === "other_exhausted") return 3
+  return 4
+}
+
+function isStaleExhausted(
+  row: { status: string; retry_remaining: number; finished_at: number | null; retry_at: number | null },
+  staleBeforeSec: number | undefined,
+): boolean {
+  if (staleBeforeSec == null) return false
+  if (row.status !== "failed" && row.retry_remaining > 0) return false
+  const ts = row.finished_at ?? row.retry_at ?? 0
+  return ts > 0 && ts < staleBeforeSec
+}
+
 function classifyStage1Failure(
   row: { status: string; last_error: string; retry_at: number | null; retry_remaining: number },
   nowSec: number,
@@ -843,6 +873,7 @@ function classifyStage1Failure(
     return isProviderCapacityError(row.last_error) ? "provider_capacity" : "other_exhausted"
   }
   if (row.retry_at != null && row.retry_at > nowSec) return "backoff"
+  if (row.retry_at != null && row.retry_at <= nowSec) return "due"
   if (isProviderCapacityError(row.last_error)) return "provider_capacity"
   return null
 }

@@ -386,8 +386,46 @@ describe("MemoryStore stage1", () => {
     const snap = store.stage1JobSnapshot()
     expect(snap.by_failure_class.backoff).toBeGreaterThanOrEqual(1)
     expect(snap.by_failure_class.other_exhausted).toBe(1)
+    expect(snap.by_failure_class.due).toBe(0)
+    expect(snap.stale_exhausted).toBe(0)
     expect(snap.recent_errors.some((e: { failure_class: string }) => e.failure_class === "backoff")).toBe(true)
     expect(snap.recent_errors.some((e: { session_id: string }) => e.session_id === "perm")).toBe(true)
+  })
+
+  it("classifies pending jobs with a past retry_at as due", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    const token = claimOne(store, "ses_due")
+    store.markStage1Failed("ses_due", token, "extraction response contained no JSON object")
+    openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='ses_due'").run()
+    const snap = store.stage1JobSnapshot()
+    expect(snap.by_failure_class.due).toBe(1)
+    expect(snap.recent_errors[0]).toEqual(expect.objectContaining({ session_id: "ses_due", failure_class: "due" }))
+  })
+
+  it("omits exhausted jobs older than the stale cutoff from recent_errors", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const store = new MemoryStore()
+    let permToken = claimOne(store, "perm_old")
+    store.markStage1Failed("perm_old", permToken, "boom 0")
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='perm_old'").run()
+      permToken = claimOne(store, "perm_old")
+      store.markStage1Failed("perm_old", permToken, `boom ${i}`)
+    }
+    openDb().prepare("UPDATE memory_jobs SET finished_at = 1 WHERE job_key='perm_old'").run()
+    const dueToken = claimOne(store, "ses_due")
+    store.markStage1Failed("ses_due", dueToken, "extraction response contained no JSON object")
+    openDb().prepare("UPDATE memory_jobs SET retry_at = 1 WHERE job_key='ses_due'").run()
+
+    const staleBefore = Math.floor(Date.now() / 1000) - 10 * 86_400
+    const snap = store.stage1JobSnapshot(staleBefore)
+    expect(snap.by_failure_class.other_exhausted).toBe(1)
+    expect(snap.stale_exhausted).toBe(1)
+    expect(snap.by_failure_class.due).toBe(1)
+    expect(snap.recent_errors.map((e: { session_id: string }) => e.session_id)).toEqual(["ses_due"])
   })
 
   it("markStage1SucceededNoOutput finishes the job and drops the output row", () => {
