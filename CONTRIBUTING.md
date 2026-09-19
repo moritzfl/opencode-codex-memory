@@ -56,12 +56,23 @@ bun run build && bun run smoke && bun run contract
 GitHub Actions runs `bun test`, typecheck, build, and smoke on every PR to
 `main`. Live host checks (`contract`, `live:*`) stay manual.
 
-Live checks against the **official** opencode binary (XDG-sandboxed; needs
-provider auth + a configured model — never touches your real memory home):
+Live checks against the **official** opencode binary (XDG-sandboxed; never
+touches your real memory home or host OpenCode credentials). Copy
+`.env.example` to `.env` and set:
+
+- `OPENCODE_LIVE_API_KEY`
+- `OPENCODE_LIVE_BASE_URL` (OpenAI-compatible `/v1` endpoint)
+- `OPENCODE_LIVE_MODEL` (model id, or `provider/id` — prefix is stripped)
+
+No API key? Use the local OpenAI-compatible proxy in
+[LLM Subscription Usage](https://github.com/moritzfl/openai-usage-quota-intellij)
+(IntelliJ plugin): enable it, then paste **Copy Base URL** into
+`OPENCODE_LIVE_BASE_URL` and **Copy API Key** into `OPENCODE_LIVE_API_KEY`.
 
 ```bash
-bun run live:read    # system-prompt injection only
-bun run live:e2e     # full write pipeline (Phase 1 + 2 + closed loop)
+cp .env.example .env   # then fill in key + endpoint + model
+bun run live:read      # system-prompt injection only
+bun run live:e2e       # full write pipeline (Phase 1 + 2 + closed loop)
 ```
 
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.

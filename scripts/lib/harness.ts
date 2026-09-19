@@ -8,7 +8,7 @@ import net from "net"
 import os from "os"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Database } from "bun:sqlite"
+import { Database, type SQLQueryBindings } from "bun:sqlite"
 
 export const MARKER = "INTEGRATION-TEST-MARKER-42"
 export const MARKER_LINE = `${MARKER}: user loves pineapple on pizza`
@@ -78,34 +78,72 @@ export function semverGte(a: string, b: string): boolean {
   return true
 }
 
-export function resolveHostModels(): HostModels {
-  const model = process.env.OPENCODE_LIVE_MODEL?.trim() || undefined
-  const smallModel = process.env.OPENCODE_LIVE_SMALL_MODEL?.trim() || undefined
-  if (model || smallModel) return { model, smallModel }
+const LIVE_ENV_HELP =
+  "copy .env.example to .env and set OPENCODE_LIVE_API_KEY, OPENCODE_LIVE_BASE_URL, OPENCODE_LIVE_MODEL. Live tests never read the host OpenCode DB or auth.json. No API key? Use the local proxy in LLM Subscription Usage: https://github.com/moritzfl/openai-usage-quota-intellij"
 
-  const candidates = [
-    path.join(os.homedir(), ".config", "opencode", "opencode.json"),
-    path.join(os.homedir(), ".opencode", "opencode.json"),
-  ]
-  for (const p of candidates) {
-    try {
-      const j = JSON.parse(fs.readFileSync(p, "utf8")) as {
-        model?: string
-        small_model?: string
-      }
-      if (j.model || j.small_model) {
-        return { model: j.model, smallModel: j.small_model }
-      }
-    } catch {
-      // try next
-    }
-  }
-  return {}
+export type LiveEnv = {
+  apiKey: string
+  baseUrl: string
+  /** OpenCode model ref, always `live/<id>`. */
+  model: string
+  smallModel: string
+  modelId: string
+  smallModelId: string
 }
 
-export function realAuthPath(): string {
-  if (process.env.OPENCODE_LIVE_AUTH?.trim()) return process.env.OPENCODE_LIVE_AUTH.trim()
-  return path.join(os.homedir(), ".local", "share", "opencode", "auth.json")
+export function liveModelId(raw: string): string {
+  const t = raw.trim()
+  const slash = t.lastIndexOf("/")
+  return slash >= 0 ? t.slice(slash + 1) : t
+}
+
+export function resolveLiveEnv(): LiveEnv | null {
+  const apiKey = process.env.OPENCODE_LIVE_API_KEY?.trim()
+  const baseUrl = process.env.OPENCODE_LIVE_BASE_URL?.trim()
+  const rawModel = process.env.OPENCODE_LIVE_MODEL?.trim()
+  if (!apiKey || !baseUrl || !rawModel) return null
+  const modelId = liveModelId(rawModel)
+  if (!modelId) return null
+  const rawSmall = process.env.OPENCODE_LIVE_SMALL_MODEL?.trim()
+  const smallModelId = rawSmall ? liveModelId(rawSmall) : modelId
+  return {
+    apiKey,
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    modelId,
+    smallModelId,
+    model: `live/${modelId}`,
+    smallModel: `live/${smallModelId}`,
+  }
+}
+
+/** OpenAI-compatible `live` provider. API key stays in env, never in the config file. */
+export function liveProviderConfig(live: LiveEnv): Record<string, unknown> {
+  const models: Record<string, unknown> = {
+    [live.modelId]: { name: live.modelId, modelID: live.modelId },
+  }
+  if (live.smallModelId !== live.modelId) {
+    models[live.smallModelId] = { name: live.smallModelId, modelID: live.smallModelId }
+  }
+  return {
+    live: {
+      name: "Live",
+      env: ["OPENCODE_LIVE_API_KEY"],
+      package: "@opencode/ai/providers/openai-compatible",
+      settings: {
+        baseURL: live.baseUrl,
+        apiKey: "{env:OPENCODE_LIVE_API_KEY}",
+      },
+      models,
+    },
+  }
+}
+
+export function resolveHostModels(): HostModels {
+  const live = resolveLiveEnv()
+  if (live) return { model: live.model, smallModel: live.smallModel }
+  const model = process.env.OPENCODE_LIVE_MODEL?.trim() || undefined
+  const smallModel = process.env.OPENCODE_LIVE_SMALL_MODEL?.trim() || undefined
+  return { model, smallModel }
 }
 
 export function ensureBuilt(): void {
@@ -150,9 +188,10 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   fs.writeFileSync(path.join(project, "README.md"), "# live test project\n")
 
   const pluginFileUrl = pathToFileURL(repoRoot()).href
+  const live = resolveLiveEnv()
   const models = {
-    model: opts.model ?? resolveHostModels().model,
-    smallModel: opts.smallModel ?? resolveHostModels().smallModel,
+    model: opts.model ?? live?.model ?? resolveHostModels().model,
+    smallModel: opts.smallModel ?? live?.smallModel ?? resolveHostModels().smallModel,
   }
 
   const pluginOptions = {
@@ -163,9 +202,15 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
 
   const config: Record<string, unknown> = {}
   if (models.model) config.model = models.model
-  if (models.smallModel) config.small_model = models.smallModel
+  if (models.smallModel) {
+    config.small_model = models.smallModel
+    config.agents = { title: { model: models.smallModel } }
+  }
+  if (live) config.providers = liveProviderConfig(live)
   if (!opts.bare) {
+    // V1 tuple plus V2 object form. OpenCode 2 prefers `plugins`.
     config.plugin = [[pluginFileUrl, pluginOptions]]
+    config.plugins = [{ package: pluginFileUrl, options: pluginOptions }]
   }
   fs.writeFileSync(
     path.join(configHome, "opencode", "opencode.json"),
@@ -220,20 +265,12 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   }
 }
 
-export function copyAuth(sandbox: Sandbox): boolean {
-  const src = realAuthPath()
-  if (!fs.existsSync(src)) return false
-  fs.mkdirSync(sandbox.opencodeData, { recursive: true })
-  fs.copyFileSync(src, path.join(sandbox.opencodeData, "auth.json"))
-  return true
-}
-
-export function requireAuth(sandbox: Sandbox): void {
-  if (!copyAuth(sandbox)) {
-    throw new Error(
-      `no auth.json at ${realAuthPath()} — live tests need provider credentials (or set OPENCODE_LIVE_AUTH)`,
-    )
+export function requireAuth(): LiveEnv {
+  const live = resolveLiveEnv()
+  if (!live) {
+    throw new Error(`missing live test credentials — ${LIVE_ENV_HELP}`)
   }
+  return live
 }
 
 export function requireModels(models: HostModels = resolveHostModels()): {
@@ -241,9 +278,7 @@ export function requireModels(models: HostModels = resolveHostModels()): {
   smallModel: string
 } {
   if (!models.model) {
-    throw new Error(
-      "no model configured — set OPENCODE_LIVE_MODEL or model in ~/.config/opencode/opencode.json",
-    )
+    throw new Error(`no model configured — ${LIVE_ENV_HELP}`)
   }
   return {
     model: models.model,
@@ -269,11 +304,19 @@ export async function freePort(): Promise<number> {
   })
 }
 
-async function fetchJson(url: string, sandbox: Sandbox, timeoutMs = 2000): Promise<{ ok: boolean; status: number; json: unknown }> {
+async function fetchJson(
+  url: string,
+  sandbox: Sandbox,
+  timeoutMs = 2000,
+  withAuth = true,
+): Promise<{ ok: boolean; status: number; json: unknown }> {
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
-    const res = await fetch(url, { headers: basicAuth(sandbox), signal: ac.signal })
+    const res = await fetch(url, {
+      headers: withAuth ? basicAuth(sandbox) : undefined,
+      signal: ac.signal,
+    })
     const text = await res.text()
     let json: unknown = null
     try {
@@ -287,23 +330,70 @@ async function fetchJson(url: string, sandbox: Sandbox, timeoutMs = 2000): Promi
   }
 }
 
+function jsonReady(json: unknown): boolean {
+  if (!json || typeof json !== "object") return false
+  const rec = json as { healthy?: unknown; version?: unknown; pid?: unknown; paths?: unknown; openapi?: unknown }
+  if (rec.healthy === true) return true
+  if (typeof rec.version === "string") return true
+  if (typeof rec.pid === "number" && typeof rec.version === "string") return true
+  if (rec.paths && typeof rec.paths === "object") return true
+  return false
+}
+
 async function serveIsReady(baseUrl: string, sandbox: Sandbox): Promise<boolean> {
-  const global = await fetchJson(`${baseUrl}/global/health`, sandbox).catch(() => null)
-  if (global?.ok && global.json && typeof global.json === "object" && (global.json as { healthy?: unknown }).healthy === true) {
-    return true
+  const urls = [
+    `${baseUrl}/openapi.json`,
+    `${baseUrl}/global/health`,
+    `${baseUrl}/api/status`,
+    `${baseUrl}/api/info`,
+  ]
+  for (const withAuth of [false, true]) {
+    for (const url of urls) {
+      const hit = await fetchJson(url, sandbox, 2000, withAuth).catch(() => null)
+      if (hit?.ok && (jsonReady(hit.json) || url.endsWith("/openapi.json"))) return true
+    }
   }
-  if (global?.ok && global.json && typeof (global.json as { version?: unknown }).version === "string") {
-    return true
-  }
-  const status = await fetchJson(`${baseUrl}/api/status`, sandbox).catch(() => null)
-  const body = status?.json
-  return Boolean(
-    status?.ok &&
-      body &&
-      typeof body === "object" &&
-      typeof (body as { pid?: unknown }).pid === "number" &&
-      typeof (body as { version?: unknown }).version === "string",
+  return false
+}
+
+async function spawnServe(
+  sandbox: Sandbox,
+  bin: string,
+  port: number,
+  logPath: string,
+  extraArgs: string[],
+): Promise<ChildProcess> {
+  const logFd = fs.openSync(logPath, "a")
+  const child = spawn(
+    bin,
+    ["serve", "--hostname", "127.0.0.1", "--port", String(port), ...extraArgs],
+    {
+      cwd: sandbox.project,
+      env: sandbox.env,
+      stdio: ["ignore", logFd, logFd],
+      detached: false,
+    },
   )
+  fs.closeSync(logFd)
+  return child
+}
+
+async function waitServeReady(child: ChildProcess, baseUrl: string, sandbox: Sandbox, logPath: string): Promise<void> {
+  const deadline = Date.now() + 60_000
+  let lastErr = "not ready"
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`opencode serve exited early (code ${child.exitCode}):\n${tail(logPath, 40)}`)
+    }
+    try {
+      if (await serveIsReady(baseUrl, sandbox)) return
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e)
+    }
+    await sleep(150)
+  }
+  await stopChild(child)
+  throw new Error(`opencode serve health timeout (${lastErr}):\n${tail(logPath, 40)}`)
 }
 
 export async function startServe(
@@ -313,40 +403,11 @@ export async function startServe(
   const bin = opts.bin ?? whichOpencode()
   const port = opts.port ?? (await freePort())
   const logPath = path.join(sandbox.root, "serve.log")
-  const logFd = fs.openSync(logPath, "w")
-  const child: ChildProcess = spawn(
-    bin,
-    ["serve", "--hostname", "127.0.0.1", "--port", String(port), ...(opts.extraArgs ?? [])],
-    {
-      cwd: sandbox.project,
-      env: sandbox.env,
-      stdio: ["ignore", logFd, logFd],
-      detached: false,
-    },
-  )
-  fs.closeSync(logFd)
-
+  const extraArgs = opts.extraArgs ?? []
   const baseUrl = `http://127.0.0.1:${port}`
-  const deadline = Date.now() + 60_000
-  let lastErr = ""
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        `opencode serve exited early (code ${child.exitCode}):\n${tail(logPath, 40)}`,
-      )
-    }
-    try {
-      if (await serveIsReady(baseUrl, sandbox)) break
-      lastErr = "not ready"
-    } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e)
-    }
-    await sleep(150)
-  }
-  if (Date.now() >= deadline) {
-    await stopChild(child)
-    throw new Error(`opencode serve health timeout (${lastErr}):\n${tail(logPath, 40)}`)
-  }
+
+  const child = await spawnServe(sandbox, bin, port, logPath, extraArgs)
+  await waitServeReady(child, baseUrl, sandbox, logPath)
 
   return {
     baseUrl,
@@ -516,7 +577,7 @@ export function opencodeDbPath(sandbox: Sandbox): string {
 export function sqlAll<T extends Record<string, unknown>>(
   dbPath: string,
   query: string,
-  params: unknown[] = [],
+  params: SQLQueryBindings[] = [],
 ): T[] {
   if (!fs.existsSync(dbPath)) return []
   const db = new Database(dbPath, { readonly: true, strict: false })
@@ -527,7 +588,7 @@ export function sqlAll<T extends Record<string, unknown>>(
   }
 }
 
-export function sqlRun(dbPath: string, query: string, params: unknown[] = []): void {
+export function sqlRun(dbPath: string, query: string, params: SQLQueryBindings[] = []): void {
   const db = new Database(dbPath, { readonly: false, create: false, strict: false })
   try {
     db.run("PRAGMA busy_timeout=5000")

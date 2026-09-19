@@ -6,3 +6,5 @@ memory.db
 memories/
 *.log
 .idea/
+.env
+.env.local

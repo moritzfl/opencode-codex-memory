@@ -41,8 +41,9 @@ via the drift script before proposing structural changes.
 
 - `./gradlew` is not used here. Dev commands: `bun install`, `bun test`,
   `bun run typecheck`, `bun run build`, `bun run smoke`, `bun run contract`.
-  Live host checks (need auth + model, XDG-sandboxed): `bun run live:read`,
-  `bun run live:e2e`.
+  Live host checks (need `.env` with `OPENCODE_LIVE_API_KEY` /
+  `OPENCODE_LIVE_BASE_URL` / `OPENCODE_LIVE_MODEL`, XDG-sandboxed; never
+  copy host OpenCode credentials): `bun run live:read`, `bun run live:e2e`.
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
 - Templates in `src/templates/*.md` are ported from codex with deliberate
   platform adaptations (citation tags, memory-tool guidance, session metadata,

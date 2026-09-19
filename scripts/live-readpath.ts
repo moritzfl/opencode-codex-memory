@@ -2,7 +2,8 @@
  * Live read-path check against the official opencode release.
  *
  * XDG-sandboxed: never touches the real opencode home.
- * Needs: opencode in PATH, provider auth, a configured model.
+ * Needs: opencode in PATH and `.env` live credentials (API key +
+ * OpenAI-compatible base URL + model). Never reads the host OpenCode DB.
  *
  *   bun run live:read
  *   OPENCODE_LIVE_KEEP=1 bun run live:read   # leave sandbox on disk
@@ -27,7 +28,7 @@ async function main() {
     smallModel: models.smallModel,
   })
   try {
-    requireAuth(sandbox)
+    requireAuth()
     writeSummary(sandbox, MARKER_LINE)
     log("read", `sandbox ${sandbox.root}`)
     log("read", `plugin ${sandbox.pluginFileUrl}`)

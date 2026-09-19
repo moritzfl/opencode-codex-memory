@@ -5,7 +5,8 @@
  *   read-path → work sessions → backdate → Phase 1 → Phase 2 →
  *   closed-loop injection → citation (soft) → memory_reset
  *
- * Needs: opencode in PATH, provider auth, model config. Costs real tokens.
+ * Needs: opencode in PATH, `.env` live credentials (API key + OpenAI-compatible
+ * base URL + model). Never reads the host OpenCode DB / auth.json.
  * `opencode run` alone is NOT enough for the write path — extraction needs a
  * process that outlives the idle event, so this driver uses `opencode serve`.
  *
@@ -147,7 +148,7 @@ async function main() {
   }
 
   try {
-    requireAuth(sandbox)
+    requireAuth()
     writeSummary(sandbox, `${MARKER_LINE}\n`)
     log("e2e", `sandbox ${sandbox.root}`)
     log("e2e", `plugin ${sandbox.pluginFileUrl}`)

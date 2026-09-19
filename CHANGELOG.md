@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Live e2e/readpath auth comes from `.env` (`OPENCODE_LIVE_API_KEY`,
+  `OPENCODE_LIVE_BASE_URL`, `OPENCODE_LIVE_MODEL`) and an OpenAI-compatible
+  `live` provider in the XDG sandbox. Host OpenCode sqlite / `auth.json` /
+  OAuth are not read. `opencode serve` health probes `/openapi.json`.
 - `memory_inspect` separates live extraction failures from leftover exhausted
   jobs older than `max_rollout_age_days`, labels pending jobs whose retry
   window has elapsed as `due`, and states Phase 2 idle/cooldown instead of a
