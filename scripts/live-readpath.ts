@@ -14,10 +14,13 @@ import {
   createSandbox,
   fail,
   log,
+  opencodeVersion,
   requireAuth,
   requireModels,
   runOpencode,
+  semverGte,
   writeSummary,
+  whichOpencode,
 } from "./lib/harness.js"
 
 async function main() {
@@ -30,6 +33,9 @@ async function main() {
   try {
     requireAuth()
     writeSummary(sandbox, MARKER_LINE)
+    const bin = whichOpencode()
+    const version = opencodeVersion(bin)
+    log("read", `bin ${bin} @ ${version}`)
     log("read", `sandbox ${sandbox.root}`)
     log("read", `plugin ${sandbox.pluginFileUrl}`)
     log("read", `model ${models.model}`)
@@ -38,6 +44,7 @@ async function main() {
       sandbox,
       [
         "run",
+        ...(semverGte(version, "2.0.0") ? ["--standalone"] : []),
         "--format",
         "json",
         `What do you remember from memory? If you see ${MARKER}, repeat that whole marker line exactly.`,

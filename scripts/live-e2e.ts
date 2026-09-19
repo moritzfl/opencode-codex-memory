@@ -32,8 +32,10 @@ import {
   log,
   memoryDbPath,
   promptSession,
+  opencodeVersion,
   requireAuth,
   requireModels,
+  whichOpencode,
   sleep,
   sqlAll,
   startServe,
@@ -124,6 +126,8 @@ function phase2Job(sandbox: Sandbox) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const models = requireModels()
+  const bin = whichOpencode()
+  log("e2e", `bin ${bin} @ ${opencodeVersion(bin)}`)
   log("e2e", `models model=${models.model} small=${models.smallModel}`)
 
   const sandbox = createSandbox({
@@ -163,6 +167,7 @@ async function main() {
         sandbox,
         sid,
         `What do you remember from memory? If you see ${MARKER}, repeat that whole marker line exactly.`,
+        { timeoutMs: 300_000 },
       )
       check(text.includes(MARKER), "read", "memory_summary visible to model")
       if (!text.includes(MARKER)) {
@@ -175,32 +180,39 @@ async function main() {
     const workIds: string[] = []
     for (const f of FACTS) {
       const sid = await createSession(serve, sandbox, f.title)
-      const reply = await promptSession(serve, sandbox, sid, f.prompt, { timeoutMs: 180_000 })
+      const reply = await promptSession(serve, sandbox, sid, f.prompt, { timeoutMs: 300_000 })
       // Second turn so the transcript is more than a single Q&A.
       await promptSession(
         serve,
         sandbox,
         sid,
         `Confirm you stored the fact containing ${f.fact.split(":")[0]}. One sentence.`,
-        { timeoutMs: 120_000 },
+        { timeoutMs: 180_000 },
       )
       workIds.push(sid)
       log("work", `${sid} (${f.title}) reply_len=${reply.length}`)
       await sleep(1500)
     }
 
-    // ----- Step 3: stop → backdate → restart → trigger -----
-    log("idle", "stopping serve to backdate sessions")
-    await serve.stop()
-    serve = null
-    await sleep(500)
+    // ----- Step 3: backdate → trigger -----
+    // OpenCode 1: session times live in sqlite; stop/start so the next list
+    // sees the backdated watermark. OpenCode 2 isolated `serve` lists from
+    // this process; restarting wipes that, so backdate in place.
+    if (!serve.v2) {
+      log("idle", "stopping serve to backdate sessions")
+      await serve.stop()
+      serve = null
+      await sleep(500)
+    }
     const n = backdateSessions(sandbox, 2)
     log("idle", `backdated ${n} session(s) by 2h`)
     clearPhase2Job(sandbox)
-
-    serve = await startServe(sandbox)
+    if (!serve) {
+      serve = await startServe(sandbox)
+    }
     log("idle", "triggering idle via short session")
     await triggerIdle(serve, sandbox)
+    log("idle", `memory.db ${fs.existsSync(memoryDbPath(sandbox)) ? "present" : "missing"}`)
 
     // ----- Step 4: Phase 1 -----
     log("phase1", `waiting up to ${args.phase1TimeoutMs}ms for stage1 outputs`)

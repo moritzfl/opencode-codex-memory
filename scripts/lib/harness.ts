@@ -37,6 +37,8 @@ export type ServeHandle = {
   port: number
   stop: () => Promise<void>
   logPath: string
+  /** OpenCode 2.x HTTP API (`/api/session`, prompt+wait). */
+  v2: boolean
 }
 
 export function repoRoot(): string {
@@ -116,14 +118,15 @@ export function resolveLiveEnv(): LiveEnv | null {
   }
 }
 
-/** OpenAI-compatible `live` provider. API key stays in env, never in the config file. */
+function liveModels(live: LiveEnv, v2: boolean): Record<string, unknown> {
+  const entry = (id: string) => (v2 ? { name: id, modelID: id } : { name: id })
+  const models: Record<string, unknown> = { [live.modelId]: entry(live.modelId) }
+  if (live.smallModelId !== live.modelId) models[live.smallModelId] = entry(live.smallModelId)
+  return models
+}
+
+/** OpenCode 2 `providers` block. API key stays in env, never in the config file. */
 export function liveProviderConfig(live: LiveEnv): Record<string, unknown> {
-  const models: Record<string, unknown> = {
-    [live.modelId]: { name: live.modelId, modelID: live.modelId },
-  }
-  if (live.smallModelId !== live.modelId) {
-    models[live.smallModelId] = { name: live.smallModelId, modelID: live.smallModelId }
-  }
   return {
     live: {
       name: "Live",
@@ -133,7 +136,22 @@ export function liveProviderConfig(live: LiveEnv): Record<string, unknown> {
         baseURL: live.baseUrl,
         apiKey: "{env:OPENCODE_LIVE_API_KEY}",
       },
-      models,
+      models: liveModels(live, true),
+    },
+  }
+}
+
+/** OpenCode 1.x `provider` block (`npm` + `options`). Key is not inlined. */
+export function liveProviderV1Config(live: LiveEnv): Record<string, unknown> {
+  return {
+    live: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "Live",
+      options: {
+        baseURL: live.baseUrl,
+        apiKey: "{env:OPENCODE_LIVE_API_KEY}",
+      },
+      models: liveModels(live, false),
     },
   }
 }
@@ -206,16 +224,34 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     config.small_model = models.smallModel
     config.agents = { title: { model: models.smallModel } }
   }
-  if (live) config.providers = liveProviderConfig(live)
+  if (live) {
+    config.provider = liveProviderV1Config(live)
+    config.providers = liveProviderConfig(live)
+    config.permission = { "*": "allow" }
+  }
   if (!opts.bare) {
     // V1 tuple plus V2 object form. OpenCode 2 prefers `plugins`.
     config.plugin = [[pluginFileUrl, pluginOptions]]
     config.plugins = [{ package: pluginFileUrl, options: pluginOptions }]
+    // 2.x serve does not auto-install `plugins[].package = file://…`.
+    const plugDir = path.join(project, ".opencode", "plugins")
+    fs.mkdirSync(plugDir, { recursive: true })
+    const entry = path.join(repoRoot(), "dist", "src", "index.js")
+    fs.writeFileSync(
+      path.join(plugDir, "codex-memory.js"),
+      `export { default } from ${JSON.stringify(entry)}\n`,
+    )
   }
   fs.writeFileSync(
     path.join(configHome, "opencode", "opencode.json"),
     JSON.stringify(config, null, 2) + "\n",
   )
+  if (live) {
+    fs.writeFileSync(
+      path.join(opencodeData, "auth.json"),
+      `${JSON.stringify({ live: { type: "api", key: live.apiKey } }, null, 2)}\n`,
+    )
+  }
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -340,20 +376,22 @@ function jsonReady(json: unknown): boolean {
   return false
 }
 
-async function serveIsReady(baseUrl: string, sandbox: Sandbox): Promise<boolean> {
+async function serveIsReady(baseUrl: string, sandbox: Sandbox): Promise<boolean | string> {
   const urls = [
     `${baseUrl}/openapi.json`,
     `${baseUrl}/global/health`,
     `${baseUrl}/api/status`,
     `${baseUrl}/api/info`,
   ]
+  let last = "no response"
   for (const withAuth of [false, true]) {
     for (const url of urls) {
       const hit = await fetchJson(url, sandbox, 2000, withAuth).catch(() => null)
       if (hit?.ok && (jsonReady(hit.json) || url.endsWith("/openapi.json"))) return true
+      if (hit) last = `${hit.status} ${url.replace(baseUrl, "")} auth=${withAuth}`
     }
   }
-  return false
+  return last
 }
 
 async function spawnServe(
@@ -386,7 +424,9 @@ async function waitServeReady(child: ChildProcess, baseUrl: string, sandbox: San
       throw new Error(`opencode serve exited early (code ${child.exitCode}):\n${tail(logPath, 40)}`)
     }
     try {
-      if (await serveIsReady(baseUrl, sandbox)) return
+      const ready = await serveIsReady(baseUrl, sandbox)
+      if (ready === true) return
+      lastErr = typeof ready === "string" ? ready : "not ready"
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e)
     }
@@ -401,6 +441,7 @@ export async function startServe(
   opts: { port?: number; bin?: string; extraArgs?: string[] } = {},
 ): Promise<ServeHandle> {
   const bin = opts.bin ?? whichOpencode()
+  const v2 = semverGte(opencodeVersion(bin), "2.0.0")
   const port = opts.port ?? (await freePort())
   const logPath = path.join(sandbox.root, "serve.log")
   const extraArgs = opts.extraArgs ?? []
@@ -413,6 +454,7 @@ export async function startServe(
     baseUrl,
     port,
     logPath,
+    v2,
     stop: async () => {
       await stopChild(child)
     },
@@ -479,14 +521,25 @@ export async function api(
   return { status: res.status, json, text }
 }
 
+function unwrapData(json: unknown): unknown {
+  if (json && typeof json === "object" && "data" in json) return (json as { data: unknown }).data
+  return json
+}
+
 export async function createSession(
   serve: ServeHandle,
   sandbox: Sandbox,
   title: string,
 ): Promise<string> {
-  const res = await api(serve, sandbox, "POST", "/session", { title })
+  const res = serve.v2
+    ? await api(serve, sandbox, "POST", "/api/session", {
+        title,
+        location: { directory: sandbox.project },
+      })
+    : await api(serve, sandbox, "POST", "/session", { title })
   if (res.status >= 300) throw new Error(`createSession failed: ${res.status} ${res.text}`)
-  const id = (res.json as { id?: string })?.id
+  const data = unwrapData(res.json) as { id?: string } | null
+  const id = data?.id ?? (res.json as { id?: string } | null)?.id
   if (!id) throw new Error(`createSession: no id in ${res.text}`)
   return id
 }
@@ -499,6 +552,7 @@ export async function promptSession(
   opts: { agent?: string; timeoutMs?: number } = {},
 ): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 180_000
+  if (serve.v2) return promptSessionV2(serve, sandbox, sessionId, text, timeoutMs)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -519,9 +573,75 @@ export async function promptSession(
     const body = await res.text()
     if (!res.ok) throw new Error(`prompt failed: ${res.status} ${body.slice(0, 500)}`)
     return extractAssistantText(body)
+  } catch (e) {
+    if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
+      throw new Error(`prompt timed out after ${timeoutMs}ms`)
+    }
+    throw e
   } finally {
     clearTimeout(timer)
   }
+}
+
+async function promptSessionV2(
+  serve: ServeHandle,
+  sandbox: Sandbox,
+  sessionId: string,
+  text: string,
+  timeoutMs: number,
+): Promise<string> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const prompted = await api(serve, sandbox, "POST", `/api/session/${sessionId}/prompt`, { text })
+    if (prompted.status >= 300) {
+      throw new Error(`prompt failed: ${prompted.status} ${prompted.text.slice(0, 500)}`)
+    }
+    // session.wait long-polls and can hang on 2.0.9; poll messages instead.
+    const deadline = Date.now() + timeoutMs
+    let last = ""
+    while (Date.now() < deadline) {
+      if (controller.signal.aborted) break
+      const msgs = await api(serve, sandbox, "GET", `/api/session/${sessionId}/message`, undefined, {
+        order: "desc",
+      })
+      if (msgs.status >= 300) {
+        last = `message.list ${msgs.status} ${msgs.text.slice(0, 200)}`
+      } else {
+        const out = extractV2AssistantText(msgs.json)
+        if (out) return out
+        last = `no assistant yet (${msgs.text.slice(0, 120)})`
+      }
+      await sleep(500)
+    }
+    throw new Error(`prompt timed out after ${timeoutMs}ms (${last})`)
+  } catch (e) {
+    if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
+      throw new Error(`prompt timed out after ${timeoutMs}ms`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function extractV2AssistantText(json: unknown): string {
+  let data: unknown = unwrapData(json)
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const rec = data as { data?: unknown; items?: unknown }
+    if (Array.isArray(rec.data)) data = rec.data
+    else if (Array.isArray(rec.items)) data = rec.items
+  }
+  const rows = Array.isArray(data) ? data : []
+  const texts: string[] = []
+  for (const m of rows as Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>) {
+    if (m?.type !== "assistant") continue
+    for (const p of m.content ?? []) {
+      if (p?.type === "text" && typeof p.text === "string") texts.push(p.text)
+    }
+    if (texts.length) break
+  }
+  return texts.join("\n")
 }
 
 function extractAssistantText(body: string): string {
@@ -605,15 +725,41 @@ export function backdateSessions(sandbox: Sandbox, hours = 2): number {
   const db = new Database(dbPath, { readonly: false, strict: false })
   try {
     db.run("PRAGMA busy_timeout=5000")
+    const names = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name),
+    )
+    const table = names.has("session") ? "session" : names.has("session_v2") ? "session_v2" : null
+    if (!table) return 0
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((r) => r.name),
+    )
     const delta = hours * 3600 * 1000
+    const sets = ["time_updated = time_updated - ?"]
+    const params: SQLQueryBindings[] = [delta]
+    if (cols.has("time_idle")) {
+      sets.push("time_idle = CASE WHEN time_idle IS NULL THEN NULL ELSE time_idle - ? END")
+      params.push(delta)
+    }
     const r = db
       .prepare(
-        `UPDATE session
-         SET time_updated = time_updated - ?
+        `UPDATE "${table}"
+         SET ${sets.join(", ")}
          WHERE parent_id IS NULL
            AND title NOT LIKE 'codex-memory-%'`,
       )
-      .run(delta)
+      .run(...params)
+    if (names.has("session_message")) {
+      const msgCols = new Set(
+        (db.prepare(`PRAGMA table_info("session_message")`).all() as { name: string }[]).map((row) => row.name),
+      )
+      const msgSets = ["time_created = time_created - ?"]
+      const msgParams: SQLQueryBindings[] = [delta]
+      if (msgCols.has("time_updated")) {
+        msgSets.push("time_updated = time_updated - ?")
+        msgParams.push(delta)
+      }
+      db.prepare(`UPDATE session_message SET ${msgSets.join(", ")}`).run(...msgParams)
+    }
     return Number(r.changes ?? 0)
   } finally {
     db.close()

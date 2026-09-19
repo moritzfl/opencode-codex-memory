@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import {
   liveModelId,
   liveProviderConfig,
+  liveProviderV1Config,
   requireAuth,
   requireModels,
   resolveLiveEnv,
@@ -54,6 +55,10 @@ describe("live env auth", () => {
     expect(json).toContain("@opencode/ai/providers/openai-compatible")
     expect(json).toContain("{env:OPENCODE_LIVE_API_KEY}")
     expect(json).toContain("deepseek-v4-flash")
+    const v1 = JSON.stringify(liveProviderV1Config(live))
+    expect(v1).not.toContain("sk-secret")
+    expect(v1).toContain("@ai-sdk/openai-compatible")
+    expect(v1).toContain("https://ollama.com/v1")
   })
 
   it("resolveLiveEnv maps env to live/<model>", () => {
