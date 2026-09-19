@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-19
+
 ### Fixed
 
 - OpenCode 2 inside an IDE/`serve --port 0` host is not the registered
