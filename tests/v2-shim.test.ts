@@ -3,6 +3,7 @@ import {
   setV2Context,
   buildV1ClientShim,
   resetV2ShimStateForTest,
+  rememberV2Session,
   adaptV2Messages,
   adaptProviderCatalog,
   adaptMcpStatus,
@@ -196,13 +197,16 @@ describe("V1 client shim", () => {
   it("accepts only the registered service owned by this host process", async () => {
     const calls: string[] = []
     const endpoint = { url: "http://127.0.0.1:4096", auth: { type: "basic" as const, username: "opencode", password: "secret" } }
-    const client = { health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) } }
+    const client = {
+      session: {},
+      health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) },
+    }
     const found = await discoverOwnService({
       service: {
         discover: async () => { calls.push("discover"); return endpoint },
         headers: () => { calls.push("headers"); return { authorization: "Basic test" } },
       },
-      make: (options) => { calls.push(`make:${options.baseUrl}`); return client as any },
+      make: (options) => { calls.push(`make:${options.baseUrl}`); return client },
     })
     expect(found?.client).toBe(client)
     expect(found?.endpoint).toBe(endpoint)
@@ -210,21 +214,27 @@ describe("V1 client shim", () => {
   })
 
   it("rejects a registered endpoint whose health PID is not this process", async () => {
-    const client = { health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid + 1 }) } }
+    const client = {
+      session: {},
+      health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid + 1 }) },
+    }
     await expect(
       discoverOwnService({
         service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
-        make: () => client as any,
+        make: () => client,
       }),
     ).rejects.toThrow(/PID/i)
   })
 
   it("rejects a registered endpoint that is not healthy", async () => {
-    const client = { health: { get: async () => ({ healthy: false, version: "2.0.3", pid: process.pid }) } }
+    const client = {
+      session: {},
+      health: { get: async () => ({ healthy: false, version: "2.0.3", pid: process.pid }) },
+    }
     await expect(
       discoverOwnService({
         service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
-        make: () => client as any,
+        make: () => client,
       }),
     ).rejects.toThrow(/healthy/i)
   })
@@ -273,7 +283,7 @@ describe("V1 client shim", () => {
 
   it("surfaces GET /api/status HTTP failures instead of a generic unhealthy", async () => {
     const orig = globalThis.fetch
-    globalThis.fetch = (async () => new Response("denied", { status: 401 })) as typeof fetch
+    globalThis.fetch = (async () => new Response("denied", { status: 401 })) as unknown as typeof fetch
     try {
       await expect(fetchServiceStatus({ url: "http://127.0.0.1:9" }, undefined)).rejects.toThrow(/401/)
     } finally {
@@ -606,5 +616,57 @@ describe("V1 client shim", () => {
     const client = buildV1ClientShim() as any
     const res = await client.session.messages({ path: { id: "ses_live" } })
     expect(res.data).toEqual([{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }])
+  })
+
+  it("falls back to observed sessions when this process is not the registered service", async () => {
+    const { ctx } = fakeCtx()
+    setV2Context(ctx as any)
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({
+        health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid + 1 }) },
+        session: {},
+      }) as any,
+    })
+    rememberV2Session("ses_local", "/proj", "local chat")
+    rememberV2Session("ses_other", "/other", "codex-memory-consolidate")
+    const client = buildV1ClientShim() as any
+    const res = await client._client.get({
+      url: "/experimental/session",
+      query: { roots: true, limit: 10, directory: "" },
+    })
+    expect(res.data.map((row: { id: string }) => row.id).sort()).toEqual(["ses_local", "ses_other"])
+    expect(res.data.find((row: { id: string }) => row.id === "ses_local")).toEqual(
+      expect.objectContaining({ id: "ses_local", directory: "/proj" }),
+    )
+    const searched = await client._client.get({
+      url: "/experimental/session",
+      query: { limit: 10, search: "codex-memory-", directory: "" },
+    })
+    expect(searched.data.map((row: { id: string }) => row.id)).toEqual(["ses_other"])
+  })
+
+  it("uses ctx get/messages/delete when the registered service PID does not match", async () => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx as any)
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({
+        health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid + 1 }) },
+        session: {},
+      }) as any,
+    })
+    const client = buildV1ClientShim() as any
+    const live = await client.session.get({ path: { id: "ses_live" } })
+    expect(live.data?.id).toBe("ses_live")
+    const gone = await client.session.get({ path: { id: "ses_gone" } })
+    expect(gone.response?.status).toBe(404)
+    const transcript = await client.session.messages({ path: { id: "ses_live" } })
+    expect(transcript.data).toEqual([{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }])
+    await expect(client.session.delete({ path: { id: "ses_fallback" } })).resolves.toEqual({})
+    expect(calls.some((call) => call.name === "interrupt")).toBe(true)
+    expect(calls.some((call) => call.name === "wait")).toBe(true)
+    const after = await client.session.get({ path: { id: "ses_fallback" } })
+    expect(after.response?.status).toBe(404)
   })
 })

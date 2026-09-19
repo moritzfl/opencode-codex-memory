@@ -39,6 +39,7 @@ import { applyPluginOptions, handleSessionDeleted } from "../index.js"
 import {
   setV2Context,
   buildV1ClientShim,
+  rememberV2Session,
   type V2Context,
 } from "./shim.js"
 import { ensureV2Agents } from "./agents.js"
@@ -184,7 +185,8 @@ async function classifyExternalContextTool(toolName: string): Promise<boolean | 
   return false
 }
 
-function stampAndPump(sid: string): void {
+function stampAndPump(sid: string, directory?: string | null): void {
+  rememberV2Session(sid, directory ?? null)
   try {
     getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
   } catch (e) {
@@ -334,7 +336,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       const sid = ev?.sessionID
       if (!sid || isMemorySubSession(sid)) return
       if (!markV2TurnSeen(sid)) return
-      stampAndPump(sid)
+      stampAndPump(sid, ctx.location?.directory)
     } catch (err) {
       console.error("[opencode-codex-memory] v2 prompt hook error:", err)
     }
@@ -427,6 +429,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
             if (e.type === "session.execution.succeeded" || e.type === "session.execution.ended") {
               const sid = sessionIdFromV2Event(data)
               if (sid && !isMemorySubSession(sid)) {
+                rememberV2Session(sid, ctx.location?.directory)
                 trackBackgroundTask(triggerPhase1(sid))
               }
             }

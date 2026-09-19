@@ -5,8 +5,11 @@
  * run byte-identical) by presenting a V1-shaped client façade backed by the
  * V2 plugin context. Only genuinely missing V2 surfaces are adapted:
  *
- * - session list/discovery → the authenticated public service client
- *   discovered through the registered local service.
+ * - session list/discovery → ctx.session.list when the host exposes it,
+ *   else the authenticated public client for THIS process's registered
+ *   service. A PID mismatch (IDE `serve --port 0` vs `serve --service`)
+ *   does not list another host; it falls back to sessions this process
+ *   has observed.
  * - session.prompt agent/system/model/format/variant → V2 create-time
  *   agent/model (via switchAgent/switchModel) + generate.text for the
  *   json_schema extraction path (V2 prompts carry text only).
@@ -88,9 +91,55 @@ export function isReleasedSubSession(id: string): boolean {
 /** Stable synthetic id for extraction helpers (see create below). */
 export const EXTRACT_STUB_SESSION_ID = "codex-memory-extract-stub"
 
+const OBSERVED_CAP = 5000
+const observedSessions = new Map<string, { updated_at: number; directory: string | null; title: string }>()
+
+/**
+ * Isolated OpenCode 2 serves (IntelliJ/desktop `serve --port 0`) are not the
+ * registered `--service` process, so global session.list is unavailable.
+ * Remember sessions this process has actually seen so phase 1 can still
+ * extract them.
+ */
+export function rememberV2Session(id: string, directory?: string | null, title?: string): void {
+  if (!id || id === EXTRACT_STUB_SESSION_ID) return
+  if (releasedSubSessions.has(id)) return
+  observedSessions.delete(id)
+  observedSessions.set(id, {
+    updated_at: Date.now(),
+    directory: directory ?? null,
+    title: typeof title === "string" ? title : "",
+  })
+  while (observedSessions.size > OBSERVED_CAP) {
+    const oldest = observedSessions.keys().next().value
+    if (oldest === undefined) break
+    observedSessions.delete(oldest)
+  }
+}
+
+function listObservedSessions(limit: number, cursor?: string | number, search?: string): unknown[] {
+  const timestampCursor = typeof cursor === "number" ? cursor : undefined
+  const needle = typeof search === "string" && search.length > 0 ? search.toLowerCase() : undefined
+  const rows = [...observedSessions.entries()].sort((a, b) => b[1].updated_at - a[1].updated_at)
+  const out: unknown[] = []
+  for (const [id, rec] of rows) {
+    if (timestampCursor !== undefined && rec.updated_at >= timestampCursor) continue
+    if (needle && !`${id}\n${rec.title}`.toLowerCase().includes(needle)) continue
+    out.push({
+      id,
+      parentID: null,
+      ...(rec.title ? { title: rec.title } : {}),
+      directory: rec.directory,
+      time: { updated: rec.updated_at },
+    })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 /** Test seam. */
 export function resetV2ShimStateForTest(): void {
   releasedSubSessions.clear()
+  observedSessions.clear()
   invalidateOwnService()
 }
 
@@ -396,9 +445,12 @@ export function buildV1ClientShim(): unknown {
     if (typeof localList === "function") {
       return paginateSessionList((input) => localList(input), limit, cursor, search)
     }
-    const client = await serviceOrThrow()
-    if (typeof client.session.list !== "function") throw new Error("registered service does not support session.list")
-    return paginateSessionList((input) => client.session.list(input), limit, cursor, search)
+    const client = await ownServiceClient()
+    if (client && typeof client.session.list === "function") {
+      return paginateSessionList((input) => client.session.list(input), limit, cursor, search)
+    }
+    if (client) throw new Error("registered service does not support session.list")
+    return { data: listObservedSessions(limit, cursor, search) }
   }
 
   const session = {
@@ -434,24 +486,30 @@ export function buildV1ClientShim(): unknown {
     messages: async (opts: { path: { id: string } }) => {
       try {
         if (isReleasedSubSession(opts.path.id)) throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
-        const client = await serviceOrThrow()
-        if (typeof client.message?.list !== "function") throw new Error("registered service does not support message.list")
-        const messages: unknown[] = []
-        const seenCursors = new Set<string>()
-        let cursor: string | undefined
-        while (true) {
-          const response = await client.message.list(
-            cursor ? { sessionID: opts.path.id, cursor } : { sessionID: opts.path.id, order: "asc" },
-          )
-          const rows = responseRows(response)
-          if (!rows) throw new Error("registered service returned an invalid message list")
-          messages.push(...rows)
-          const next = responseNextCursor(response)
-          if (!next || seenCursors.has(next)) break
-          seenCursors.add(next)
-          cursor = next
+        const client = await ownServiceClient()
+        if (typeof client?.message?.list === "function") {
+          const messages: unknown[] = []
+          const seenCursors = new Set<string>()
+          let cursor: string | undefined
+          while (true) {
+            const response = await client.message.list(
+              cursor ? { sessionID: opts.path.id, cursor } : { sessionID: opts.path.id, order: "asc" },
+            )
+            const rows = responseRows(response)
+            if (!rows) throw new Error("registered service returned an invalid message list")
+            messages.push(...rows)
+            const next = responseNextCursor(response)
+            if (!next || seenCursors.has(next)) break
+            seenCursors.add(next)
+            cursor = next
+          }
+          return { data: adaptV2Messages(messages) }
         }
-        return { data: adaptV2Messages(messages) }
+        const raw = await (ctx().session as { context: (input: { sessionID: string }) => Promise<unknown> }).context({
+          sessionID: opts.path.id,
+        })
+        const rows = Array.isArray(raw) ? raw : responseRows(raw) ?? []
+        return { data: adaptV2Messages(rows) }
       } catch (e) {
         return { error: e }
       }
@@ -484,17 +542,23 @@ export function buildV1ClientShim(): unknown {
       }
       try {
         const client = await ownServiceClient()
-        if (!client?.session?.get) return { error: shutdownError ?? new Error("session still exists after interrupt") }
-        const info = await client.session.get({ sessionID: opts.path.id })
-        if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
-          markReleased(opts.path.id)
-          return {}
-        }
-        const data = und(info)
-        if (data && typeof data === "object") {
+        if (client?.session?.get) {
+          const info = await client.session.get({ sessionID: opts.path.id })
+          if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
+            markReleased(opts.path.id)
+            return {}
+          }
+          const data = und(info)
+          if (data && typeof data === "object") {
+            return { error: shutdownError ?? new Error("session still exists after interrupt") }
+          }
           return { error: shutdownError ?? new Error("session still exists after interrupt") }
         }
-        return { error: shutdownError ?? new Error("session still exists after interrupt") }
+        // Isolated serve: no session.remove on plugin ctx. interrupt+wait already
+        // finished, so the helper is idle. Holding the phase-2 lease until it
+        // expires would block consolidation for an hour.
+        markReleased(opts.path.id)
+        return {}
       } catch (e) {
         if (isNotFoundError(e)) {
           markReleased(opts.path.id)
@@ -508,8 +572,17 @@ export function buildV1ClientShim(): unknown {
         if (isReleasedSubSession(opts.path.id)) {
           return { response: { status: 404 }, error: { _tag: "SessionNotFoundError" } }
         }
-        const client = await serviceOrThrow()
-        const info = und(await client.session.get?.({ sessionID: opts.path.id }))
+        const client = await ownServiceClient()
+        if (client?.session?.get) {
+          try {
+            const info = und(await client.session.get({ sessionID: opts.path.id }))
+            return { data: info }
+          } catch (e) {
+            if (isNotFoundError(e)) return { response: { status: 404 }, error: e }
+            return { error: e }
+          }
+        }
+        const info = und(await ctx().session.get({ sessionID: opts.path.id }))
         return { data: info }
       } catch (e) {
         if (isNotFoundError(e)) return { response: { status: 404 }, error: e }

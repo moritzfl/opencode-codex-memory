@@ -48,12 +48,12 @@ retry eligibility, and warnings.
 
 Same memories, not the same host. These are the limits that show up in use:
 
-**Background learning needs this app’s local service.** The plugin lists
-sessions through the documented HTTP client (`@opencode/client`, bundled)
-against the OpenCode 2 instance that registered itself for this process.
-A plain `opencode serve` talking to some other host will not see those sessions,
-so extraction across projects will not run there. Injection of an already-built
-summary still works.
+**Background learning lists sessions on this process, not some other
+OpenCode.** If this process is the registered `serve --service` instance,
+extraction uses that host’s global session list. A private `serve --port 0`
+(IntelliJ panel, desktop) whose PID does not match `service.json` will not
+read another instance’s sessions; it still extracts chats this process has
+seen. Injection of an already-built summary always works.
 
 **Citation blocks can stay in the saved transcript** so the sidebar can render
 them. They are stripped before the next model call. OpenCode 1.x removes them

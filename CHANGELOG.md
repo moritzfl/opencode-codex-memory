@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode 2 inside an IDE/`serve --port 0` host is not the registered
+  `serve --service` process. Discovery no longer dies on that PID mismatch:
+  this process still learns from sessions it has seen, helper cleanup uses
+  the local context, and consolidation no longer holds a one-hour lease
+  after a helper interrupt.
+
 ## [0.7.3] - 2026-09-18
 
 ### Fixed
