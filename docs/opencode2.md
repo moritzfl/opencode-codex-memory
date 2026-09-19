@@ -48,12 +48,13 @@ retry eligibility, and warnings.
 
 Same memories, not the same host. These are the limits that show up in use:
 
-**Background learning lists sessions on this process, not some other
-OpenCode.** If this process is the registered `serve --service` instance,
-extraction uses that host’s global session list. A private `serve --port 0`
-(IntelliJ panel, desktop) whose PID does not match `service.json` will not
-read another instance’s sessions; it still extracts chats this process has
-seen. Injection of an already-built summary always works.
+**Background learning lists sessions from this machine’s registered local
+service.** Sessions live in the shared OpenCode database, so an IDE
+`serve --port 0` whose PID does not match `service.json` still uses a
+healthy loopback `--service` for the global list. A non-loopback PID
+mismatch is refused. If no service is registered, this process only
+extracts chats it has seen. Injection of an already-built summary always
+works.
 
 **Citation blocks can stay in the saved transcript** so the sidebar can render
 them. They are stripped before the next model call. OpenCode 1.x removes them

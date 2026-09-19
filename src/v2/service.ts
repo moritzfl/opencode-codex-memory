@@ -198,10 +198,22 @@ async function probeEndpoint(
   return fetchServiceStatus(endpoint, deps.service.headers(endpoint), signal)
 }
 
+/** Local loopback only — IDE `serve --port 0` shares opencode.db with `--service`. */
+export function isLoopbackEndpointUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname
+    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1"
+  } catch {
+    return false
+  }
+}
+
 /**
  * Find a ready, registered OpenCode service without starting or replacing one.
- * A missing service is a normal unavailable result; a PID mismatch is a
- * safety failure because it would make global memory operate on another host.
+ * A missing service is a normal unavailable result. A PID mismatch on a
+ * non-loopback URL is a safety failure (would operate on another host).
+ * Loopback PID mismatch is the IDE isolated-serve case: same machine, shared
+ * session database, so global list/get/messages still go through that service.
  */
 export async function discoverOwnService(
   dependencies?: V2ServiceDependencies,
@@ -214,7 +226,12 @@ export async function discoverOwnService(
   const controller = new AbortController()
   const health = await withServiceTimeout(probeEndpoint(deps, endpoint, client, controller.signal), timeoutMs, controller)
   if (health.pid !== process.pid) {
-    throw new Error(`registered OpenCode service PID ${String(health.pid)} does not match plugin host PID ${process.pid}`)
+    if (!isLoopbackEndpointUrl(endpoint.url)) {
+      throw new Error(`registered OpenCode service PID ${String(health.pid)} does not match plugin host PID ${process.pid}`)
+    }
+    console.warn(
+      `[opencode-codex-memory] registered OpenCode service PID ${String(health.pid)} is a different local process than plugin host PID ${process.pid}; using it for global session list`,
+    )
   }
   return { endpoint, client, health }
 }
