@@ -13,12 +13,12 @@ In your OpenCode 2 config (`opencode.jsonc` or equivalent):
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    { "package": "opencode-codex-memory@0.7.5", "options": { "min_rollout_idle_hours": 1 } },
+    { "package": "opencode-codex-memory@0.7.6", "options": { "min_rollout_idle_hours": 1 } },
   ],
 }
 ```
 
-OpenCode 1.x keeps the older `"plugin": ["opencode-codex-memory@0.7.5"]` form.
+OpenCode 1.x keeps the older `"plugin": ["opencode-codex-memory@0.7.6"]` form.
 
 All V1 options apply unchanged: `generate_memories`, `use_memories`,
 `dedicated_tools`, `disable_on_external_context`, `extract_model`,
