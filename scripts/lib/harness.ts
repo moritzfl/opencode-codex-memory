@@ -205,7 +205,6 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   fs.mkdirSync(project, { recursive: true })
   fs.writeFileSync(path.join(project, "README.md"), "# live test project\n")
 
-  const pluginFileUrl = pathToFileURL(repoRoot()).href
   const live = resolveLiveEnv()
   const models = {
     model: opts.model ?? live?.model ?? resolveHostModels().model,
@@ -229,27 +228,21 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     config.providers = liveProviderConfig(live)
     config.permission = { "*": "allow" }
   }
+
+  // One load path for 1.x and 2.x: project file plugin + config options aimed
+  // at that same file. Repo `file://` in config is a second identity; 2.x
+  // serve also does not auto-install it.
+  const pluginFileUrl = pathToFileURL(repoRoot()).href
   if (!opts.bare) {
-    // V1 tuple plus V2 object form. OpenCode 2 prefers `plugins`.
-    config.plugin = [[pluginFileUrl, pluginOptions]]
-    config.plugins = [{ package: pluginFileUrl, options: pluginOptions }]
-    // 2.x serve does not auto-install `plugins[].package = file://…`.
-    // Do not drop this on 1.x — a second file-plugin copy can skip extraction.
-    let v2 = false
-    try {
-      v2 = semverGte(opencodeVersion(), "2.0.0")
-    } catch {
-      // no binary in PATH (unit tests)
-    }
-    if (v2) {
-      const plugDir = path.join(project, ".opencode", "plugins")
-      fs.mkdirSync(plugDir, { recursive: true })
-      const entry = path.join(repoRoot(), "dist", "src", "index.js")
-      fs.writeFileSync(
-        path.join(plugDir, "codex-memory.js"),
-        `export { default } from ${JSON.stringify(entry)}\n`,
-      )
-    }
+    const plugRel = "./.opencode/plugins/codex-memory.js"
+    const plugFile = path.join(project, ".opencode", "plugins", "codex-memory.js")
+    fs.mkdirSync(path.dirname(plugFile), { recursive: true })
+    fs.writeFileSync(
+      plugFile,
+      `export { default } from ${JSON.stringify(path.join(repoRoot(), "dist", "src", "index.js"))}\n`,
+    )
+    config.plugin = [[pathToFileURL(plugFile).href, pluginOptions]]
+    config.plugins = [{ package: plugRel, options: pluginOptions }]
   }
   fs.writeFileSync(
     path.join(configHome, "opencode", "opencode.json"),
