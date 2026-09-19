@@ -27,6 +27,12 @@ export interface PluginOptionsState {
   max_rollout_age_days: number
   max_rollouts_per_startup: number
   min_rollout_idle_hours: number
+  /**
+   * Live-harness only. Not a Codex knob. When true, numeric ranges are not
+   * clamped to MemoriesToml so tests can use e.g. min_rollout_idle_hours: 0.01.
+   * Production configs must leave this unset.
+   */
+  test: boolean
   codex_interop: CodexInteropOptions
   claude_import: ClaudeImportOptions
 }
@@ -41,6 +47,7 @@ const DEFAULT_PLUGIN_OPTIONS: PluginOptionsState = {
   max_rollout_age_days: 10,
   max_rollouts_per_startup: 2,
   min_rollout_idle_hours: 6,
+  test: false,
   codex_interop: { import: false, export: false },
   claude_import: { enabled: false },
 }

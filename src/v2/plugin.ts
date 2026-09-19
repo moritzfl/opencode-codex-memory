@@ -282,7 +282,8 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
   resetAgentHealth()
   mcpStatusInFlight = null
   clearConfigWarnings()
-  if (ctx.options) applyPluginOptions(ctx.options as Record<string, unknown>)
+  const rawOptions = ctx.options as Record<string, unknown> | undefined
+  if (rawOptions && Object.keys(rawOptions).length > 0) applyPluginOptions(rawOptions)
   else {
     const previousDb = memoryDbPath()
     resetPluginOptions()

@@ -192,6 +192,7 @@ const KNOWN_OPTION_KEYS = new Set([
   "max_rollout_age_days",
   "max_rollouts_per_startup",
   "min_rollout_idle_hours",
+  "test",
   "home",
   "codex_interop",
   "claude_import",
@@ -208,6 +209,15 @@ function clampInt(key: string, value: unknown, min: number, max: number, fallbac
     return fallback
   }
   return Math.min(max, Math.max(min, Math.floor(value)))
+}
+
+/** Finite number, no Codex range clamp. Used only when options.test is true. */
+function finiteNumber(key: string, value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    recordConfigWarning(`${key} must be a finite number; using default ${fallback}`)
+    return fallback
+  }
+  return value
 }
 
 export function applyPluginOptions(opts: PluginOptions): void {
@@ -230,17 +240,37 @@ export function applyPluginOptions(opts: PluginOptions): void {
     if (typeof raw[key] === "boolean") pluginOptions[key] = raw[key]
     else recordConfigWarning(`${key} must be a boolean; using default ${pluginOptions[key]}`)
   }
+  // options.test: live-harness only. Skips MemoriesToml numeric clamps.
+  if ("test" in raw) {
+    if (typeof raw.test === "boolean") pluginOptions.test = raw.test
+    else recordConfigWarning("test must be a boolean; using default false")
+  }
   for (const key of ["extract_model", "consolidation_model"] as const) {
     if (!(key in raw)) continue
     if (typeof raw[key] === "string") pluginOptions[key] = raw[key]
     else recordConfigWarning(`${key} must be a string; using the opencode model default`)
   }
+  const testing = pluginOptions.test
   if ("max_raw_memories_for_consolidation" in opts)
-    pluginOptions.max_raw_memories_for_consolidation = clampInt("max_raw_memories_for_consolidation", opts.max_raw_memories_for_consolidation, 1, 4096, 256)
-  if ("max_unused_days" in opts) pluginOptions.max_unused_days = clampInt("max_unused_days", opts.max_unused_days, 0, 365, 30)
-  if ("max_rollout_age_days" in opts) pluginOptions.max_rollout_age_days = clampInt("max_rollout_age_days", opts.max_rollout_age_days, 0, 90, 10)
-  if ("max_rollouts_per_startup" in opts) pluginOptions.max_rollouts_per_startup = clampInt("max_rollouts_per_startup", opts.max_rollouts_per_startup, 1, 128, 2)
-  if ("min_rollout_idle_hours" in opts) pluginOptions.min_rollout_idle_hours = clampInt("min_rollout_idle_hours", opts.min_rollout_idle_hours, 1, 48, 6)
+    pluginOptions.max_raw_memories_for_consolidation = testing
+      ? finiteNumber("max_raw_memories_for_consolidation", opts.max_raw_memories_for_consolidation, 256)
+      : clampInt("max_raw_memories_for_consolidation", opts.max_raw_memories_for_consolidation, 1, 4096, 256)
+  if ("max_unused_days" in opts)
+    pluginOptions.max_unused_days = testing
+      ? finiteNumber("max_unused_days", opts.max_unused_days, 30)
+      : clampInt("max_unused_days", opts.max_unused_days, 0, 365, 30)
+  if ("max_rollout_age_days" in opts)
+    pluginOptions.max_rollout_age_days = testing
+      ? finiteNumber("max_rollout_age_days", opts.max_rollout_age_days, 10)
+      : clampInt("max_rollout_age_days", opts.max_rollout_age_days, 0, 90, 10)
+  if ("max_rollouts_per_startup" in opts)
+    pluginOptions.max_rollouts_per_startup = testing
+      ? finiteNumber("max_rollouts_per_startup", opts.max_rollouts_per_startup, 2)
+      : clampInt("max_rollouts_per_startup", opts.max_rollouts_per_startup, 1, 128, 2)
+  if ("min_rollout_idle_hours" in opts)
+    pluginOptions.min_rollout_idle_hours = testing
+      ? finiteNumber("min_rollout_idle_hours", opts.min_rollout_idle_hours, 6)
+      : clampInt("min_rollout_idle_hours", opts.min_rollout_idle_hours, 1, 48, 6)
   if ("home" in raw) {
     if (typeof raw.home !== "string") {
       recordConfigWarning("home must be a string; using the OpenCode data dir")

@@ -212,7 +212,8 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   }
 
   const pluginOptions = {
-    min_rollout_idle_hours: 1,
+    test: true,
+    min_rollout_idle_hours: 0.01,
     max_rollouts_per_startup: 8,
     ...(opts.pluginOptions ?? {}),
   }

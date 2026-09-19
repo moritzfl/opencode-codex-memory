@@ -681,6 +681,21 @@ describe("memory_inspect", () => {
     expect(pluginOptions.claude_import.enabled).toBe(false)
   })
 
+  it("keeps Codex integer clamps unless options.test is set", async () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { pluginOptions } = require("../src/options.js")
+    applyPluginOptions({ min_rollout_idle_hours: 0.01 })
+    expect(pluginOptions.min_rollout_idle_hours).toBe(1)
+    expect(pluginOptions.test).toBe(false)
+    applyPluginOptions({ test: true, min_rollout_idle_hours: 0.01, max_rollouts_per_startup: 8 })
+    expect(pluginOptions.test).toBe(true)
+    expect(pluginOptions.min_rollout_idle_hours).toBe(0.01)
+    expect(pluginOptions.max_rollouts_per_startup).toBe(8)
+    applyPluginOptions({ min_rollout_idle_hours: 6 })
+    expect(pluginOptions.min_rollout_idle_hours).toBe(6)
+    expect(pluginOptions.test).toBe(false)
+  })
+
   it("reports the resolved codex memories root when interop is enabled", async () => {
     const { memory_inspect } = require("../tools/control.js")
     const { pluginOptions } = require("../src/options.js")

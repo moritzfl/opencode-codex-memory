@@ -575,4 +575,4 @@ mappings:
       (fresh plugin, no legacy configs); (5) wrong-TYPED values on known keys
       warn via memory_inspect and fall back to the default (codex: serde
       hard-fails the whole config parse — a plugin must not break the host on
-      bad options).
+      bad options); (6) options.test (live harness only) skips Codex numeric clamps so e2e can set min_rollout_idle_hours=0.01. Production stays integer 1–48 like MemoriesToml

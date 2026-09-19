@@ -316,16 +316,11 @@ async function v2promptWithWait(
   if (body.format) {
     const prompt = body.system ? `${body.system}\n\n---\n\n${text}` : text
     const parsed = body.model ? parseModelRef(`${body.model.providerID}/${body.model.modelID}`) : null
+    // Model.Ref is { providerID, id }. Do not send variant here — 2.0.9
+    // generate.text rejects extra/partial model objects.
     const payload = {
       prompt,
-      ...(parsed || body.variant
-        ? {
-            model: {
-              ...(parsed ? { providerID: parsed.providerID, id: parsed.modelID } : {}),
-              ...(body.variant ? { variant: body.variant } : {}),
-            },
-          }
-        : {}),
+      ...(parsed ? { model: { providerID: parsed.providerID, id: parsed.modelID } } : {}),
     }
     if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
     const publicClient = await ownServiceClient()

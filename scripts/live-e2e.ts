@@ -12,7 +12,7 @@
  *
  * Flaky points (handled here):
  *   - serve must outlive the extraction pass (not `opencode run`)
- *   - sessions backdated past min_rollout_idle_hours (floor 1h)
+ *   - min_rollout_idle_hours 0.01 so work sessions age out on the real clock
  *   - max_rollouts_per_startup raised to 8; 30s in-process rate gate
  *   - Phase 2 6h cooldown cleared via job-row delete on fresh DB
  *
@@ -25,7 +25,6 @@ import path from "path"
 import {
   MARKER,
   MARKER_LINE,
-  backdateSessions,
   clearPhase2Job,
   createSandbox,
   createSession,
@@ -194,22 +193,13 @@ async function main() {
       await sleep(1500)
     }
 
-    // ----- Step 3: backdate → trigger -----
-    // OpenCode 1: session times live in sqlite; stop/start so the next list
-    // sees the backdated watermark. OpenCode 2 isolated `serve` lists from
-    // this process; restarting wipes that, so backdate in place.
-    if (!serve.v2) {
-      log("idle", "stopping serve to backdate sessions")
-      await serve.stop()
-      serve = null
-      await sleep(500)
-    }
-    const n = backdateSessions(sandbox, 2)
-    log("idle", `backdated ${n} session(s) by 2h`)
+    // ----- Step 3: wait real idle, then trigger -----
+    // 0.01h = 36s. Do not forge sqlite timestamps — that would not test
+    // OpenCode 2's own session clock.
+    const idleMs = 45_000
+    log("idle", `waiting ${idleMs}ms for min_rollout_idle_hours=0.01`)
+    await sleep(idleMs)
     clearPhase2Job(sandbox)
-    if (!serve) {
-      serve = await startServe(sandbox)
-    }
     log("idle", "triggering idle via short session")
     await triggerIdle(serve, sandbox)
     log("idle", `memory.db ${fs.existsSync(memoryDbPath(sandbox)) ? "present" : "missing"}`)

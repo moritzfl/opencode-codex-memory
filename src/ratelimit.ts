@@ -1,3 +1,5 @@
+import { pluginOptions } from "./options.js"
+
 export interface RateLimitInfo {
   ok: boolean
   reason?: string
@@ -114,6 +116,9 @@ export async function checkRateLimit(kind: MemoryPhase = "phase1", model?: strin
   }
   // Phase 2: no 30s gate (codex relies on DB claim/cooldown only).
   if (kind === "phase2") return { ok: true }
+
+  // Live harness sets options.test; skip the process stampede timer there.
+  if (pluginOptions.test) return { ok: true }
 
   const now = Date.now()
   if (now - lastPhase1Work < MIN_PHASE1_INTERVAL_MS) {

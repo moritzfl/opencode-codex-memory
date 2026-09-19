@@ -5,6 +5,7 @@ import path from "path"
 import { closeDb } from "../src/db.js"
 import { setPluginInput } from "../src/llm.js"
 import { resetPluginLifecycle } from "../src/lifecycle.js"
+import { resetPluginOptions } from "../src/options.js"
 import { DEFAULT_PHASE1_OPTIONS, runPhase1 } from "../src/phase1.js"
 import {
   activeProviderCapacityBackoffs,
@@ -21,6 +22,7 @@ const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-ratelimit-${proc
 beforeEach(() => {
   closeDb()
   resetRateLimitForTest()
+  resetPluginOptions()
   resetPluginLifecycle()
   fs.mkdirSync(TEST_ROOT, { recursive: true })
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT

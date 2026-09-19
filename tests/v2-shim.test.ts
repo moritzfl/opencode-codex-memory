@@ -415,7 +415,7 @@ describe("V1 client shim", () => {
     const gen = calls[0].args as any
     expect(gen.prompt).toContain("SYS")
     expect(gen.prompt).toContain("TRANSCRIPT")
-    expect(gen.model).toEqual({ providerID: "acme", id: "m1", variant: "low" })
+    expect(gen.model).toEqual({ providerID: "acme", id: "m1" })
     expect(JSON.stringify(res.data)).toContain("raw_memory")
   })
 
