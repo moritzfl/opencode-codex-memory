@@ -2,7 +2,7 @@
  * Full write-pipeline live E2E against the official opencode release.
  *
  * XDG sandbox:
- *   read-path → work sessions → backdate → Phase 1 → Phase 2 →
+ *   read-path → work sessions → real idle → Phase 1 → Phase 2 →
  *   closed-loop injection → citation (soft) → memory_reset
  *
  * Needs: opencode in PATH, `.env` live credentials (API key + OpenAI-compatible
@@ -25,6 +25,7 @@ import path from "path"
 import {
   MARKER,
   MARKER_LINE,
+  api,
   clearPhase2Job,
   createSandbox,
   createSession,
@@ -45,24 +46,32 @@ import {
   type ServeHandle,
 } from "./lib/harness.js"
 
+// Real artifacts + repeated user constraints meet Codex's minimum-signal gate.
+// Sketch-only Q&A may correctly produce all-empty extraction output.
 const FACTS = [
   {
     title: "e2e-csv-util",
     fact: "E2E_FACT_CSV: built a TypeScript CSV parser returning typed rows under strict mode",
     prompt:
-      "Remember this project fact for later (repeat it back once): E2E_FACT_CSV: built a TypeScript CSV parser returning typed rows under strict mode. Then briefly sketch the parser API in one short paragraph.",
+      "Implement src/csv.ts and tests/csv.test.ts using TypeScript and bun:test. Export parseCsv(text: string): string[][], supporting commas, newlines, quoted fields, doubled quotes, and CRLF. Project decision E2E_FACT_CSV: warehouse identifiers such as 000742 must always remain strings with leading zeroes; never infer numbers, trim fields, or silently repair malformed quotes. Throw on unterminated quotes. Add regression tests and run them. Use file/shell tools for this implementation, but do not call memory tools; background learning handles this conversation.",
+    followup: "For all future CSV changes in this repo, preserving identifier 000742 exactly is mandatory because our warehouse joins use string keys. Confirm the regression passes with bun test tests/csv.test.ts and report the result. No memory tool calls.",
+    artifact: "src/csv.ts",
   },
   {
     title: "e2e-result-type",
     fact: "E2E_FACT_RESULT: refactored error handling to a Result type instead of throwing",
     prompt:
-      "Remember this project fact for later (repeat it back once): E2E_FACT_RESULT: refactored error handling to a Result type instead of throwing. Then show a 5-line Result<T,E> sketch.",
+      "Implement src/result.ts and tests/result.test.ts using TypeScript and bun:test. Export Result<T,E> = {ok:true,value:T}|{ok:false,error:E} and parseAmount(text:string): Result<number,string>. Project decision E2E_FACT_RESULT: negative amounts return error code LEDGER_NEGATIVE_AMOUNT, malformed amounts return LEDGER_INVALID_AMOUNT, and callers must never catch exceptions. This is our ledger UI's permanent error contract. Add tests for -1, nonsense, and 42; run them. Use file/shell tools, but no memory tool calls.",
+    followup: "Keep LEDGER_NEGATIVE_AMOUNT stable in all future ledger work: our UI translations key off it. Verify parseAmount('-1') returns that error without throwing and run bun test tests/result.test.ts. No memory tool calls.",
+    artifact: "src/result.ts",
   },
   {
     title: "e2e-readme",
     fact: "E2E_FACT_README: wrote a README section explaining the two-phase memory plugin",
     prompt:
-      "Remember this project fact for later (repeat it back once): E2E_FACT_README: wrote a README section explaining the two-phase memory plugin. Then write two bullet points for that section.",
+      "Update README.md with our permanent contribution workflow. Project decision E2E_FACT_README: this repo uses Bun only; run bun test tests/csv.test.ts tests/result.test.ts before every change, preserve CSV string identifiers, and keep ledger error codes stable. Document that the memory plugin uses Phase 1 extraction then Phase 2 consolidation. Read the implementation and run that exact verification command before documenting success. No memory tool calls.",
+    followup: "For future work always use the exact targeted Bun test command from README, never substitute npm test. Confirm both CSV and Result tests passed and that README records the command. No memory tool calls.",
+    artifact: "README.md",
   },
 ] as const
 
@@ -161,6 +170,16 @@ async function main() {
     log("read", `serve ${serve.baseUrl}`)
     {
       const sid = await createSession(serve, sandbox, "e2e-read")
+      if (serve.v2) {
+        const status = await api(serve, sandbox, "POST", "/api/rpc/opencode-codex-memory/status", { input: {} }, {
+          "location[directory]": sandbox.project,
+        })
+        const effective = (status.json as { output?: { extractModel?: string; consolidationModel?: string } })?.output
+        if (status.status !== 200 || effective?.extractModel !== models.model || effective.consolidationModel !== models.model) {
+          throw new Error(`plugin options not applied: ${status.text}`)
+        }
+        log("config", "OK — V2 plugin received configured model options")
+      }
       const text = await promptSession(
         serve,
         sandbox,
@@ -185,13 +204,16 @@ async function main() {
         serve,
         sandbox,
         sid,
-        `Confirm you stored the fact containing ${f.fact.split(":")[0]}. One sentence.`,
+        f.followup,
         { timeoutMs: 180_000 },
       )
       workIds.push(sid)
+      check(fs.existsSync(path.join(sandbox.project, f.artifact)), "work", `${f.artifact} implemented`)
       log("work", `${sid} (${f.title}) reply_len=${reply.length}`)
       await sleep(1500)
     }
+    const noteDir = path.join(sandbox.memories, "extensions", "ad_hoc", "notes")
+    check(!fs.existsSync(noteDir) || fs.readdirSync(noteDir).length === 0, "work", "ordinary work completed without direct memory notes")
 
     // ----- Step 3: wait real idle, then trigger -----
     // 0.01h = 36s. Do not forge sqlite timestamps — that would not test
@@ -206,13 +228,15 @@ async function main() {
 
     // ----- Step 4: Phase 1 -----
     log("phase1", `waiting up to ${args.phase1TimeoutMs}ms for stage1 outputs`)
+    const phase1Started = Date.now()
     try {
       await waitFor(
         "phase1 outputs",
         () => {
-          const rows = stage1Rows(sandbox)
+          const rows = stage1Rows(sandbox).filter((r) => workIds.includes(r.session_id))
           if (rows.length > 0) return true
           const jobs = stage1Jobs(sandbox)
+          if (!jobs.length && Date.now() - phase1Started > 60_000) throw new Error("no stage1 claims after real idle + trigger")
           const failed = jobs.filter((j) => j.status === "failed" || (j.last_error && j.status !== "done"))
           if (failed.length >= FACTS.length) {
             throw new Error(
@@ -330,6 +354,29 @@ async function main() {
 
     const gitDir = path.join(sandbox.memories, ".git")
     check(fs.existsSync(gitDir), "phase2", "memories/.git baseline present")
+    if (serve.v2) {
+      const listed = await api(serve, sandbox, "GET", "/api/session", undefined, { search: "codex-memory-consolidate" })
+      if (listed.status !== 200) throw new Error(`helper session list failed: ${listed.text}`)
+      const helpers = (listed.json as { data: { id: string }[] }).data
+      let executed = 0
+      for (const helper of helpers) {
+        const transcript = await api(serve, sandbox, "GET", `/api/session/${helper.id}/message`, undefined, { limit: "100" })
+        if (transcript.status !== 200) throw new Error(`helper transcript failed: ${transcript.text}`)
+        for (const message of (transcript.json as { data: any[] }).data) {
+          for (const part of message.content ?? []) {
+            if (part.type !== "tool" || part.state?.status !== "completed") continue
+            const calls = part.state?.metadata?.toolCalls ?? [{ tool: part.name }]
+            for (const call of calls) {
+              executed++
+              if (!["read", "edit", "write", "patch", "glob", "grep"].includes(call.tool)) {
+                throw new Error(`consolidator escaped file-tool allowlist: ${call.tool}`)
+              }
+            }
+          }
+        }
+      }
+      check(executed > 0, "sandbox", `consolidator used only file tools (${executed} calls)`)
+    }
 
     // ----- Step 7: closed loop -----
     {
@@ -338,7 +385,7 @@ async function main() {
         serve,
         sandbox,
         sid,
-        "What did we work on in the previous sessions in this test? Be specific about CSV, Result type, or README if you know them.",
+         "What did we work on in previous sessions in this project? Recall a specific implementation decision from memory; if unknown, say so.",
         { timeoutMs: 180_000 },
       )
       const hit =
@@ -356,7 +403,7 @@ async function main() {
         serve,
         sandbox,
         sid,
-        "Tell me about the CSV work. Cite memory sources using the required <memory-citation> block at the end if you used memory.",
+        `Tell me about previous work in this project. Cite memory sources using the required ${serve.v2 ? "fenced memory-citation" : "<memory-citation>"} block at the end if you used memory.`,
         { timeoutMs: 180_000 },
       )
       await sleep(2000)
@@ -369,6 +416,20 @@ async function main() {
       }
     } else {
       log("cite", "skipped (--skip-citation)")
+    }
+
+    // Explicit requests are a second write path. Test only after the automatic
+    // extraction loop, so an ad-hoc note cannot make a broken phase 1 look green.
+    {
+      const noteMarker = `E2E_EXPLICIT_${crypto.randomUUID()}`
+      const sid = await createSession(serve, sandbox, "e2e-remember")
+      await promptSession(serve, sandbox, sid,
+        `Remember this for future sessions: the project deployment label is ${noteMarker}. Save it with memory_add_note, preserving the exact label.`,
+      )
+      const saved = fs.existsSync(noteDir) && fs.readdirSync(noteDir).some((file) =>
+        fs.readFileSync(path.join(noteDir, file), "utf8").includes(noteMarker),
+      )
+      check(saved, "remember", "explicit remember request persisted a durable note")
     }
 
     // ----- Step 9: reset -----
