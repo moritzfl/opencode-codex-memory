@@ -234,13 +234,22 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     config.plugin = [[pluginFileUrl, pluginOptions]]
     config.plugins = [{ package: pluginFileUrl, options: pluginOptions }]
     // 2.x serve does not auto-install `plugins[].package = file://…`.
-    const plugDir = path.join(project, ".opencode", "plugins")
-    fs.mkdirSync(plugDir, { recursive: true })
-    const entry = path.join(repoRoot(), "dist", "src", "index.js")
-    fs.writeFileSync(
-      path.join(plugDir, "codex-memory.js"),
-      `export { default } from ${JSON.stringify(entry)}\n`,
-    )
+    // Do not drop this on 1.x — a second file-plugin copy can skip extraction.
+    let v2 = false
+    try {
+      v2 = semverGte(opencodeVersion(), "2.0.0")
+    } catch {
+      // no binary in PATH (unit tests)
+    }
+    if (v2) {
+      const plugDir = path.join(project, ".opencode", "plugins")
+      fs.mkdirSync(plugDir, { recursive: true })
+      const entry = path.join(repoRoot(), "dist", "src", "index.js")
+      fs.writeFileSync(
+        path.join(plugDir, "codex-memory.js"),
+        `export { default } from ${JSON.stringify(entry)}\n`,
+      )
+    }
   }
   fs.writeFileSync(
     path.join(configHome, "opencode", "opencode.json"),
