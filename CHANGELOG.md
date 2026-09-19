@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `memory_inspect` separates live extraction failures from leftover exhausted
+  jobs older than `max_rollout_age_days`, labels pending jobs whose retry
+  window has elapsed as `due`, and states Phase 2 idle/cooldown instead of a
+  bare `pending`. Discovery is this process's session list (not total chats)
+  and no longer logs the same count on every cache hit.
+
 ## [0.7.6] - 2026-09-19
 
 ### Fixed

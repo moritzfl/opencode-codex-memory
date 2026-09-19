@@ -12,10 +12,11 @@ import { memoryRoot } from "../paths.js"
 /** Read the same snapshots as memory_inspect; never claim or advance a job. */
 export function readMemoryStatus(sessionID?: string | null): MemoryStatus {
   const store = new MemoryStore()
-  const phase1 = store.stage1JobSnapshot()
-  const phase2 = store.phase2JobSnapshot()
   const options = pluginOptions
   const now = Date.now()
+  const staleBeforeSec = Math.floor(now / 1000) - options.max_rollout_age_days * 86_400
+  const phase1 = store.stage1JobSnapshot(staleBeforeSec)
+  const phase2 = store.phase2JobSnapshot()
   const session = sessionInjection(sessionID)
   const total = injectionTotals()
   const retryTimes = [
@@ -31,7 +32,10 @@ export function readMemoryStatus(sessionID?: string | null): MemoryStatus {
     warnings.push(...health.agents.memorize.issues.map((issue) => `memorize: ${issue}`))
   }
   if (phase2?.last_error) warnings.push("Consolidation failed; see memory_inspect for details.")
-  if (phase1.by_failure_class.other_exhausted > 0) warnings.push("Some extraction jobs exhausted their retries.")
+  if (phase1.by_failure_class.due > 0) warnings.push("Some extraction jobs are due to retry.")
+  if (phase1.by_failure_class.other_exhausted > phase1.stale_exhausted) {
+    warnings.push("Some extraction jobs exhausted their retries.")
+  }
   if (phase1.by_failure_class.provider_capacity > 0) warnings.push("Some extraction jobs hit provider capacity limits.")
   const codexImport = options.codex_interop.import && resolveCodexInterop(options.codex_interop) !== null
   if (options.codex_interop.import && !codexImport) warnings.push("Codex import is misconfigured.")

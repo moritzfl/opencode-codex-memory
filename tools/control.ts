@@ -2,7 +2,7 @@ import fs from "fs"
 import path from "path"
 import { tool } from "@opencode-ai/plugin"
 import { memoryRoot, memorySummaryPath, dataRoot, memoryHomeSource } from "../src/paths.js"
-import { MemoryStore } from "../src/store.js"
+import { MemoryStore, PHASE2_COOLDOWN_MS } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
 import { assertMemoryRootSafe, readRegularFileNoFollow } from "../src/path-guard.js"
@@ -236,6 +236,20 @@ function fmtWatermarkMs(ms: number | null | undefined): string {
   return new Date(ms).toISOString()
 }
 
+function phase2NoteLines(phase2: {
+  status: string
+  last_error: string | null
+  finished_at: number | null
+}): string[] {
+  if (phase2.last_error || phase2.status === "running" || phase2.finished_at == null) return []
+  const until = phase2.finished_at + PHASE2_COOLDOWN_MS / 1000
+  const now = Math.floor(Date.now() / 1000)
+  if (now < until) return [`phase2_note: idle, 6h cooldown until ${fmtUnixSec(until)}`]
+  if (phase2.status === "pending") return ["phase2_note: pending, cooldown elapsed"]
+  if (phase2.status === "done") return ["phase2_note: idle, cooldown elapsed"]
+  return []
+}
+
 export const memory_inspect = tool({
   description:
     "Inspect the current memory state. Returns: stage1_outputs count, stage-1 job status " +
@@ -252,7 +266,8 @@ export const memory_inspect = tool({
       assertMemoryRootSafe()
       const store = new MemoryStore()
       const outputs = store.stage1Outputs()
-      const stage1Jobs = store.stage1JobSnapshot()
+      const staleBeforeSec = Math.floor(Date.now() / 1000) - pluginOptions.max_rollout_age_days * 86_400
+      const stage1Jobs = store.stage1JobSnapshot(staleBeforeSec)
       const summaryPath = memorySummaryPath()
       let summaryChars = 0
       let summaryTokens = 0
@@ -275,6 +290,7 @@ export const memory_inspect = tool({
             `phase2_last_success_watermark: ${fmtWatermarkMs(phase2.last_success_watermark)}`,
             // Clean-success finish only — never a failure timestamp.
             `phase2_last_success_finished_at: ${fmtUnixSec(phase2.success_finished_at)}`,
+            ...phase2NoteLines(phase2),
           ]
         : [
             "phase2_status: none",
@@ -292,6 +308,7 @@ export const memory_inspect = tool({
         .map(([s, c]) => `${s}=${c}`)
       const fc = stage1Jobs.by_failure_class
       const failureParts = [
+        fc.due > 0 ? `due=${fc.due}` : "",
         fc.backoff > 0 ? `backoff=${fc.backoff}` : "",
         fc.provider_capacity > 0 ? `provider_capacity=${fc.provider_capacity}` : "",
         fc.other_exhausted > 0 ? `other_exhausted=${fc.other_exhausted}` : "",
@@ -299,6 +316,11 @@ export const memory_inspect = tool({
       const stage1Lines = [
         `stage1_jobs: ${stage1StatusParts.length > 0 ? stage1StatusParts.join(" ") : "none"}`,
         `stage1_failures: ${failureParts.length > 0 ? failureParts.join(" ") : "none"}`,
+        ...(stage1Jobs.stale_exhausted > 0
+          ? [
+              `stage1_stale_exhausted: ${stage1Jobs.stale_exhausted} (older than max_rollout_age_days, will not retry)`,
+            ]
+          : []),
         ...stage1Jobs.recent_errors.map((e) => {
           const klass = e.failure_class ? `, ${e.failure_class}` : ""
           const retry = e.retry_at ? ` retry_at=${fmtUnixSec(e.retry_at)}` : ""
@@ -307,7 +329,7 @@ export const memory_inspect = tool({
       ]
       const discovery = getDiscoveryStatus()
       const discoveryLine = discovery
-        ? `discovery: ${discovery.ok ? "ok" : "failed"} count=${discovery.count} at=${new Date(discovery.at).toISOString()}${discovery.error ? ` error=${discovery.error}` : ""}`
+        ? `discovery: ${discovery.ok ? "ok" : "failed"} count=${discovery.count} at=${new Date(discovery.at).toISOString()}${discovery.error ? ` error=${discovery.error}` : ""} (this process's session list, not total chats)`
         : "discovery: never ran (no phase-1 pass yet this process)"
       const idleHours = pluginOptions.min_rollout_idle_hours
       const eligibilityHint =
@@ -354,6 +376,7 @@ export const memory_inspect = tool({
           stage1_count: outputs.length,
           stage1_jobs: stage1Jobs.by_status,
           stage1_failures: stage1Jobs.by_failure_class,
+          stage1_stale_exhausted: stage1Jobs.stale_exhausted,
           stage1_recent_errors: stage1Jobs.recent_errors,
           phase2_status: phase2?.status ?? null,
           phase2_last_error: phase2?.last_error ?? null,

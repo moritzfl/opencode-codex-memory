@@ -32,6 +32,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   resetRateLimitForTest()
+  require("../src/diagnostics.js").resetDiagnosticsForTest()
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -449,6 +450,7 @@ describe("memory_inspect", () => {
     fs.symlinkSync(root, path.join(root, "loop"))
     const r = await memory_inspect.execute({}, CTX)
     expect(r.output).toContain("phase2_status: done")
+    expect(r.output).toContain("phase2_note: idle, 6h cooldown until")
     expect(r.output).toContain("phase2_last_error: none")
     expect(r.output).toContain(`phase2_last_success_watermark: ${new Date(ts).toISOString()}`)
     expect(r.output).toMatch(/phase2_last_success_finished_at: \d{4}-/)
@@ -533,6 +535,46 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("ses_perm (failed, other_exhausted)")
     expect(r.metadata.stage1_failures.backoff).toBeGreaterThanOrEqual(1)
     expect(r.metadata.stage1_failures.other_exhausted).toBe(1)
+    expect(r.metadata.stage1_failures.due).toBe(0)
+  })
+
+  it("leads inspect errors with due jobs and folds stale exhausted into a count", async () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { openDb } = require("../src/db.js")
+    const { memory_inspect } = require("../tools/control.js")
+    const store = new MemoryStore()
+    let perm = store.claimStage1Jobs([{ id: "ses_old", updated_at: 1000 }])
+    store.markStage1Failed(perm[0].sessionId, perm[0].ownershipToken, "boom 0")
+    for (let i = 1; i < 3; i++) {
+      openDb().prepare("UPDATE memory_jobs SET retry_at=1 WHERE job_key='ses_old'").run()
+      perm = store.claimStage1Jobs([{ id: "ses_old", updated_at: 1000 }])
+      store.markStage1Failed(perm[0].sessionId, perm[0].ownershipToken, `boom ${i}`)
+    }
+    openDb().prepare("UPDATE memory_jobs SET finished_at=1 WHERE job_key='ses_old'").run()
+    const due = store.claimStage1Jobs([{ id: "ses_due", updated_at: 1000 }])
+    store.markStage1Failed(due[0].sessionId, due[0].ownershipToken, "extraction response contained no JSON object")
+    openDb().prepare("UPDATE memory_jobs SET retry_at=1 WHERE job_key='ses_due'").run()
+
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("due=1")
+    expect(r.output).toContain("ses_due (pending, due)")
+    expect(r.output).toContain("stage1_stale_exhausted: 1 (older than max_rollout_age_days, will not retry)")
+    expect(r.output).not.toContain("ses_old (failed")
+    expect(r.metadata.stage1_stale_exhausted).toBe(1)
+    expect(r.metadata.stage1_failures.due).toBe(1)
+  })
+
+  it("labels discovery as this process's session list", async () => {
+    const { recordDiscoveryStatus, resetDiagnosticsForTest } = require("../src/diagnostics.js")
+    const { memory_inspect } = require("../tools/control.js")
+    resetDiagnosticsForTest()
+    recordDiscoveryStatus({ ok: true, count: 1 })
+    recordDiscoveryStatus({ ok: true, count: 1 })
+    const r = await memory_inspect.execute({}, CTX)
+    expect(r.output).toContain("discovery: ok count=1")
+    expect(r.output).toContain("(this process's session list, not total chats)")
+    const listed = (r.output as string).match(/listed 1 session\(s\)/g) ?? []
+    expect(listed.length).toBe(1)
   })
 
   it("does not read a memory summary through a symlink", async () => {
