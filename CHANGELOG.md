@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-09-19
+
+### Fixed
+
+- OpenCode 2 extraction preserves reasoning variants when a complete model
+  reference is available and avoids invalid variant-only model references.
+- Sessionless OpenCode 2 extraction releases its synthetic helper locally,
+  avoiding spurious host-session cleanup failures.
+
 ### Changed
 
 - Live e2e/readpath auth comes from `.env` (`OPENCODE_LIVE_API_KEY`,
@@ -18,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window has elapsed as `due`, and states Phase 2 idle/cooldown instead of a
   bare `pending`. Discovery is this process's session list (not total chats)
   and no longer logs the same count on every cache hit.
+- Live tests load one explicitly configured plugin package on both host
+  generations, verify that OpenCode 2 receives model options, and wait for
+  completed replies to the current prompt. Permission grants remain scoped
+  to the interactive agent so memory helpers retain their file-tool sandbox.
+- Live e2e coverage verifies automatic learning from implemented tasks,
+  fresh-session recall, citations, explicit "remember this" requests, and
+  reset. Hard failures retain their sandbox for diagnosis; OpenCode 2 contract
+  checks use an isolated host.
 
 ## [0.7.6] - 2026-09-19
 
