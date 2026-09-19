@@ -227,23 +227,27 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   if (live) {
     config.provider = liveProviderV1Config(live)
     config.providers = liveProviderConfig(live)
-    config.permission = { "*": "allow" }
+    // Permission grants belong to the interactive agent only. Global grants
+    // can override the memory helpers' deny-first file-tool sandbox on V2.
+    config.agent = { build: { permission: { "*": "allow" } } }
   }
 
-  // One load path for 1.x and 2.x: project file plugin + config options aimed
-  // at that same file. Repo `file://` in config is a second identity; 2.x
-  // serve also does not auto-install it.
-  const pluginFileUrl = pathToFileURL(repoRoot()).href
+  // Both hosts load one explicitly configured package directory. OpenCode
+  // 2.0.9 rejects configured files; auto-discovered files load without these
+  // options. Keep this outside plugins/ so discovery cannot win the identity.
+  const pluginDir = path.join(project, ".opencode", "memory-plugin")
+  const pluginFileUrl = pathToFileURL(opts.bare ? repoRoot() : pluginDir).href
   if (!opts.bare) {
-    const plugRel = "./.opencode/plugins/codex-memory.js"
-    const plugFile = path.join(project, ".opencode", "plugins", "codex-memory.js")
-    fs.mkdirSync(path.dirname(plugFile), { recursive: true })
+    fs.mkdirSync(pluginDir, { recursive: true })
+    fs.writeFileSync(path.join(pluginDir, "package.json"), JSON.stringify({
+      name: "ocm-live-plugin", type: "module", main: "./index.js", exports: { ".": "./index.js" },
+    }))
     fs.writeFileSync(
-      plugFile,
+      path.join(pluginDir, "index.js"),
       `export { default } from ${JSON.stringify(path.join(repoRoot(), "dist", "src", "index.js"))}\n`,
     )
-    config.plugin = [[pathToFileURL(plugFile).href, pluginOptions]]
-    config.plugins = [{ package: plugRel, options: pluginOptions }]
+    config.plugin = [[pluginFileUrl, pluginOptions]]
+    config.plugins = [{ package: pluginDir, options: pluginOptions }]
   }
   fs.writeFileSync(
     path.join(configHome, "opencode", "opencode.json"),
@@ -276,7 +280,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
 
   const keep = opts.keep === true || process.env.OPENCODE_LIVE_KEEP === "1"
   const cleanup = () => {
-    if (keep) {
+    if (sandbox.keep) {
       console.error(`[harness] keeping sandbox: ${root}`)
       return
     }
@@ -287,7 +291,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     }
   }
 
-  return {
+  const sandbox: Sandbox = {
     root,
     dataHome,
     configHome,
@@ -302,6 +306,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     keep,
     cleanup,
   }
+  return sandbox
 }
 
 export function requireAuth(): LiveEnv {
@@ -498,6 +503,7 @@ export async function api(
   apiPath: string,
   body?: unknown,
   query: Record<string, string | undefined> = {},
+  signal?: AbortSignal,
 ): Promise<ApiResult> {
   const url = new URL(apiPath, serve.baseUrl)
   if (!url.searchParams.has("directory")) {
@@ -508,6 +514,7 @@ export async function api(
   }
   const res = await fetch(url, {
     method,
+    signal,
     headers: {
       ...basicAuth(sandbox),
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -555,7 +562,7 @@ export async function promptSession(
   opts: { agent?: string; timeoutMs?: number } = {},
 ): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 180_000
-  if (serve.v2) return promptSessionV2(serve, sandbox, sessionId, text, timeoutMs)
+  if (serve.v2) return promptSessionV2(serve, sandbox, sessionId, text, timeoutMs, opts.agent)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -592,32 +599,28 @@ async function promptSessionV2(
   sessionId: string,
   text: string,
   timeoutMs: number,
+  agent?: string,
 ): Promise<string> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const prompted = await api(serve, sandbox, "POST", `/api/session/${sessionId}/prompt`, { text })
+    const request = (method: string, route: string, body?: unknown, query = {}) =>
+      api(serve, sandbox, method, route, body, query, controller.signal)
+    if (agent) {
+      const switched = await request("POST", `/api/session/${sessionId}/agent`, { agent })
+      if (switched.status >= 300) throw new Error(`switchAgent failed: ${switched.status} ${switched.text}`)
+    }
+    const prompted = await request("POST", `/api/session/${sessionId}/prompt`, { text })
     if (prompted.status >= 300) {
       throw new Error(`prompt failed: ${prompted.status} ${prompted.text.slice(0, 500)}`)
     }
-    // session.wait long-polls and can hang on 2.0.9; poll messages instead.
-    const deadline = Date.now() + timeoutMs
-    let last = ""
-    while (Date.now() < deadline) {
-      if (controller.signal.aborted) break
-      const msgs = await api(serve, sandbox, "GET", `/api/session/${sessionId}/message`, undefined, {
-        order: "desc",
-      })
-      if (msgs.status >= 300) {
-        last = `message.list ${msgs.status} ${msgs.text.slice(0, 200)}`
-      } else {
-        const out = extractV2AssistantText(msgs.json)
-        if (out) return out
-        last = `no assistant yet (${msgs.text.slice(0, 120)})`
-      }
-      await sleep(500)
-    }
-    throw new Error(`prompt timed out after ${timeoutMs}ms (${last})`)
+    const promptID = (unwrapData(prompted.json) as { id?: string })?.id
+    if (!promptID) throw new Error("prompt response missing message id")
+    const waited = await request("POST", `/api/experimental/session/${sessionId}/wait`)
+    if (waited.status >= 300) throw new Error(`session.wait failed: ${waited.status} ${waited.text}`)
+    const msgs = await request("GET", `/api/session/${sessionId}/message`, undefined, { order: "desc", limit: "100" })
+    if (msgs.status >= 300) throw new Error(`message.list failed: ${msgs.status} ${msgs.text}`)
+    return completedV2Reply(msgs.json, promptID)
   } catch (e) {
     if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
       throw new Error(`prompt timed out after ${timeoutMs}ms`)
@@ -628,23 +631,24 @@ async function promptSessionV2(
   }
 }
 
-function extractV2AssistantText(json: unknown): string {
+/** Newest-first messages after session.wait; never accept a stale or partial reply. */
+export function completedV2Reply(json: unknown, promptID: string): string {
   let data: unknown = unwrapData(json)
   if (data && typeof data === "object" && !Array.isArray(data)) {
     const rec = data as { data?: unknown; items?: unknown }
     if (Array.isArray(rec.data)) data = rec.data
     else if (Array.isArray(rec.items)) data = rec.items
   }
-  const rows = Array.isArray(data) ? data : []
-  const texts: string[] = []
-  for (const m of rows as Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>) {
-    if (m?.type !== "assistant") continue
-    for (const p of m.content ?? []) {
-      if (p?.type === "text" && typeof p.text === "string") texts.push(p.text)
-    }
-    if (texts.length) break
+  const rows: any[] = Array.isArray(data) ? data : []
+  const boundary = rows.findIndex((m) => m.id === promptID && m.type === "user")
+  if (boundary < 0) throw new Error(`prompt ${promptID} missing from transcript`)
+  const assistant = rows.slice(0, boundary).find((m) => m.type === "assistant")
+  if (!assistant) throw new Error(`no assistant reply to ${promptID}`)
+  if (assistant.error) throw new Error(`assistant failed: ${JSON.stringify(assistant.error)}`)
+  if (!assistant.time?.completed || !assistant.finish || assistant.finish === "tool-calls") {
+    throw new Error(`assistant turn incomplete after session.wait (${assistant.finish ?? "no finish"})`)
   }
-  return texts.join("\n")
+  return (assistant.content ?? []).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
 }
 
 function extractAssistantText(body: string): string {
