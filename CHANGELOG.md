@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- V2 citation instructions now require a blank line before the
+  `memory-citation` fence so markdown clients (OpenCode web) parse it as a
+  code block instead of gluing it onto the last sentence.
+
 ## [0.7.5] - 2026-09-19
 
 ### Added

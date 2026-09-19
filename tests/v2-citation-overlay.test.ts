@@ -24,6 +24,9 @@ describe("overlayV2CitationInstructions", () => {
   it("replaces the V1 XML citation section with the fenced V2 form", () => {
     const out = overlayV2CitationInstructions(V1)
     expect(out).toContain("```memory-citation")
+    expect(out).toContain("blank line")
+    expect(out).toContain("own line at column 0")
+    expect(out).toContain("answer text ends here.\n\n```memory-citation")
     expect(out).toContain("Updating memories:")
     expect(out).toContain("keep this")
     expect(out).not.toContain("<citation_entries>")

@@ -7,10 +7,15 @@ export const V2_CITATION_INSTRUCTIONS = `Memory citation requirements:
 
 - If ANY relevant memory files were used: append exactly one fenced code
   block with the language tag \`memory-citation\` as the VERY LAST content of
-  the final reply. Normal responses should include the answer first, then
-  append the block at the end. The host renders this block natively.
-- Use this exact structure for programmatic parsing:
+  the final reply. Answer first, then a blank line, then the block. The
+  opening fence must be on its own line at column 0 — never glue it to the
+  last sentence, or markdown clients treat the block as paragraph text and
+  collapse its newlines. The host renders this block natively.
+- Use this exact structure for programmatic parsing (blank line before the
+  fence is required):
 \`\`\`\`
+answer text ends here.
+
 \`\`\`memory-citation
 MEMORY.md:234-236|note=build command for the api service
 rollout_summaries/2026-02-17T21-23-02-ln3m-example.md:10-12|note=weekly report format
