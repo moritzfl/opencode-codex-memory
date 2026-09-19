@@ -141,7 +141,11 @@ mappings:
       expose this dir through the plugin API (/path returns
       home/config/state/worktree/directory, not data), hence the recompute.
       OPENCODE_CODEX_MEMORY_TEST_ROOT is the CODEX_HOME analog: an outright
-      override used by tests and the write-pipeline sandbox.
+      override used by tests and the write-pipeline sandbox. DELIBERATE
+      ADAPTATION: plugin option `home` and OPENCODE_CODEX_MEMORY_HOME relocate
+      only this plugin's files (memory.db + memories/) away from OpenCode's
+      data dir so a sandbox can mount memory without the host session
+      database. Codex has no equivalent; its data root already is CODEX_HOME.
   - ours: src/path-guard.ts
     theirs: codex-rs/ext/memories/src/local/path.rs
     note: >

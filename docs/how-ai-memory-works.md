@@ -527,7 +527,8 @@ A writing system inside an AI agent needs boundaries that fail closed, and
 this one stacks several:
 
 - **Local-only storage.** There is no remote memory service to enable, by
-  accident or otherwise. Everything lives under the host's data directory. The
+  accident or otherwise. Everything lives under the plugin home (OpenCode's
+  data directory by default, or `home` / `OPENCODE_CODEX_MEMORY_HOME`). The
   only thing that ever leaves the machine is the traffic the model provider
   already sees — and even that passes through redaction first.
 - **Secrets are scrubbed** from transcripts and extracted notes before they

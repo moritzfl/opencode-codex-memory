@@ -65,6 +65,8 @@ bun run live:e2e     # full write pipeline (Phase 1 + 2 + closed loop)
 ```
 
 - Store/DB tests use a temp root via `OPENCODE_CODEX_MEMORY_TEST_ROOT`.
+  Production relocation of just memory files is `home` /
+  `OPENCODE_CODEX_MEMORY_HOME` (TEST_ROOT still wins in tests).
 - Templates in `src/templates/*.md` are ported from codex with deliberate
   platform adaptations — never byte-copy them from upstream. Read the mapping
   `note:` in `codex-map.yaml` first; `tests/prompts.test.ts` guards the

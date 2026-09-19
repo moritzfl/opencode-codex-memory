@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `home` plugin option (and `OPENCODE_CODEX_MEMORY_HOME`) relocates only
+  `memory.db` + `memories/` so a sandbox can mount memory without the rest of
+  OpenCode's local database. Precedence: `home` (pinned; ignores OpenCode's
+  data dir and `XDG_DATA_HOME`) → `OPENCODE_CODEX_MEMORY_HOME` → OpenCode data
+  dir (default; memory moves with that directory). Absolute path required
+  (`~` ok). `memory_inspect` shows the resolved home.
+
 ## [0.7.4] - 2026-09-19
 
 ### Fixed

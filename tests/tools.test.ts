@@ -554,8 +554,27 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("generate_memories: true")
     expect(r.output).toContain("codex_interop: off")
     expect(r.output).toContain("claude_import: off")
+    expect(r.output).toContain(`home: ${TEST_ROOT} (test root)`)
     expect(r.output).toContain("config_warnings: none")
     expect(r.metadata.effective_options.dedicated_tools).toBe(true)
+  })
+
+  it("inspect shows a relocated home from the option", async () => {
+    delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    const home = path.join(TEST_ROOT, "sandbox-mount")
+    fs.mkdirSync(path.join(home, "memories"), { recursive: true })
+    const { applyPluginOptions } = require("../src/index.js")
+    applyPluginOptions({ home })
+    try {
+      const { memory_inspect } = require("../tools/control.js")
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain(`home: ${home} (option)`)
+      expect(r.metadata.effective_options.home).toBe(home)
+    } finally {
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
+      require("../src/options.js").resetPluginOptions()
+      require("../src/db.js").closeDb()
+    }
   })
 
   it("reports effective agent health after config injection", async () => {

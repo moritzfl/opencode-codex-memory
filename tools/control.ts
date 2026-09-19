@@ -1,7 +1,7 @@
 import fs from "fs"
 import path from "path"
 import { tool } from "@opencode-ai/plugin"
-import { memoryRoot, memorySummaryPath } from "../src/paths.js"
+import { memoryRoot, memorySummaryPath, dataRoot, memoryHomeSource } from "../src/paths.js"
 import { MemoryStore } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
@@ -45,6 +45,19 @@ function wipeMemoriesDir(): void {
   }
 }
 
+function homeSourceLabel(source: ReturnType<typeof memoryHomeSource>): string {
+  switch (source) {
+    case "test":
+      return "test root"
+    case "option":
+      return "option"
+    case "env":
+      return "OPENCODE_CODEX_MEMORY_HOME"
+    case "default":
+      return "OpenCode data dir"
+  }
+}
+
 /**
  * Renders the effective (post-parse, post-clamp) plugin options plus any
  * problems recorded while applying them. The plugin never hard-fails on bad
@@ -68,6 +81,7 @@ function renderEffectiveConfig(): string[] {
     `  max_rollout_age_days: ${o.max_rollout_age_days}`,
     `  max_rollouts_per_startup: ${o.max_rollouts_per_startup}`,
     `  min_rollout_idle_hours: ${o.min_rollout_idle_hours}`,
+    `  home: ${dataRoot()} (${homeSourceLabel(memoryHomeSource())})`,
   ]
   const ci = o.codex_interop
   if (!ci.import && !ci.export) {

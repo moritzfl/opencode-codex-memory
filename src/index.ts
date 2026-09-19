@@ -1,5 +1,6 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
-import { memoryRoot } from "./paths.js"
+import { memoryRoot, memoryDbPath, setConfiguredHome, resolveHomePath } from "./paths.js"
+import { closeDb } from "./db.js"
 import { stripCitations, extractCitedSessionIds, hasCitationMarkup } from "./citation.js"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../tools/memory.js"
 import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
@@ -160,7 +161,11 @@ export default {
     // instances in one process — see the ARCHITECTURE known-gaps table).
     clearConfigWarnings()
     if (opts) applyPluginOptions(opts)
-    else resetPluginOptions()
+    else {
+      const previousDb = memoryDbPath()
+      resetPluginOptions()
+      if (memoryDbPath() !== previousDb) closeDb()
+    }
     // Finish bounded reseeding before hooks can see a surviving memory
     // sub-session after a plugin reload.
     await cleanupOldSubSessions()
@@ -187,6 +192,7 @@ const KNOWN_OPTION_KEYS = new Set([
   "max_rollout_age_days",
   "max_rollouts_per_startup",
   "min_rollout_idle_hours",
+  "home",
   "codex_interop",
   "claude_import",
 ])
@@ -207,6 +213,7 @@ function clampInt(key: string, value: unknown, min: number, max: number, fallbac
 export function applyPluginOptions(opts: PluginOptions): void {
   // Fresh pass per apply so memory_inspect never shows warnings for keys the
   // caller has since fixed. server() clears too, for boots without options.
+  const previousDb = memoryDbPath()
   clearConfigWarnings()
   resetPluginOptions()
   const raw = opts as Record<string, unknown>
@@ -234,6 +241,26 @@ export function applyPluginOptions(opts: PluginOptions): void {
   if ("max_rollout_age_days" in opts) pluginOptions.max_rollout_age_days = clampInt("max_rollout_age_days", opts.max_rollout_age_days, 0, 90, 10)
   if ("max_rollouts_per_startup" in opts) pluginOptions.max_rollouts_per_startup = clampInt("max_rollouts_per_startup", opts.max_rollouts_per_startup, 1, 128, 2)
   if ("min_rollout_idle_hours" in opts) pluginOptions.min_rollout_idle_hours = clampInt("min_rollout_idle_hours", opts.min_rollout_idle_hours, 1, 48, 6)
+  if ("home" in raw) {
+    if (typeof raw.home !== "string") {
+      recordConfigWarning("home must be a string; using the OpenCode data dir")
+    } else {
+      const resolved = resolveHomePath(raw.home)
+      if (!resolved) {
+        recordConfigWarning("home must be an absolute path (tilde ~ is ok); using the OpenCode data dir")
+      } else {
+        pluginOptions.home = resolved
+        setConfiguredHome(resolved)
+        const envHome = process.env.OPENCODE_CODEX_MEMORY_HOME
+        if (envHome) {
+          const envResolved = resolveHomePath(envHome)
+          if (envResolved && envResolved !== resolved) {
+            recordConfigWarning("OPENCODE_CODEX_MEMORY_HOME ignored because home option is set")
+          }
+        }
+      }
+    }
+  }
   if ("codex_interop" in opts) {
     const raw = opts.codex_interop
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -293,6 +320,7 @@ export function applyPluginOptions(opts: PluginOptions): void {
       recordConfigWarning("claude_import must be an object like { enabled, claude_home, projects }; ignored")
     }
   }
+  if (memoryDbPath() !== previousDb) closeDb()
 }
 
 /**
@@ -382,7 +410,7 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
   }
   // Sub-sessions use directory=memoryRoot (llm.ts), so memory paths are usually
   // in-bounds. Keep an explicit external_directory allow for the memory root as
-  // belt-and-suspenders (path is homedir/env-dependent; out-ranks `"*": deny`).
+  // belt-and-suspenders (path is home/env-dependent; out-ranks `"*": deny`).
   const memorize = defs["memorize"] as { permission?: Record<string, unknown> } | undefined
   if (memorize?.permission && !("external_directory" in memorize.permission)) {
     memorize.permission["external_directory"] = { [path.join(memoryRoot(), "*")]: "allow" }

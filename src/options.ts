@@ -1,5 +1,6 @@
 import type { CodexInteropOptions } from "./codex-interop.js"
 import type { ClaudeImportOptions } from "./claude-import.js"
+import { setConfiguredHome } from "./paths.js"
 
 /**
  * Effective plugin options + configuration diagnostics, owned by a leaf
@@ -8,9 +9,9 @@ import type { ClaudeImportOptions } from "./claude-import.js"
  *
  * Option names and defaults mirror codex's MemoriesToml/MemoriesConfig
  * (codex-rs/config/src/types.rs). Keep them 1:1 so the drift script and
- * manual syncing stay trivial; do not rename for taste. codex_interop and
- * claude_import are opencode-facing knobs for external-agent exchange
- * (codex's Claude importer is migration-UI gated / default-off).
+ * manual syncing stay trivial; do not rename for taste. codex_interop,
+ * claude_import, and home are opencode-facing knobs (Codex has no equivalent
+ * of relocating just the memory files away from the host data dir).
  */
 export interface PluginOptionsState {
   generate_memories: boolean
@@ -19,6 +20,8 @@ export interface PluginOptionsState {
   disable_on_external_context: boolean
   extract_model?: string
   consolidation_model?: string
+  /** Resolved absolute plugin home (parent of memory.db + memories/). Unset = default. */
+  home?: string
   max_raw_memories_for_consolidation: number
   max_unused_days: number
   max_rollout_age_days: number
@@ -51,6 +54,8 @@ export const pluginOptions: PluginOptionsState = {
 export function resetPluginOptions(): void {
   delete pluginOptions.extract_model
   delete pluginOptions.consolidation_model
+  delete pluginOptions.home
+  setConfiguredHome(undefined)
   Object.assign(pluginOptions, DEFAULT_PLUGIN_OPTIONS, {
     codex_interop: { ...DEFAULT_PLUGIN_OPTIONS.codex_interop },
     claude_import: { ...DEFAULT_PLUGIN_OPTIONS.claude_import },

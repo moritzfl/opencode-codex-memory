@@ -23,9 +23,10 @@ See the [changelog](./CHANGELOG.md) for release history.
 **Local-first by design.** Memory is plain markdown files plus a small SQLite
 database on your own machine — no memory service to sign up for, no MCP server,
 no separate process, no sync. Installing it is one line in your `opencode.json`;
-from there everything lives under `~/.local/share/opencode/`, so you can read it,
-grep it, edit it, or delete it like anything else you own. Nothing leaves your
-machine beyond the model calls OpenCode already makes.
+from there everything lives under `~/.local/share/opencode/` by default (or a
+directory you set with `home`), so you can read it, grep it, edit it, or delete
+it like anything else you own. Nothing leaves your machine beyond the model
+calls OpenCode already makes.
 
 If you *do* also use the Codex CLI or Claude Code on the same machine: the
 plugin can bring their memories in (and, for Codex, push ours back). Off by
@@ -126,9 +127,15 @@ echo 'I prefer TypeScript strict mode and 2-space indentation.' \
     └── extensions/ad_hoc/notes/    # things you explicitly asked it to remember
 ```
 
-The location follows OpenCode's own data directory — `$XDG_DATA_HOME/opencode`
+By default this is OpenCode's own data directory — `$XDG_DATA_HOME/opencode`
 when that's set, otherwise `~/.local/share/opencode` (same resolution on macOS,
-Linux, and Windows).
+Linux, and Windows). Relocating OpenCode's local dir (for example by setting
+`XDG_DATA_HOME`) therefore moves memory with it. To pin **only** `memory.db`
+and `memories/` somewhere else — a sandbox mount, without the rest of
+OpenCode's database — set `home`. That pin is always enforced; OpenCode's data
+dir and `XDG_DATA_HOME` no longer apply. Precedence:
+[Relocating memory](#relocating-memory-sandbox-mounts). Do not symlink
+`memories/` — the plugin refuses a symlinked memory root.
 
 It's all plain files and a local SQLite database. Read them, edit them, delete
 them — it's yours. (The `memories/` folder also holds a few working files and
@@ -143,11 +150,13 @@ leave job state, Git baseline, and memory files out of sync. Include hidden
 files, especially `memories/.git/`, and SQLite sidecars such as `memory.db-wal`
 or `memory.db-shm` when present.
 
-The directory is `$XDG_DATA_HOME/opencode` when `XDG_DATA_HOME` is set,
-otherwise `~/.local/share/opencode`. Copy that whole directory to a dated
-backup location. To restore, stop OpenCode, replace the current `opencode/`
-data directory with the backup copy, then start OpenCode again. Do not restore
-while OpenCode is running or copy only `memory.db` or only `memories/`.
+The default directory is `$XDG_DATA_HOME/opencode` when `XDG_DATA_HOME` is set,
+otherwise `~/.local/share/opencode`. If you set `home` (or
+`OPENCODE_CODEX_MEMORY_HOME`), back up that directory instead — it is the pair
+`memory.db` + `memories/`. Copy it to a dated backup location. To restore, stop
+OpenCode, replace the current home with the backup copy, then start OpenCode
+again. Do not restore while OpenCode is running or copy only `memory.db` or
+only `memories/`.
 
 ## Privacy & safety
 
@@ -192,6 +201,7 @@ Codex's `[memories]` config so the two stay easy to compare:
 | `max_unused_days` | `30` | Prune memories unused for this long |
 | `codex_interop` | `{ "import": false, "export": false }` | Two-way memory exchange with a local Codex CLI (see below) |
 | `claude_import` | `{ "enabled": false }` | One-way import of Claude Code project memories (see below) |
+| `home` | unset (follows OpenCode data dir) | Pin `memory.db` + `memories/` here. When set, OpenCode's data dir and `XDG_DATA_HOME` are ignored. See [Relocating memory](#relocating-memory-sandbox-mounts) |
 
 To set options, turn the plugin entry into a `[name, options]` pair:
 
@@ -252,6 +262,56 @@ nearest OpenCode variant on `none < minimal < low < medium < high < xhigh < max`
 > tools have no such friction — that's why they are the default. The
 > maintenance tools (`memory_reset`, `memory_inspect`, `memory_mode`) stay
 > available either way.
+
+### Relocating memory (sandbox mounts)
+
+First match wins:
+
+1. **`home` plugin option** — pinned. Always enforced. OpenCode's data
+   directory and `XDG_DATA_HOME` do not apply.
+2. **`OPENCODE_CODEX_MEMORY_HOME`** — same pin, only if `home` is unset.
+3. **OpenCode data dir** (default) — `$XDG_DATA_HOME/opencode` when that env
+   is set, otherwise `~/.local/share/opencode`. Memory moves with OpenCode's
+   local directory.
+
+To mount **only** memory into a sandbox, use (1) or (2) and point at a
+dedicated directory:
+
+```json
+{
+  "plugin": [
+    ["opencode-codex-memory@0.7.4", { "home": "/path/to/opencode-memory" }]
+  ]
+}
+```
+
+OpenCode 2:
+
+```jsonc
+{
+  "plugins": [
+    { "package": "opencode-codex-memory@0.7.4", "options": { "home": "/path/to/opencode-memory" } }
+  ]
+}
+```
+
+`~` is expanded. The path must be absolute — a project-relative path would
+make memory follow the cwd, and memory is global. Same layout as the default,
+just elsewhere:
+
+```
+/path/to/opencode-memory/
+├── memory.db
+└── memories/
+```
+
+Mount that directory into the sandbox at the **same absolute path**.
+
+This does not move existing files. Stop OpenCode, copy `memory.db` (and
+`memory.db-wal` / `memory.db-shm` if present) plus `memories/` into the new
+home, then start it again. Do not symlink `memories/` in place of `home` —
+a symlinked memory root is refused. Ask the agent to run `memory_inspect` to
+confirm the resolved path.
 
 ### Sharing memory with the Codex CLI
 

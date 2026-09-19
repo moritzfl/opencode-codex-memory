@@ -31,6 +31,8 @@ import {
   abortActiveSubSessions,
 } from "../llm.js"
 import { pluginOptions, clearConfigWarnings, resetPluginOptions } from "../options.js"
+import { memoryDbPath } from "../paths.js"
+import { closeDb } from "../db.js"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "../lifecycle.js"
 import { hostMcpStatus } from "../host-client.js"
 import { recordDiagnostic } from "../diagnostics.js"
@@ -281,7 +283,11 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
   mcpStatusInFlight = null
   clearConfigWarnings()
   if (ctx.options) applyPluginOptions(ctx.options as Record<string, unknown>)
-  else resetPluginOptions()
+  else {
+    const previousDb = memoryDbPath()
+    resetPluginOptions()
+    if (memoryDbPath() !== previousDb) closeDb()
+  }
   await ensureV2Agents(ctx as any)
 
   const statusRegistration = await ctx.rpc.register(MemoryStatusRpc, {

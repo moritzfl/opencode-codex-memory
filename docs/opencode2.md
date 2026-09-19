@@ -1,8 +1,9 @@
 # OpenCode 2
 
 The same package runs on OpenCode 1.x and OpenCode 2. Memory still lives in
-`~/.local/share/opencode/` and uses the same options. Pin the version — OpenCode
-installs a plugin spec once and does not follow “latest”.
+the plugin home (OpenCode data dir by default, or `home` /
+`OPENCODE_CODEX_MEMORY_HOME`) and uses the same options. Pin the version —
+OpenCode installs a plugin spec once and does not follow “latest”.
 
 ## Install
 
@@ -21,7 +22,8 @@ OpenCode 1.x keeps the older `"plugin": ["opencode-codex-memory@0.7.4"]` form.
 
 All V1 options apply unchanged: `generate_memories`, `use_memories`,
 `dedicated_tools`, `disable_on_external_context`, `extract_model`,
-`consolidation_model`, the numeric clamps, `codex_interop`, and `claude_import`.
+`consolidation_model`, the numeric clamps, `codex_interop`, `claude_import`,
+and `home`.
 
 ## What you get
 

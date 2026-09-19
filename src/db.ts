@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite"
+import fs from "fs"
+import path from "path"
 import { memoryDbPath } from "./paths.js"
 
 const SCHEMA_V1 = [
@@ -48,6 +50,7 @@ let dbInstance: Database | null = null
 export function openDb(): Database {
   if (dbInstance) return dbInstance
   const dbPath = memoryDbPath()
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
   const db = new Database(dbPath, { create: true, readwrite: true, strict: false })
   try {
     // Match codex's memories-DB open options (runtime.rs): WAL, NORMAL sync,

@@ -75,9 +75,13 @@ WRITE PATH
     dispose() aborts the consolidator signal so reload cannot leave two writers
 
 STORAGE
-  ~/.local/share/opencode/memory.db        plugin SQLite (stage1 outputs + jobs + session meta)
-  ~/.local/share/opencode/memories/        MEMORY.md, memory_summary.md, raw_memories.md,
+  <home>/memory.db                         plugin SQLite (stage1 outputs + jobs + session meta)
+  <home>/memories/                         MEMORY.md, memory_summary.md, raw_memories.md,
                                            rollout_summaries/, extensions/, skills/, .git/
+  default <home>                           OpenCode data dir (follows XDG_DATA_HOME)
+  pin                                      plugin option `home`, else OPENCODE_CODEX_MEMORY_HOME
+                                           (does not follow OpenCode data dir / XDG)
+  test only                                OPENCODE_CODEX_MEMORY_TEST_ROOT (wins over pins)
   opencode session data                    never read from disk — transcripts and
                                            discovery go through the plugin API (D4)
 ```
