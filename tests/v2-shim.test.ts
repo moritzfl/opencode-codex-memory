@@ -7,6 +7,7 @@ import {
   adaptV2Messages,
   adaptProviderCatalog,
   adaptMcpStatus,
+  EXTRACT_STUB_SESSION_ID,
 } from "../src/v2/shim.js"
 import {
   discoverOwnService,
@@ -415,8 +416,19 @@ describe("V1 client shim", () => {
     const gen = calls[0].args as any
     expect(gen.prompt).toContain("SYS")
     expect(gen.prompt).toContain("TRANSCRIPT")
-    expect(gen.model).toEqual({ providerID: "acme", id: "m1" })
+    expect(gen.model).toEqual({ providerID: "acme", id: "m1", variant: "low" })
     expect(JSON.stringify(res.data)).toContain("raw_memory")
+  })
+
+  it("never sends a variant-only Model.Ref when the host default model is used", async () => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    await client.session.prompt({ path: { id: "ses_extract" }, body: {
+      agent: "memorize-extract", variant: "low", format: { type: "json_schema" },
+      parts: [{ type: "text", text: "TRANSCRIPT" }],
+    } })
+    expect((calls[0].args as any).model).toBeUndefined()
   })
 
   it("adapts public config documents for the V1 model resolver", async () => {
@@ -563,6 +575,22 @@ describe("V1 client shim", () => {
     })
     expect(calls.map((c) => c.name)).toEqual(["switchAgent", "switchModel", "prompt", "wait"])
     expect((calls[2].args as any).text).toBe("DO")
+  })
+
+  it("releases sessionless extraction handles without calling host session APIs", async () => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx as any)
+    serviceRemove = async () => { throw new Error("must not remove a synthetic session") }
+    const client = buildV1ClientShim() as any
+    const create = () => client.session.create({ body: { title: "codex-memory-extract-test" } })
+    expect((await create()).data.id).toBe(EXTRACT_STUB_SESSION_ID)
+    const path = { id: EXTRACT_STUB_SESSION_ID }
+    await expect(client.session.abort({ path })).resolves.toEqual({})
+    await expect(client.session.delete({ path })).resolves.toEqual({})
+    expect((await client.session.get({ path })).response.status).toBe(404)
+    expect((await create()).data.id).toBe(EXTRACT_STUB_SESSION_ID)
+    await expect(client.session.delete({ path })).resolves.toEqual({})
+    expect(calls).toEqual([])
   })
 
   it("maps NotFound gets to 404", async () => {

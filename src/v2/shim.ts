@@ -316,11 +316,15 @@ async function v2promptWithWait(
   if (body.format) {
     const prompt = body.system ? `${body.system}\n\n---\n\n${text}` : text
     const parsed = body.model ? parseModelRef(`${body.model.providerID}/${body.model.modelID}`) : null
-    // Model.Ref is { providerID, id }. Do not send variant here — 2.0.9
-    // generate.text rejects extra/partial model objects.
+    // Model.Ref requires providerID + id. A variant is valid only alongside
+    // that complete reference; never emit a variant-only model object.
     const payload = {
       prompt,
-      ...(parsed ? { model: { providerID: parsed.providerID, id: parsed.modelID } } : {}),
+      ...(parsed ? { model: {
+        providerID: parsed.providerID,
+        id: parsed.modelID,
+        ...(body.variant ? { variant: body.variant } : {}),
+      } } : {}),
     }
     if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
     const publicClient = await ownServiceClient()
@@ -510,6 +514,12 @@ export function buildV1ClientShim(): unknown {
       }
     },
     delete: async (opts: { path: { id: string }; signal?: AbortSignal }) => {
+      // generate.text never creates a host session. Its synthetic handle is
+      // released locally; passing it to session APIs fails the ^ses schema.
+      if (opts.path.id === EXTRACT_STUB_SESSION_ID) {
+        markReleased(opts.path.id)
+        return {}
+      }
       let shutdownError: unknown
       try {
         const client = await serviceOrThrow()
@@ -585,6 +595,7 @@ export function buildV1ClientShim(): unknown {
       }
     },
     abort: async (opts: { path: { id: string } }) => {
+      if (opts.path.id === EXTRACT_STUB_SESSION_ID) return {}
       try {
         const client = await serviceOrThrow()
         if (typeof client.session.interrupt !== "function") throw new Error("registered service does not support session.interrupt")
