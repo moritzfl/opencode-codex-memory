@@ -15,7 +15,7 @@ import {
   repoRoot,
   type Sandbox,
   type ServeHandle,
-} from "./lib/harness.ts"
+} from "./lib/harness.js"
 
 const V1_BIN = process.env.OPENCODE_V1_BIN?.trim() || ""
 const V2_BIN = process.env.OPENCODE_BIN?.trim() || "opencode"
@@ -178,7 +178,7 @@ async function probeV1(bin: string): Promise<void> {
     }
     await waitHealth(baseUrl, sandbox, Date.now() + 15_000)
     note(true, `opencode-1.18 serve healthy on ${baseUrl}`)
-    const serve: ServeHandle = { baseUrl, port, logPath, stop: async () => {} }
+    const serve: ServeHandle = { baseUrl, port, logPath, v2: false, stop: async () => {} }
     const id = await createSession(serve, sandbox, "host-load")
     console.log(`[opencode-1.18 session] ${id}`)
     await Bun.sleep(1_500)

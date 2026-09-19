@@ -18,6 +18,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { $ } from "bun"
+import { api, createSandbox, startServe, type ServeHandle } from "./lib/harness.js"
 
 const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.3"
 
@@ -97,13 +98,20 @@ async function main(): Promise<void> {
   log("bin", `opencode2 @ ${version}`)
   note(versionGte(version, MIN_VERSION), `opencode2 ${version} ≥ ${MIN_VERSION}`)
 
-  // --- OpenAPI via the background service (no auth needed for /openapi.json) ---
+  // --- OpenAPI from an isolated host, using its own sandbox auth ---
   let doc: { paths?: Record<string, Record<string, { operationId?: string }>> }
+  const sandbox = createSandbox({ bare: true })
+  let serve: ServeHandle | undefined
   try {
-    const raw = await $`opencode2 api get /openapi.json`.text()
-    doc = JSON.parse(raw)
+    serve = await startServe(sandbox, { bin: "opencode2" })
+    const response = await api(serve, sandbox, "GET", "/openapi.json")
+    if (response.status !== 200) throw new Error(`OpenAPI HTTP ${response.status}`)
+    doc = response.json as typeof doc
   } catch (e) {
-    failSetup(`could not fetch /openapi.json: ${e instanceof Error ? e.message : String(e)}`)
+    throw new Error(`could not fetch /openapi.json: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    await serve?.stop()
+    sandbox.cleanup()
   }
   const ops = new Set<string>()
   for (const methods of Object.values(doc.paths ?? {})) {
