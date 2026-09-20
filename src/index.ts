@@ -1,12 +1,14 @@
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "./source.js"
-import { memoryRoot, memoryDbPath, setConfiguredHome, resolveHomePath } from "./paths.js"
+import { memoryRoot, memoryDbPath, dataRoot, setConfiguredHome, resolveHomePath } from "./paths.js"
 import { closeDb } from "./db.js"
 import { stripCitations, extractCitedSessionIds, hasCitationMarkup } from "./citation.js"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../tools/memory.js"
 import { memory_reset, memory_inspect, memory_mode } from "../tools/control.js"
 import { MemoryStore } from "./store.js"
-import { runPhase1 } from "./phase1.js"
-import { runPhase2 } from "./phase2.js"
+import { runMemoryPipeline, runMemoryConsolidation } from "./pipeline.js"
+import { writeMemoryVersions } from "./memory-version.js"
+import { sessionMemoryVersion, withSessionMemoryVersion } from "./session-version.js"
+import { existingMemoryStores } from "./store.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession, abortActiveSubSessions } from "./llm.js"
 import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOptions } from "./options.js"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "./lifecycle.js"
@@ -16,7 +18,6 @@ import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import path from "path"
 
-let phase1InFlight = false
 let pluginClient: PluginInput["client"] | null = null
 const backgroundTasks = new Set<Promise<void>>()
 
@@ -134,14 +135,17 @@ interface SessionMemoryStore {
 
 export function handleSessionDeleted(
   sessionId: string,
-  store: SessionMemoryStore = getStore(),
+  store?: SessionMemoryStore,
   // With generation off the memorize agent is not injected, so a consolidation
   // attempt could only fail; the row deletion above still happens, and the
   // enqueued job runs when generation is re-enabled (codex: delete only
   // enqueues; the pipeline itself is gated elsewhere).
   schedulePhase2: () => void = () => { if (pluginOptions.generate_memories) trackBackgroundTask(triggerPhase2()) },
 ): void {
-  if (store.deleteSessionMemory(sessionId)) schedulePhase2()
+  const stores = store ? [store] : existingMemoryStores()
+  let changed = false
+  for (const target of stores) changed = target.deleteSessionMemory(sessionId) || changed
+  if (changed) schedulePhase2()
 }
 
 export default {
@@ -162,16 +166,18 @@ export default {
     clearConfigWarnings()
     if (opts) applyPluginOptions(opts)
     else {
-      const previousDb = memoryDbPath()
+      const previousDb = dataRoot()
       resetPluginOptions()
-      if (memoryDbPath() !== previousDb) closeDb()
+      if (dataRoot() !== previousDb) closeDb()
     }
     // Finish bounded reseeding before hooks can see a surviving memory
     // sub-session after a plugin reload.
     await cleanupOldSubSessions()
     try {
-      if (getStore().releaseOrphanedPhase2Job()) {
-        console.warn("[opencode-codex-memory] released a consolidation lease orphaned by a dead process")
+      for (const store of existingMemoryStores()) {
+        if (store.releaseOrphanedPhase2Job()) {
+          console.warn(`[opencode-codex-memory] released orphaned ${store.version} consolidation lease`)
+        }
       }
     } catch (err) {
       console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
@@ -185,6 +191,8 @@ const KNOWN_OPTION_KEYS = new Set([
   "use_memories",
   "dedicated_tools",
   "disable_on_external_context",
+  "version",
+  "dual_write",
   "extract_model",
   "consolidation_model",
   "max_raw_memories_for_consolidation",
@@ -223,7 +231,7 @@ function finiteNumber(key: string, value: unknown, fallback: number): number {
 export function applyPluginOptions(opts: PluginOptions): void {
   // Fresh pass per apply so memory_inspect never shows warnings for keys the
   // caller has since fixed. server() clears too, for boots without options.
-  const previousDb = memoryDbPath()
+  const previousDb = dataRoot()
   clearConfigWarnings()
   resetPluginOptions()
   const raw = opts as Record<string, unknown>
@@ -235,7 +243,7 @@ export function applyPluginOptions(opts: PluginOptions): void {
       recordConfigWarning(`unknown/unsupported option '${key}' ignored`)
     }
   }
-  for (const key of ["generate_memories", "use_memories", "dedicated_tools", "disable_on_external_context"] as const) {
+  for (const key of ["generate_memories", "use_memories", "dedicated_tools", "disable_on_external_context", "dual_write"] as const) {
     if (!(key in raw)) continue
     if (typeof raw[key] === "boolean") pluginOptions[key] = raw[key]
     else recordConfigWarning(`${key} must be a boolean; using default ${pluginOptions[key]}`)
@@ -251,6 +259,10 @@ export function applyPluginOptions(opts: PluginOptions): void {
     else recordConfigWarning(`${key} must be a string; using the opencode model default`)
   }
   const testing = pluginOptions.test
+  if ("version" in raw) {
+    if (raw.version === "v1" || raw.version === "v2") pluginOptions.version = raw.version
+    else recordConfigWarning('version must be "v1" or "v2"; using default v1')
+  }
   if ("max_raw_memories_for_consolidation" in opts)
     pluginOptions.max_raw_memories_for_consolidation = testing
       ? finiteNumber("max_raw_memories_for_consolidation", opts.max_raw_memories_for_consolidation, 256)
@@ -350,7 +362,7 @@ export function applyPluginOptions(opts: PluginOptions): void {
       recordConfigWarning("claude_import must be an object like { enabled, claude_home, projects }; ignored")
     }
   }
-  if (memoryDbPath() !== previousDb) closeDb()
+  if (dataRoot() !== previousDb) closeDb()
 }
 
 /**
@@ -443,7 +455,9 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
   // belt-and-suspenders (path is home/env-dependent; out-ranks `"*": deny`).
   const memorize = defs["memorize"] as { permission?: Record<string, unknown> } | undefined
   if (memorize?.permission && !("external_directory" in memorize.permission)) {
-    memorize.permission["external_directory"] = { [path.join(memoryRoot(), "*")]: "allow" }
+    memorize.permission["external_directory"] = Object.fromEntries(
+      writeMemoryVersions().map((version) => [path.join(memoryRoot(version), "*"), "allow"]),
+    )
   }
   config.agent ??= {}
   for (const [name, def] of Object.entries(defs)) {
@@ -484,8 +498,10 @@ function buildHooks() {
       // real conversation prompts.
       if (!input.sessionID || isMemorySubSession(input.sessionID)) return
       if (isTitleGenerationPrompt(output.system)) return
-      ensureMemoryLayout()
-      const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+      const memoryPrompt = withSessionMemoryVersion(input.sessionID, () => {
+        ensureMemoryLayout()
+        return buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+      })
       if (memoryPrompt) {
         output.system.push(memoryPrompt)
       }
@@ -515,7 +531,7 @@ function buildHooks() {
         // Same part key as the event path: whichever hook sees the ids first
         // records them; the other becomes a no-op.
         const fresh = takeNewCitations(`${input.sessionID}:${input.partID}`, ids)
-        if (fresh.length > 0) getStore().recordUsage(fresh)
+        if (fresh.length > 0) withSessionMemoryVersion(input.sessionID, () => getStore().recordUsage(fresh))
       } catch (e) {
         console.error("[opencode-codex-memory] citation recording failed:", e)
       }
@@ -564,6 +580,7 @@ function buildHooks() {
     try {
       const sid = input?.sessionID
       if (!sid || isMemorySubSession(sid)) return
+      sessionMemoryVersion(sid)
       if (!markTurnSeen(sid)) return
       try {
         getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
@@ -621,7 +638,7 @@ function buildHooks() {
         const fresh = takeNewCitations(`${part.sessionID ?? ""}:${part.id ?? ""}`, ids)
         if (fresh.length > 0) {
           try {
-            getStore().recordUsage(fresh)
+            withSessionMemoryVersion(part.sessionID, () => getStore().recordUsage(fresh))
           } catch (e) {
             console.error("[opencode-codex-memory] recordUsage failed:", e)
           }
@@ -716,47 +733,9 @@ function buildHooks() {
 }
 
 async function triggerPhase1(currentSessionId: string): Promise<void> {
-  if (phase1InFlight || !pluginOptions.generate_memories || isPluginShuttingDown()) return
-  phase1InFlight = true
-  try {
-    await runPhase1(getStore(), {
-      maxAgeDays: pluginOptions.max_rollout_age_days,
-      minIdleHours: pluginOptions.min_rollout_idle_hours,
-      maxClaimed: pluginOptions.max_rollouts_per_startup,
-      maxUnusedDays: pluginOptions.max_unused_days,
-      excludeSession: currentSessionId,
-      extractModel: pluginOptions.extract_model,
-    })
-  } catch (err) {
-    console.error("[opencode-codex-memory] phase1 error:", err)
-    recordDiagnostic("error", "phase1", err instanceof Error ? err.message : String(err))
-  } finally {
-    phase1InFlight = false
-  }
-  trackBackgroundTask(triggerPhase2())
+  await runMemoryPipeline(currentSessionId)
 }
 
 async function triggerPhase2(): Promise<void> {
-  if (isPluginShuttingDown()) return
-  try {
-    // runPhase2 has its own in-flight guard
-    const result = await runPhase2(getStore(), {
-      maxRaw: pluginOptions.max_raw_memories_for_consolidation,
-      maxUnusedDays: pluginOptions.max_unused_days,
-      extensionRetentionDays: 7,
-      consolidationModel: pluginOptions.consolidation_model,
-      codexInterop: pluginOptions.codex_interop,
-      claudeImport: pluginOptions.claude_import,
-    })
-    if (result.status !== "already_running" && result.status !== "skipped_cooldown" && result.status !== "skipped_running") {
-      recordDiagnostic(
-        result.status === "succeeded" || result.status === "no_workspace_changes" ? "info" : "warn",
-        "phase2",
-        result.status,
-      )
-    }
-  } catch (err) {
-    console.error("[opencode-codex-memory] phase2 error:", err)
-    recordDiagnostic("error", "phase2", err instanceof Error ? err.message : String(err))
-  }
+  await runMemoryConsolidation()
 }

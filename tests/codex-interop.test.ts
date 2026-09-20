@@ -13,6 +13,8 @@ beforeEach(() => {
   delete process.env.CODEX_HOME
 })
 afterEach(() => {
+  const { applyPluginOptions } = require("../src/index.js")
+  applyPluginOptions({})
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   delete process.env.CODEX_HOME
   try {
@@ -36,6 +38,13 @@ describe("resolveCodexInterop", () => {
   it("returns null when both directions are disabled", () => {
     const { resolveCodexInterop } = interop()
     expect(resolveCodexInterop({ import: false, export: false })).toBeNull()
+  })
+
+  it("disables handbook exchange while version=v2", () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { resolveCodexInterop } = interop()
+    applyPluginOptions({ version: "v2" })
+    expect(resolveCodexInterop({ import: true, export: true, codex_home: CODEX_HOME })).toBeNull()
   })
 
   it("resolves codex_home option over CODEX_HOME env over ~/.codex", () => {

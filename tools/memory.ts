@@ -6,7 +6,18 @@ import {
   readRegularFileNoFollow,
   writeRegularFileNoFollow,
 } from "../src/path-guard.js"
-import { tool } from "@opencode-ai/plugin"
+import { tool as defineTool } from "@opencode-ai/plugin"
+import { withSessionMemoryVersion } from "../src/session-version.js"
+
+// Both host adapters call these definitions. Resolve once for the whole tool
+// execution, so relative paths follow the namespace injected into this chat.
+function sessionTool<Args extends Parameters<typeof defineTool>[0]["args"]>(definition: Parameters<typeof defineTool<Args>>[0]) {
+  return defineTool<Args>({
+    ...definition,
+    execute: (args, ctx) => withSessionMemoryVersion(ctx.sessionID, () => definition.execute(args, ctx)),
+  })
+}
+const tool = Object.assign(sessionTool, { schema: defineTool.schema })
 
 const MAX_READ_BYTES = 256 * 1024
 
