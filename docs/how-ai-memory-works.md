@@ -81,6 +81,11 @@ when the overview suggests it. It mirrors how you would use your own notes —
 you don't reread every lab notebook every morning; you keep a rough mental map
 of what exists and pull the specific page when you need it.
 
+That pyramid is the **v1** default. Codex later added an opt-in **v2** that
+drops the handbook and treats the injected summary as the memory itself. The
+tour below is still v1; the contrast is in
+[Two versions: v1 and v2](#two-versions-v1-and-v2).
+
 ### Three jobs
 
 Around this store, three jobs run, fully decoupled:
@@ -593,11 +598,102 @@ any memory system designer will face:
   with conservative defaults, because the right forgetting cadence is a
   property of how *you* work.
 
+## Two versions: v1 and v2
+
+The pyramid and pipeline above are the original contract — **v1**, still the
+default. Codex later shipped an opt-in **v2** (`version: "v2"` in this plugin)
+that keeps the same outer loop — extract after a session, consolidate in the
+background, inject a small summary — and changes the *epistemic* contract:
+what the system is allowed to claim about you.
+
+v1 is built to **anticipate**. Extraction is told to mine a session for things
+that should change the next agent's default behavior. A one-task request can
+be promoted into a standing preference; consolidation then lifts those
+takeaways into a searchable handbook (`MEMORY.md`) and a tiny always-on index.
+The dream is that you stop repeating yourself.
+
+v2 is built to **stop lying about you**. The failure v1 actually has is
+over-promotion: "show me the plan before editing *this*" becomes "the user
+prefers plans before edits," and that sentence then sits in every future
+session. v2's own extraction example is the opposite instruction — record the
+request, do not write the personality trait.
+
+![Side-by-side: v1 keeps a handbook layer between the injected summary and
+session recaps; v2 drops the handbook, extracts recaps only, and treats the
+summary as the memory.](memory-v1-v2.svg)
+
+### What v2 changes in each job
+
+**Extract.** v1 serializes a filtered transcript and requires three fields:
+detailed `raw_memory`, a recap, and a filename slug. v2 spends the same
+limited window on *who spoke*: human messages first, then the assistant's
+final answers, then other agents, harness context, and tools last. Replies to
+OpenCode's question tool stay paired with their questions as human evidence.
+Codex also distinguishes assistant commentary when that provenance is available;
+OpenCode transcripts do not expose the same phase metadata. Output is
+a bounded recap and a slug — no raw takeaways file. The prompt says write
+**task history, not a user profile**. Working directory and branch, when
+present, are hints, not labels to trust.
+
+**Consolidate.** v1 rebuilds a routing inventory (`raw_memories.md`) and asks
+the consolidator to maintain `MEMORY.md` plus `memory_summary.md`. v2 updates
+**only** `memory_summary.md`. The file must start with `v1` (that line is the
+*summary format* version, not the pipeline version), then four headings —
+User Profile, User preferences, General Tips, What's in Memory — and stay
+under 10,000 bytes. Preferences belong in that section only when they were
+stated as a default or showed up across distinct tasks. Everything else is a
+dated pointer to an exact recap filename and session id.
+
+**Remember.** v1's read path is progressive disclosure: skim the summary,
+search the handbook, open one or two recaps if pointed there. v2's summary
+*is* the context. Open a recap only if extra wording, chronology, or
+uncertainty would change the answer — not to rediscover a pointer already in
+the summary. Memory is not proof of current behavior; drift is the model's
+problem again, which is the point.
+
+The two pipelines do not share a folder. v2 lives in `memories_v2/` with its
+own job database so a flip cannot rewrite v1 artifacts. Session
+enabled/polluted flags stay shared. Reset clears both trees and keeps those
+flags. Skills and ad-hoc notes can still exist as extensions on whichever
+root is selected.
+
+### What you give up, and when to flip
+
+v2 is **less eager**. It will not learn a working style from one steering
+message. The agent will re-ask or re-discover more often until a preference
+is clearly repeated or explicit. You also lose the handbook as a grep
+surface: if the summary's "What's in Memory" is thin, there is no `MEMORY.md`
+safety net.
+
+Keep v1 if the pain is an agent that does not anticipate enough. Choose v2
+if the pain is memory that is too confident — rules that hijack new work.
+Those are opposite optimizations. v2 is not v1 with a new folder.
+
+This plugin leaves v1 the default and supports Codex's **dual-write** migration:
+set `version: "v1", dual_write: true` to keep reading v1 while both independent
+pipelines learn from eligible conversations. Neither writer uses the other's
+generated handbook or recaps as its extraction source. The extra learning costs
+extra model calls.
+
+Inspect and OpenCode 2's `/memory` view show **V2 readiness**: a currently valid
+summary plus at least 20 distinct sessions consumed by one successful V2
+consolidation. This is a high-water mark, not a count of runs or a guarantee of
+quality. Pruning does not lower it; resetting memory clears it.
+
+Cutover is explicit: choose `version: "v2"`, restart the server, and start a new
+session. Existing conversations retain their original read version, so their
+injected summary, retrieval tools, dictated notes, and citation credits agree.
+Keep dual-write on while evaluating V2 to preserve a current V1 rollback path;
+turn it off when only V2 should learn. These are **memory pipeline** versions,
+independent of whether the host is OpenCode 1.x or 2.x. The
+[migration walkthrough](../README.md#migrating-from-memory-v1-to-v2) covers the
+configuration steps.
+
 ## Conclusion
 
-Memory for an AI agent is not a database problem; it is an editorial one. The
-system described here works because it embraces three disciplines that mirror
-how humans manage knowledge:
+Memory for an AI agent is not a database problem; it is an editorial one.
+v1 and v2 disagree about how aggressively to edit — promote defaults, or
+refuse to invent them — but they share the same three disciplines:
 
 - **Learning** is retrospective, selective, and evidence-based. It happens in
   the background, passes through a minimum-signal gate that treats "not worth

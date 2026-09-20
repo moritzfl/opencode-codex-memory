@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: ac192cd7937b0d73edc6dffe009940ae53782dd4
-codex_ref_date: 2026-09-06
+codex_ref: 5ee2bdf1e0e04064bc427ae31a49a01e8f7064df
+codex_ref_date: 2026-09-19
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -63,6 +63,12 @@ watch_paths:
   - codex-rs/app-server/src/external_agent_migration/processor.rs
   - codex-rs/app-server/src/external_agent_migration/protocol.rs
   - codex-rs/app-server-protocol/src/protocol/v2/config.rs
+  # Added after the 2026-09-14 audit — v2 is opt-in; watch these so a
+  # default flip or dual_write-on-by-default cannot land unnoticed:
+  - codex-rs/protocol/src/memory_version.rs
+  - codex-rs/state/src/runtime/memory_versions.rs
+  - codex-rs/state/src/runtime/memory_readiness.rs
+  - codex-rs/app-server/src/request_processors/memory_status.rs
 
 # ours: path in this repo. theirs: path in the codex checkout.
 # Every `theirs` is existence-checked by the drift script (catches renames like
@@ -84,6 +90,13 @@ mappings:
       rollout_summaries described as per-session .md recaps (codex: raw .jsonl
       rollouts with session_meta/rollout_path).
       Injects a SINGLE global memory_summary.md regardless of project.
+  - ours: src/templates/read_path_v2.md
+    theirs: codex-rs/ext/memories/templates/memories/read_path_v2.md
+    note: >
+      Adapted, not byte-copied. Citation tags are plugin-shaped
+      (<memory-citation>/<session_ids>/ses_*). search_step and
+       update_instructions placeholders match read_path.md.
+      No MEMORY.md hop. Recaps are per-session .md files. Opt-in; default v1.
   - ours: src/source.ts
     theirs: codex-rs/ext/memories/src/prompts.rs
     note: >
@@ -95,6 +108,18 @@ mappings:
       root or summary file is a symlink, then reads through the same O_NOFOLLOW
       file descriptor it verified to close the final-component race; codex
       prompts.rs trusts the root and only rejects a symlinked root on clear.
+      V2 keeps the complete valid summary in one cache-stable system string
+      instead of Codex's 8900-byte contextual fragments (OpenCode has no such
+      per-fragment limit). Cache is keyed by summary path, not only mtime.
+  - ours: src/session-version.ts
+    theirs: codex-rs/ext/memories/src/extension.rs
+    note: >
+      Preserve one read version for injection, retrieval, notes and citation
+      accounting. DELIBERATE ADAPTATION: Codex freezes version in thread-extension
+      runtime state; OpenCode plugin reloads do not end conversations, so stamps
+      persist in memory_session_versions on the shared memory.db catalog.
+      Selection happens at first memory use/turn, not host session creation.
+      Status peeks never create a stamp. Reset preserves stamps and modes.
   - ours: tools/memory.ts
     theirs: codex-rs/ext/memories/src/tools/search.rs
     note: >
@@ -146,6 +171,9 @@ mappings:
       only this plugin's files (memory.db + memories/) away from OpenCode's
       data dir so a sandbox can mount memory without the host session
       database. Codex has no equivalent; its data root already is CODEX_HOME.
+      Opt-in version=v2 uses memories_v2/ + memory_v2.db (Codex
+      version.directory_name). session_meta stays on memory.db (shared
+      catalog; Codex shares the host thread DB).
   - ours: src/path-guard.ts
     theirs: codex-rs/ext/memories/src/local/path.rs
     note: >
@@ -180,7 +208,33 @@ mappings:
   # --- Storage / DB ---
   - ours: src/db.ts
     theirs: codex-rs/state/memory_migrations/0001_memories.sql
-    note: SQLite schema (stage1 outputs, jobs, session meta).
+    note: >
+      SQLite schema (stage1 outputs, jobs, session meta). v2 jobs/outputs open
+      memory_v2.db; session_meta always migrates on memory.db.
+      Both DB handles remain open concurrently. Migration 3 adds per-store
+      consolidation_progress and the shared session-version routing table.
+  - ours: src/memory-version.ts
+    theirs: codex-rs/memories/write/src/start.rs
+    note: >
+      Codex clones config per writer. Node AsyncLocalStorage provides immutable
+      version routing through async calls instead of changing global options;
+      dual_write selects both V1 and V2 regardless of the selected read default.
+  - ours: src/pipeline.ts
+    theirs: codex-rs/memories/write/src/start.rs
+    note: >
+      Shared OpenCode 1/2 orchestration runs phase 1 then phase 2 independently
+      per write version. Failures do not reject the sibling writer. Local
+      guards, throttles and abort scopes are keyed by versioned root/DB path.
+      Host startup/idle triggers and provider quota adaptations remain as
+      documented on index.ts and ratelimit.ts.
+  - ours: src/migration.ts
+    theirs: codex-rs/app-server/src/request_processors/memory_status.rs
+    note: >
+      Read-only readiness: valid V2 summary AND maximum distinct sessions in one
+      successful consolidation >= threshold (default 20, allowed 1..4096).
+      Exposed via memory_inspect and OpenCode 2 status RPC/UI. No automatic
+      cutover. Missing V2 DB reports zero without creating an inactive store;
+      summary reads additionally reject symlinks via the plugin path guard.
   - ours: src/store.ts
     theirs: codex-rs/state/src/runtime/memories.rs
     note: >
@@ -198,6 +252,13 @@ mappings:
       keep status=pending and do not decrement retry_remaining; exhausted
       quota-failed rows are requeued without a newer session watermark. Codex
       instead skips claiming via guard.rs before any job is started.
+      Opt-in version=v2: jobs/outputs on memory_v2.db via openDb();
+      session_meta on memory.db via openSessionMetaDb() (shared catalog).
+      Shared mode/pollution checks run before counting ranked rows toward the
+      selection limit. Success atomically advances consolidation_progress using
+      a distinct-session high-water count; stale ownership cannot advance it.
+      Pruning preserves progress; reset clears it and citation dedupe in both
+      stores without closing live handles. Session deletion covers both stores.
 
   # --- Write path: phase 1 (extraction) ---
   - ours: src/phase1.ts
@@ -218,6 +279,8 @@ mappings:
       citation markup). After an observed quota/rate-limit error, remaining
       claimed jobs in the same pass are finalized without calling the model
       (Codex guard.rs skips the whole startup instead).
+      Opt-in version=v2: summary+slug schema, empty raw_memory, 9k-byte
+      summary truncate after redact, tiered input via rollout-input.ts.
   - ours: src/capture.ts
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
@@ -234,16 +297,39 @@ mappings:
       already history-mode agnostic because these APIs expose the session
       transcript independently of Codex's rollout storage mode.
       See D4 in ARCHITECTURE.md.
+  - ours: src/rollout-input.ts
+    theirs: codex-rs/memories/write/src/rollout_input.rs
+    note: >
+      V2 evidence ranking over OpenCode TranscriptMessage parts, not Codex
+      RolloutItem. Human/final/other-agent/context/tool tiers, newest first per
+      tier, restored source order with omission markers. OpenCode's native
+      question tool already pairs input/output; answered replies are human
+      evidence with the question retained. Host transcripts expose neither
+      Codex MessagePhase::Commentary nor internal content-item provenance;
+      unmarked assistant text stays final. UTF-8 byte bounds and head/tail
+      truncation follow Codex, after redaction/citation stripping. V1 unchanged.
+      Extraction is one inline host prompt rather than 8900-byte contextual
+      fragments; OpenCode does not impose Codex's per-fragment limit.
   - ours: src/templates/stage_one_system.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_system.md
     note: >
       Byte-synced from codex_ref with title only retitled "Single Session"
       (opencode UX); keeps codex "rollout" domain language for artifacts.
+  - ours: src/templates/stage_one_system_v2.md
+    theirs: codex-rs/memories/write/templates/memories/stage_one_system_v2.md
+    note: >
+      Adapted: [REDACTED:secret]; session text not rollout jsonl in the
+      evidence warning. JSON contract is summary+slug only. Opt-in; default v1.
   - ours: src/templates/stage_one_input.md
     theirs: codex-rs/memories/write/templates/memories/stage_one_input.md
     note: >
       Platform-shaped: session_id/session_cwd/transcript placeholders instead of
       codex rollout_path/rollout_cwd/rollout_contents (opencode has no rollout file).
+  - ours: src/templates/stage_one_input_v2.md
+    theirs: codex-rs/memories/write/templates/memories/stage_one_input_v2.md
+    note: >
+      Platform-shaped: session_id/session_cwd/session_git_branch/transcript
+      instead of rollout_path/cwd/git_branch/contents. Opt-in; default v1.
 
   # --- Write path: phase 2 (consolidation) ---
   - ours: src/phase2.ts
@@ -277,6 +363,12 @@ mappings:
       shutdown is a failed or timed-out session.delete call, deliberately NOT
       an unconfirmed 404 — sessionDeletionConfirmed returns false on hosts without session.get
       and would otherwise stall every job for a full lease.
+      Opt-in version=v2: skip raw_memories rebuild; validate summary headings
+      and <10k bytes, no MEMORY.md.
+      DELIBERATE DIVERGENCE: post-success storage-byte OTEL histogram added
+      upstream is not emitted (no plugin telemetry backend). OpenCode helper
+      permissions restrict each job to its own memory root even in dual mode;
+      V1 uses session external_directory rules, V2 uses session deny-first rules.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
     note: >
@@ -339,6 +431,8 @@ mappings:
       instruction-level, matching codex's own all-instruction content rules
       (see ARCHITECTURE.md D6). Default-off via the opencode-specific
       codex_interop plugin option.
+      Handbook exchange remains V1-only; the V1 writer can still exchange while
+      dual_write is on and the read default is V2. No automatic V1-to-V2 import.
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >
@@ -375,6 +469,12 @@ mappings:
       lib.rs prompt_blocks. INVARIANT: project/cwd scoping lives ONLY here,
       as an LLM instruction to "organize the index first by cwd / project scope,
       then by topic". Do not add hard scoping elsewhere unless codex does.
+  - ours: src/templates/consolidation_v2.md
+    theirs: codex-rs/memories/write/templates/memories/consolidation_v2.md
+    note: >
+      Adapted: session_id not thread_id; [REDACTED:secret]; file tools only
+      (no shell/delete); same extension placeholders as consolidation.md.
+      Summary-only (no MEMORY.md). Opt-in; default v1.
 
   # --- Control / lifecycle ---
   - ours: tools/control.ts
@@ -388,6 +488,8 @@ mappings:
       the guard rail. memory_mode additionally accepts "polluted" (codex
       protocol: enabled|disabled, polluted is set only automatically);
       memory_inspect is a port addition (read-only status).
+      memory_reset wipes memories/ and memories_v2/ plus both job DBs,
+      preserving memory_session_meta (Codex clears both version roots).
   - ours: src/index.ts
     theirs: codex-rs/core/src/stream_events_utils.rs
     note: >
@@ -486,7 +588,8 @@ mappings:
       on none < minimal < low < medium < high < xhigh < max (ties → higher).
       Empty variant lists omit the pin (host default). Catalog lookup failure
       or a missing variants field keeps the Codex pin (unknown variant is a
-      host no-op). Custom picker names such as "fast xhigh" are ignored.
+      host no-op).       Custom picker names such as "fast xhigh" are ignored.
+      Opt-in version=v2 selects consolidation_v2.md / stage_one_*_v2.md.
 
   # --- Utilities ---
   - ours: src/redact.ts
@@ -559,6 +662,7 @@ mappings:
       min_rollout_idle_hours, extract_model, consolidation_model. Defaults match
       codex (max_rollout_age_days=10, min_rollout_idle_hours=6,
       max_rollouts_per_startup=2, max_raw_memories_for_consolidation=256).
+      Also supported: version (default v1), dual_write (default false).
       Numeric knobs are clamped to codex's ranges (types.rs From<MemoriesToml>):
       (1,4096)/(0,365)/(0,90)/(1,128)/(1,48). Unknown option keys warn (codex
       deny_unknown_fields errors). use_memories=false hides the memory tools
@@ -575,4 +679,6 @@ mappings:
       (fresh plugin, no legacy configs); (5) wrong-TYPED values on known keys
       warn via memory_inspect and fall back to the default (codex: serde
       hard-fails the whole config parse — a plugin must not break the host on
-      bad options); (6) options.test (live harness only) skips Codex numeric clamps so e2e can set min_rollout_idle_hours=0.01. Production stays integer 1–48 like MemoriesToml
+      bad options); (6) options.test (live harness only) skips Codex numeric clamps
+      so e2e can set min_rollout_idle_hours=0.01. Production stays integer 1–48
+      like MemoriesToml. version defaults to v1; dual_write defaults to false.

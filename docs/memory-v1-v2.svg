@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="varrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="860" fill="#ffffff"/>
+
+  <text x="320" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">v1 — default</text>
+  <text x="320" y="66" text-anchor="middle" font-size="15" fill="#6b7280">anticipate the user through a handbook</text>
+  <text x="960" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">v2 — opt-in</text>
+  <text x="960" y="66" text-anchor="middle" font-size="15" fill="#6b7280">write task history; do not invent standing rules</text>
+
+  <!-- ===== v1 pyramid (left) ===== -->
+  <polygon points="320,88 248,188 392,188" fill="#DD2E44"/>
+  <text x="320" y="158" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Injected summary</text>
+
+  <polygon points="248,188 200,258 440,258 392,188" fill="#FDCB58"/>
+  <text x="320" y="232" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Handbook MEMORY.md</text>
+
+  <polygon points="200,258 152,328 488,328 440,258" fill="#53B44A"/>
+  <text x="320" y="302" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Skills</text>
+
+  <polygon points="152,328 104,398 536,398 488,328" fill="#4A90D9"/>
+  <text x="320" y="372" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Session recaps</text>
+
+  <polygon points="104,398 56,468 584,468 536,398" fill="#F4900C"/>
+  <text x="320" y="442" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Full transcripts</text>
+
+  <!-- ===== v2 pyramid (right) ===== -->
+  <polygon points="960,88 888,188 1032,188" fill="#DD2E44"/>
+  <text x="960" y="148" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Injected summary</text>
+  <text x="960" y="168" text-anchor="middle" font-size="13" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">= the memory</text>
+
+  <polygon points="888,188 840,258 1080,258 1032,188" fill="#ffffff" stroke="#FDCB58" stroke-width="3" stroke-dasharray="8 6"/>
+  <text x="960" y="228" text-anchor="middle" font-size="15" font-weight="bold" fill="#9ca3af">Handbook dropped</text>
+  <text x="960" y="248" text-anchor="middle" font-size="12" fill="#9ca3af">no MEMORY.md · no raw_memories.md</text>
+
+  <polygon points="840,258 792,328 1128,328 1080,258" fill="#53B44A"/>
+  <text x="960" y="302" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Skills</text>
+
+  <polygon points="792,328 744,398 1176,398 1128,328" fill="#4A90D9"/>
+  <text x="960" y="372" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Session recaps</text>
+
+  <polygon points="744,398 696,468 1224,468 1176,398" fill="#F4900C"/>
+  <text x="960" y="442" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000" stroke="#ffffff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">Full transcripts</text>
+
+  <!-- column divider -->
+  <line x1="640" y1="80" x2="640" y2="478" stroke="#e5e7eb" stroke-width="2"/>
+
+  <!-- ===== bottom: three jobs ===== -->
+  <text x="40" y="520" font-size="13" letter-spacing="1.4" fill="#8a8f98">WHAT EACH JOB DOES</text>
+
+  <rect x="40" y="536" width="380" height="292" rx="14" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="230" y="568" text-anchor="middle" font-size="16" font-weight="bold" fill="#3a3f46">Extract</text>
+  <text x="56" y="600" font-size="14" fill="#6b7280">v1  dump the transcript</text>
+  <text x="80" y="622" font-size="14" fill="#6b7280">→ raw takeaways + recap</text>
+  <line x1="56" y1="640" x2="404" y2="640" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="56" y="668" font-size="14" fill="#6b7280">v2  spend the budget on humans</text>
+  <text x="80" y="690" font-size="14" fill="#6b7280">→ recap only (no raw memory)</text>
+  <text x="80" y="712" font-size="14" fill="#6b7280">task history, not a user profile</text>
+  <text x="80" y="734" font-size="13" fill="#8a8f98">“show the plan for this” is not</text>
+  <text x="80" y="754" font-size="13" fill="#8a8f98">“the user prefers plans”</text>
+  <text x="80" y="776" font-size="13" fill="#8a8f98">standing prefs wait for Phase 2</text>
+  <text x="80" y="796" font-size="13" fill="#8a8f98">and need repeated evidence</text>
+
+  <rect x="450" y="536" width="380" height="292" rx="14" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="640" y="568" text-anchor="middle" font-size="16" font-weight="bold" fill="#3a3f46">Consolidate</text>
+  <text x="466" y="600" font-size="14" fill="#6b7280">v1  merge into a handbook</text>
+  <text x="490" y="622" font-size="14" fill="#6b7280">+ a tiny injected index</text>
+  <line x1="466" y1="640" x2="814" y2="640" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="466" y="668" font-size="14" fill="#6b7280">v2  rewrite memory_summary.md</text>
+  <text x="490" y="690" font-size="14" fill="#6b7280">only · under 10k bytes</text>
+  <text x="490" y="712" font-size="14" fill="#6b7280">four required headings</text>
+  <text x="490" y="734" font-size="13" fill="#8a8f98">preferences only if stated as a</text>
+  <text x="490" y="754" font-size="13" fill="#8a8f98">default or seen across tasks</text>
+  <text x="490" y="776" font-size="13" fill="#8a8f98">everything else is a dated</text>
+  <text x="490" y="796" font-size="13" fill="#8a8f98">pointer to an exact recap file</text>
+
+  <rect x="860" y="536" width="380" height="292" rx="14" fill="#ffffff" stroke="#c5c9ce" stroke-width="2"/>
+  <text x="1050" y="568" text-anchor="middle" font-size="16" font-weight="bold" fill="#3a3f46">Remember</text>
+  <text x="876" y="600" font-size="14" fill="#6b7280">v1  summary → search handbook</text>
+  <text x="900" y="622" font-size="14" fill="#6b7280">→ open 1–2 recaps if pointed</text>
+  <line x1="876" y1="640" x2="1224" y2="640" stroke="#e5e7eb" stroke-width="1"/>
+  <text x="876" y="668" font-size="14" fill="#6b7280">v2  summary is already context</text>
+  <text x="900" y="690" font-size="14" fill="#6b7280">open a recap only if extra</text>
+  <text x="900" y="712" font-size="14" fill="#6b7280">evidence would change the answer</text>
+  <text x="900" y="734" font-size="13" fill="#8a8f98">memory is not proof of current</text>
+  <text x="900" y="754" font-size="13" fill="#8a8f98">behavior — verify when it matters</text>
+  <text x="900" y="776" font-size="13" fill="#8a8f98">no handbook hop; skills/notes</text>
+  <text x="900" y="796" font-size="13" fill="#8a8f98">can still live as extensions</text>
+</svg>

@@ -189,6 +189,8 @@ Codex's `[memories]` config so the two stay easy to compare:
 | Option | Default | Meaning |
 |---|---|---|
 | `generate_memories` | `true` | Turn the background learning pipeline on/off |
+| `version` | `"v1"` | Read version for new sessions, and the sole writer when dual-write is off. `"v2"` is summary-only, with recaps in isolated `memories_v2/` and no `MEMORY.md`. |
+| `dual_write` | `false` | Run both learning pipelines independently while reading the selected version. Enables V2 warmup before an explicit cutover. |
 | `use_memories` | `true` | Inject the memory summary into the system prompt |
 | `dedicated_tools` | `true` | Expose the `memory_read`/`memory_search`/`memory_list`/`memory_add_note` tools |
 | `disable_on_external_context` | `false` | Exclude sessions that used web/MCP tools from memory |
@@ -262,6 +264,47 @@ nearest OpenCode variant on `none < minimal < low < medium < high < xhigh < max`
 > tools have no such friction — that's why they are the default. The
 > maintenance tools (`memory_reset`, `memory_inspect`, `memory_mode`) stay
 > available either way.
+
+### Migrating from memory V1 to V2
+
+Memory versions are independent of OpenCode host versions: both work on
+OpenCode 1.x and 2.x. V1 remains the default. See the
+[conceptual comparison](docs/how-ai-memory-works.md#two-versions-v1-and-v2)
+for the different learning contracts.
+
+1. Set these **plugin options** and restart OpenCode's server:
+
+   ```json
+   { "version": "v1", "dual_write": true }
+   ```
+
+   V1 continues serving memory. Both pipelines independently extract eligible
+   conversations and consolidate into their own workspaces. This adds model
+   calls for the second pipeline; it does not copy or convert V1 artifacts.
+
+2. Check `memory_inspect`, or `/memory` on OpenCode 2. `v2_ready` becomes true
+   when V2 has a valid summary and one successful consolidation has consumed
+   at least **20 distinct sessions**. The count is a high-water mark, not a
+   lifetime sum, so repeated consolidation of one session cannot make V2 ready.
+   `min_consolidated_threads` on inspect (RPC: `minConsolidatedThreads`) can
+   override the reporting threshold from 1 to 4096; it does not change config
+   or switch versions. Readiness is a warmup signal, not a quality guarantee.
+
+3. When ready, set `version: "v2"` and restart the server. New sessions use V2.
+   Existing sessions keep the version selected on their first memory use,
+   including retrieval tools, explicit notes, and citation accounting across
+   server restarts. Start a new session to try the new read path.
+
+4. Keep `dual_write: true` while evaluating V2, then set it to `false` when you
+   want only V2 learning. To roll back, select `version: "v1"` and start a new
+   session. If dual-write was off, V1 will not contain the intervening learning.
+
+There is no automatic cutover. An explicit "remember this" note goes to the
+requesting session's selected workspace; the other writer learns from eligible
+conversation history. Disabled/polluted session flags are shared. Session
+deletion removes extracted rows from both stores and queues forgetting;
+`memory_reset` clears both stores and workspaces, preserving session modes and
+read-version stamps. Inactive stores resume queued consolidation when enabled.
 
 ### Relocating memory (sandbox mounts)
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Codex memory V2: provenance-ranked extraction, bounded session recaps,
+  summary-only consolidation and recap-oriented retrieval in isolated
+  `memories_v2/` and `memory_v2.db`. V1 remains the default.
+- `dual_write` migration mode runs both learning pipelines independently.
+  Inspect and the OpenCode 2 memory UI report each pipeline and V2 readiness
+  (valid summary plus a successful consolidation of 20 distinct sessions).
+- Explicit read-version cutover for new sessions; existing sessions retain
+  their namespace for injection, tools, notes and citations across reloads.
+
+### Changed
+
+- Both OpenCode hosts share pipeline scheduling with async-local namespace
+  routing, independent DB handles and worker guards, and per-job memory-root
+  permissions. Session exclusion metadata remains shared.
+- Reset and session deletion cover both namespaces; reset also clears readiness
+  progress and citation dedupe while preserving session modes and routing.
+- Live e2e tests cover dual-write warmup and explicit V2 cutover on both hosts.
+
 ## [0.7.7] - 2026-09-19
 
 ### Fixed

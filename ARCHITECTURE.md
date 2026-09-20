@@ -75,9 +75,11 @@ WRITE PATH
     dispose() aborts the consolidator signal so reload cannot leave two writers
 
 STORAGE
-  <home>/memory.db                         plugin SQLite (stage1 outputs + jobs + session meta)
+  <home>/memory.db                         V1 outputs/jobs + shared session metadata
+  <home>/memory_v2.db                      V2 outputs/jobs + consolidation progress
   <home>/memories/                         MEMORY.md, memory_summary.md, raw_memories.md,
                                            rollout_summaries/, extensions/, skills/, .git/
+  <home>/memories_v2/                      V2: memory_summary.md + recaps (no MEMORY.md)
   default <home>                           OpenCode data dir (follows XDG_DATA_HOME)
   pin                                      plugin option `home`, else OPENCODE_CODEX_MEMORY_HOME
                                            (does not follow OpenCode data dir / XDG)
@@ -88,12 +90,34 @@ STORAGE
 
 Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `capture`, `phase1`, `phase2`, `workspace`, `git-baseline`, `redact`, `token`,
-`llm`, `reasoning-variant`, `ratelimit`, `paths`, `path-guard`, `host-client`,
+`llm`, `rollout-input`, `reasoning-variant`, `ratelimit`, `paths`, `path-guard`, `host-client`,
 `lifecycle`, `options`, `diagnostics`, `agent-health`) plus external-agent exchange
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
 model-facing tools (`memory.ts`, `control.ts`). OpenCode2 host adapter lives in
 `src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. User-facing notes:
 `docs/opencode2.md`. Per-file upstream provenance lives in `codex-map.yaml`.
+
+**Versioned memory:** `version: "v2"` selects `memories_v2/` + `memory_v2.db`,
+summary-only extract/consolidate, and a recap-oriented read path. Default is V1.
+`dual_write: true` runs both writers through shared `src/pipeline.ts`, regardless
+of the read default. Node `AsyncLocalStorage` binds each asynchronous operation
+to its version; independent DB handles, phase-1 throttles, phase-2 guards and
+abort scopes prevent namespace mixing. Provider-capacity backoff remains shared
+when both writers use the same model.
+
+`memory_session_meta` stays on `memory.db` (shared catalog). The same DB stores
+`memory_session_versions`: injection, tools, notes, and citations freeze their
+read version on first real use. Codex stores this in thread-extension state;
+the plugin persists it because plugin reloads do not end OpenCode conversations.
+Status reads peek without stamping. Reset preserves these routing stamps and
+session modes while clearing both workspaces, outputs, jobs, citation dedupe,
+and readiness progress; active DB handles remain open.
+
+`src/migration.ts` reports the maximum distinct-session count from one successful
+V2 consolidation. Readiness also requires a currently valid V2 summary and
+defaults to 20 sessions. Inspect and the OpenCode-2 status RPC report it; version
+switching is explicit and affects new sessions. The V2 prompt remains one
+cache-stable string (D1); Codex's 8.9k fragment split is skipped.
 
 ---
 
@@ -118,7 +142,7 @@ puts cache breakpoints on the first two system messages
 (`provider/transform.ts`, `.slice(0, 2)`). The stable memory block therefore
 gets its own cache segment: changing memory invalidates that segment without
 invalidating opencode's base prompt. The plugin caches the summary in process
-  memory, stats its mtime each turn, and re-reads only after an external edit
+  memory keyed by summary path, stats its mtime each turn, and re-reads only after an external edit
   changes that mtime or Phase 2 explicitly invalidates the cache. Sessionless
   invocations of the same hook (used by opencode while generating agent
   definitions) are ignored, as is a symlinked memory root or summary file.
@@ -162,11 +186,15 @@ differs by host:
   path as the session project boundary (`containsPath` /
   `external_directory`): in-bounds file tools freely touch the memory root
   only. Paths under the user's real project are outside that boundary and hit
-  `external_directory`, which the wildcard deny blocks.
+  `external_directory`, which the wildcard deny blocks. Per-helper session
+  rules restrict external access to that job's single memory root, overriding
+  the agent's grants for both roots when dual-write is configured.
 - **OpenCode2:** V2 agents are location-scoped, so helpers spawn in the
   active plugin location (`setSubSessionDirectory`). Session boundary is the
   project; memory-root scoping is permission-only (`read`/`edit`/`glob`/`grep`
   + `external_directory` under the memory workspace, everything else denied).
+  Helper creation supplies session-scoped deny-first rules that narrow access
+  to that job's one root before any agentic prompt.
 
 Either way the consolidator is memory-root-scoped without Seatbelt — residual
 is still tool-permission-level (not process-level), not "can edit the
@@ -306,6 +334,7 @@ root" invariant. The extension approach is pure content.
 | Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 30s anti-stampede plus an observed-quota circuit breaker (1h, scoped by configured model or phase default); quota failures do not burn stage-1 retries | See `src/ratelimit.ts`; wire live provider quota when opencode exposes it |
 | Plugin dispose / reload | N/A (in-process core) | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions; startup reseeds helpers via paginated host-wide `experimental.session` | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry |
 | Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
+| Memory version lifetime | Thread-extension runtime state | Persistent per-session read-version stamp | New sessions follow config; resumed sessions retain their namespace |
 
 ---
 
