@@ -1,5 +1,8 @@
+import fs from "fs"
 import type { Database } from "bun:sqlite"
-import { openDb } from "./db.js"
+import { openDb, openSessionMetaDb, openTransientDb } from "./db.js"
+import { allJobDbPaths, sessionMetaDbPath, memoryDbPath } from "./paths.js"
+import { currentMemoryVersion, MEMORY_VERSIONS, withMemoryVersion } from "./memory-version.js"
 import { isProviderCapacityError } from "./ratelimit.js"
 
 export const DEFAULT_RETRY_REMAINING = 3
@@ -43,6 +46,41 @@ export type Phase2ClaimResult =
   | { type: "skipped_running" }
   | { type: "skipped_retry_unavailable" }
 
+function clearJobTables(db: Database): void {
+  db.transaction(() => {
+    db.run("DELETE FROM memory_stage1_outputs")
+    db.run("DELETE FROM memory_jobs")
+    db.run("DELETE FROM memory_citation_usage")
+    db.run("UPDATE consolidation_progress SET max_thread_count = 0")
+    db
+      .prepare(
+        `INSERT INTO memory_jobs
+          (kind, job_key, status, finished_at, last_error, retry_remaining, last_success_watermark)
+         VALUES ('memory_consolidate_global', 'global', 'done', ?, NULL, ?, 0)`,
+      )
+      .run(nowSec(), DEFAULT_RETRY_REMAINING)
+  }).immediate()
+}
+
+/** Wipe jobs/outputs in every versioned DB. Leaves memory_session_meta on memory.db. */
+export function clearAllVersionMemoryData(): void {
+  for (const dbPath of allJobDbPaths()) {
+    if (dbPath !== sessionMetaDbPath() && !fs.existsSync(dbPath)) continue
+    const db = openTransientDb(dbPath)
+    try {
+      clearJobTables(db)
+    } finally {
+      db.close()
+    }
+  }
+}
+
+/** Include inactive existing stores for deletion, reset guards and diagnostics. */
+export function existingMemoryStores(): MemoryStore[] {
+  return MEMORY_VERSIONS.filter((version) => version === "v1" || fs.existsSync(memoryDbPath(version)))
+    .map((version) => withMemoryVersion(version, () => new MemoryStore()))
+}
+
 function newId(): string {
   return crypto.randomUUID()
 }
@@ -81,12 +119,20 @@ function failureMessage(error: unknown): string {
 }
 
 export class MemoryStore {
-  constructor(private db: Database = openDb()) {}
+  constructor(
+    private db: Database = openDb(),
+    private meta: Database = openSessionMetaDb(),
+    readonly version = currentMemoryVersion(),
+  ) {}
 
   stage1Outputs(): Stage1Output[] {
     return this.db
       .prepare("SELECT * FROM memory_stage1_outputs ORDER BY source_updated_at DESC")
       .all() as Stage1Output[]
+  }
+
+  stage1OutputCount(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM memory_stage1_outputs").get() as { count: number }).count
   }
 
   hasStage1Output(sessionId: string): boolean {
@@ -495,6 +541,8 @@ export class MemoryStore {
         )
         .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
       if (res.changes === 0) return
+      this.db.prepare("UPDATE consolidation_progress SET max_thread_count = MAX(max_thread_count, ?)")
+        .run(new Set(selected.map((s) => s.session_id)).size)
       this.db.run("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
       const mark = this.db.prepare(
         `UPDATE memory_stage1_outputs
@@ -503,6 +551,12 @@ export class MemoryStore {
       )
       for (const s of selected) mark.run(s.source_updated_at, s.session_id, s.source_updated_at)
     }).immediate()
+  }
+
+  /** High-water mark of distinct sessions consumed by one successful run. */
+  maxConsolidatedThreadCount(): number {
+    return (this.db.prepare("SELECT max_thread_count FROM consolidation_progress WHERE singleton = 1")
+      .get() as { max_thread_count: number }).max_thread_count
   }
 
   /**
@@ -665,21 +719,30 @@ export class MemoryStore {
    */
   getPhase2InputSelection(maxRaw: number, maxUnusedDays: number): Stage1Output[] {
     const cutoff = now() - maxUnusedDays * 24 * 60 * 60 * 1000
-    return this.db
+    if (maxRaw <= 0) return []
+    const rows = this.db
       .prepare(
         `SELECT so.* FROM memory_stage1_outputs so
-         LEFT JOIN memory_session_meta m ON m.session_id = so.session_id
-         WHERE (m.memory_mode IS NULL OR m.memory_mode = 'enabled')
-           AND (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
+         WHERE (length(trim(so.raw_memory)) > 0 OR length(trim(so.rollout_summary)) > 0)
            AND ((so.last_usage IS NOT NULL AND so.last_usage >= ?)
                 OR (so.last_usage IS NULL AND so.source_updated_at >= ?))
          ORDER BY COALESCE(so.usage_count, 0) DESC,
                   COALESCE(so.last_usage, so.source_updated_at) DESC,
                   so.source_updated_at DESC,
-                  so.session_id DESC
-         LIMIT ?`,
+                   so.session_id DESC`,
       )
-      .all(cutoff, cutoff, maxRaw) as Stage1Output[]
+      .iterate(cutoff, cutoff)
+    const selected: Stage1Output[] = []
+    // V2's job DB has no source catalog. Check the shared catalog before
+    // counting a row toward the limit, as Codex does against its thread DB.
+    for (const value of rows) {
+      const row = value as Stage1Output
+      const mode = this.getMemoryMode(row.session_id)
+      if (mode !== null && mode !== "enabled") continue
+      selected.push(row)
+      if (selected.length >= maxRaw) break
+    }
+    return selected
   }
 
   /**
@@ -713,22 +776,11 @@ export class MemoryStore {
    * surface is model-invoked mid-session, so hooks can race the wipe.
    */
   clearMemoryData(): void {
-    this.db.transaction(() => {
-      this.db.run("DELETE FROM memory_stage1_outputs")
-      this.db.run("DELETE FROM memory_jobs")
-      this.db.run("DELETE FROM memory_citation_usage")
-      this.db
-        .prepare(
-          `INSERT INTO memory_jobs
-            (kind, job_key, status, finished_at, last_error, retry_remaining, last_success_watermark)
-           VALUES ('memory_consolidate_global', 'global', 'done', ?, NULL, ?, 0)`,
-        )
-        .run(nowSec(), DEFAULT_RETRY_REMAINING)
-    }).immediate()
+    clearJobTables(this.db)
   }
 
   setMemoryMode(sessionId: string, mode: "enabled" | "disabled" | "polluted"): void {
-    this.db
+    this.meta
       .prepare(
         `INSERT INTO memory_session_meta (session_id, memory_mode, polluted, updated_at)
          VALUES (?, ?, ?, ?)
@@ -744,7 +796,7 @@ export class MemoryStore {
    * overriding an explicit user-set or polluted mode.
    */
   stampMemoryModeIfAbsent(sessionId: string, mode: "enabled" | "disabled"): void {
-    this.db
+    this.meta
       .prepare(
         `INSERT OR IGNORE INTO memory_session_meta (session_id, memory_mode, polluted, updated_at)
          VALUES (?, ?, 0, ?)`,
@@ -753,14 +805,14 @@ export class MemoryStore {
   }
 
   getMemoryMode(sessionId: string): "enabled" | "disabled" | "polluted" | null {
-    const row = this.db
+    const row = this.meta
       .prepare("SELECT memory_mode AS mode FROM memory_session_meta WHERE session_id = ?")
       .get(sessionId) as { mode: "enabled" | "disabled" | "polluted" } | null
     return row?.mode ?? null
   }
 
   markPolluted(sessionId: string): void {
-    this.db
+    this.meta
       .prepare(
         `INSERT INTO memory_session_meta (session_id, memory_mode, polluted, updated_at)
          VALUES (?, 'polluted', 1, ?)
@@ -770,7 +822,7 @@ export class MemoryStore {
   }
 
   isPolluted(sessionId: string): boolean {
-    const row = this.db
+    const row = this.meta
       .prepare("SELECT polluted AS p FROM memory_session_meta WHERE session_id = ?")
       .get(sessionId) as { p: number } | null
     return row?.p === 1

@@ -197,6 +197,15 @@ describe("validateExtraction", () => {
       validateExtraction({ raw_memory: "task: <primary task signature>", rollout_summary: "rs", rollout_slug: "s" }),
     ).toThrow()
   })
+
+  it("v2 accepts summary-only output and treats empty summary as no-op", () => {
+    const r = validateExtraction({ rollout_summary: "recap", rollout_slug: "slug" }, "v2")!
+    expect(r.raw_memory).toBe("")
+    expect(r.rollout_summary).toBe("recap")
+    expect(r.rollout_slug).toBe("slug")
+    expect(validateExtraction({ rollout_summary: "", rollout_slug: "x" }, "v2")).toBeNull()
+    expect(validateExtraction({ raw_memory: "", rollout_summary: "rs", rollout_slug: "x" }, "v1")).toBeNull()
+  })
 })
 
 describe("extractViaSubagent (structured output)", () => {
@@ -228,6 +237,8 @@ describe("extractViaSubagent (structured output)", () => {
   afterEach(() => {
     setPluginInput({ client: undefined } as any)
     setSubSessionCreateTimeoutForTest()
+    const { applyPluginOptions } = require("../src/index.js")
+    applyPluginOptions({})
   })
 
   it("requests json_schema format and reads the result from AssistantMessage.structured", async () => {
@@ -258,6 +269,25 @@ describe("extractViaSubagent (structured output)", () => {
   it("treats an all-empty structured object as a no-op", async () => {
     stubClient(() => ({ data: { info: { structured: { raw_memory: "", rollout_summary: "", rollout_slug: "" } } } }))
     expect(await extractViaSubagent("ses_3", "transcript")).toBeNull()
+  })
+
+  it("v2 requests summary-only schema and stores empty raw_memory", async () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const captured = stubClient(() => ({
+      data: { info: { structured: { rollout_summary: "v2 recap", rollout_slug: "v2-slug" } } },
+    }))
+    try {
+      applyPluginOptions({ version: "v2" })
+      const r = await extractViaSubagent("ses_v2", "transcript", { cwd: "/x" })
+      expect(r).toEqual({ raw_memory: "", rollout_summary: "v2 recap", rollout_slug: "v2-slug" })
+      const body = captured.getPromptBody()
+      expect(body.format?.schema?.required).toEqual(["rollout_summary", "rollout_slug"])
+      expect(body.format?.schema?.required).not.toContain("raw_memory")
+      expect(body.system).toContain("Write task history, not a user profile")
+      expect(body.parts[0].text).toContain("session_primary_git_branch_hint: unknown")
+    } finally {
+      applyPluginOptions({})
+    }
   })
 
   it("rejects an HTTP-success response whose assistant message contains an error", async () => {

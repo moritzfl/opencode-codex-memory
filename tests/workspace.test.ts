@@ -10,6 +10,8 @@ beforeEach(() => {
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
 afterEach(() => {
+  const { applyPluginOptions } = require("../src/index.js")
+  applyPluginOptions({})
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -109,6 +111,21 @@ describe("workspace rendering", () => {
     expect(fs.existsSync(p)).toBe(true)
   })
 
+  it("does not seed MEMORY.md on a v2 root", () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { ensureLayout } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    applyPluginOptions({ version: "v2" })
+    ensureLayout()
+    const root = memoryRoot()
+    expect(root).toBe(path.join(TEST_ROOT, "memories_v2"))
+    expect(fs.existsSync(path.join(root, "MEMORY.md"))).toBe(false)
+    expect(fs.existsSync(path.join(root, "memory_summary.md"))).toBe(true)
+    expect(fs.existsSync(path.join(root, "rollout_summaries"))).toBe(true)
+    expect(fs.existsSync(path.join(root, "extensions", "ad_hoc", "instructions.md"))).toBe(true)
+    expect(fs.existsSync(path.join(TEST_ROOT, "memories", "MEMORY.md"))).toBe(false)
+  })
+
   it("unlinks a symlinked extensions dir before seeding, without writing through it", () => {
     const { ensureLayout } = require("../src/workspace.js")
     const { memoryRoot } = require("../src/paths.js")
@@ -177,6 +194,25 @@ describe("validateConsolidationArtifacts", () => {
     r = validateConsolidationArtifacts()
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toMatch(/missing consolidated memory/)
+  })
+
+  it("v2 accepts a heading-complete summary without MEMORY.md", () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { ensureLayout, validateConsolidationArtifactsForVersion } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    applyPluginOptions({ version: "v2" })
+    ensureLayout()
+    const root = memoryRoot()
+    expect(fs.existsSync(path.join(root, "MEMORY.md"))).toBe(false)
+    fs.writeFileSync(
+      path.join(root, "memory_summary.md"),
+      "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n",
+    )
+    expect(validateConsolidationArtifactsForVersion(root, "v2").ok).toBe(true)
+    fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\n## User Profile\n")
+    const invalid = validateConsolidationArtifactsForVersion(root, "v2")
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) expect(invalid.reason).toMatch(/invalid v2 memory summary/)
   })
 
   it("rejects a directory named MEMORY.md", () => {

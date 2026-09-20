@@ -14,6 +14,8 @@ beforeEach(() => {
 afterEach(() => {
   const { closeDb } = require("../src/db.js")
   closeDb()
+  const { applyPluginOptions } = require("../src/index.js")
+  applyPluginOptions({})
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -895,5 +897,42 @@ describe("MemoryStore session meta", () => {
       generated_at: Date.now(),
     })
     expect(store.claimGlobalPhase2Job().type).toBe("skipped_cooldown")
+  })
+})
+
+describe("versioned job DB", () => {
+  it("isolates v2 jobs while sharing session_meta on memory.db", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { closeDb, openDb } = require("../src/db.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const { memoryDbPath, sessionMetaDbPath } = require("../src/paths.js")
+
+    const v1 = new MemoryStore()
+    v1.setMemoryMode("ses_shared", "disabled")
+    const v1Claim = v1.claimStage1Jobs([{ id: "ses_v1", updated_at: 1000 }])
+    expect(v1Claim).toHaveLength(1)
+    const v1JobsPath = memoryDbPath()
+    expect(v1JobsPath).toBe(sessionMetaDbPath())
+
+    applyPluginOptions({ version: "v2" })
+    closeDb()
+    const v2 = new MemoryStore()
+    expect(v2.getMemoryMode("ses_shared")).toBe("disabled")
+    expect(v2.stage1Outputs()).toEqual([])
+    const v2Claim = v2.claimStage1Jobs([{ id: "ses_v2", updated_at: 1000 }])
+    expect(v2Claim).toHaveLength(1)
+    expect(memoryDbPath()).toBe(path.join(TEST_ROOT, "memory_v2.db"))
+    expect(fs.existsSync(path.join(TEST_ROOT, "memory_v2.db"))).toBe(true)
+    expect(fs.existsSync(path.join(TEST_ROOT, "memories"))).toBe(false)
+    expect(openDb().prepare("SELECT job_key FROM memory_jobs WHERE kind='memory_stage1'").all())
+      .toEqual([{ job_key: "ses_v2" }])
+
+    applyPluginOptions({ version: "v1" })
+    closeDb()
+    const v1b = new MemoryStore()
+    expect(v1b.getMemoryMode("ses_shared")).toBe("disabled")
+    expect(
+      openDb().prepare("SELECT job_key FROM memory_jobs WHERE kind='memory_stage1'").all(),
+    ).toEqual([{ job_key: "ses_v1" }])
   })
 })

@@ -1,5 +1,6 @@
 import fs from "fs"
 import path from "path"
+import { currentMemoryVersion } from "./memory-version.js"
 import { memoryRoot } from "./paths.js"
 import { assertMemoryRootSafe, safeResolveMemoryPath, withRegularFileNoFollow } from "./path-guard.js"
 import { truncateToTokens } from "./token.js"
@@ -7,6 +8,7 @@ import { fillTemplate } from "./llm.js"
 
 const MEMORY_SUMMARY_TOKEN_LIMIT = 2500
 const READ_PATH_TEMPLATE = "read_path.md"
+const READ_PATH_TEMPLATE_V2 = "read_path_v2.md"
 
 // Tool-dependent guidance for read_path.md. With dedicated_tools on, the
 // prompt points at the memory_* tools (our platform adaptation — the memory
@@ -19,6 +21,15 @@ const SEARCH_STEP_TOOLS = `2. Search {{ base_path }}/MEMORY.md for those keyword
      period's sessions/notes; without a query it lists them chronologically.`
 
 const SEARCH_STEP_FILES = `2. Search {{ base_path }}/MEMORY.md using those keywords.`
+
+const SEARCH_STEP_TOOLS_V2 = `Search {{ base_path }}/rollout_summaries/ with the \`memory_search\`
+   tool, or read a recap with \`memory_read\`, when extra evidence, wording,
+   chronology, or uncertainty could change your answer.
+   - For time-scoped recall ("what was I working on last week / around date X"),
+     pass \`since\`/\`until\` to \`memory_search\` — with a query it searches only that
+     period's sessions/notes; without a query it lists them chronologically.`
+
+const SEARCH_STEP_FILES_V2 = `Search {{ base_path }}/rollout_summaries/ using those keywords when a needed route is missing.`
 
 const UPDATE_INSTRUCTIONS_TOOLS = `Use the \`memory_add_note\` tool, which writes
 one small note file under \`extensions/ad_hoc/notes/\` describing what to
@@ -36,10 +47,11 @@ interface CachedSummary {
   mtime: number
 }
 
-let cached: CachedSummary | null = null
+const cache = new Map<string, CachedSummary>()
 
 function readTemplate(): string {
-  const templatePath = path.join(import.meta.dirname, "templates", READ_PATH_TEMPLATE)
+  const name = currentMemoryVersion() === "v2" ? READ_PATH_TEMPLATE_V2 : READ_PATH_TEMPLATE
+  const templatePath = path.join(import.meta.dirname, "templates", name)
   return fs.readFileSync(templatePath, "utf8")
 }
 
@@ -49,6 +61,7 @@ function readMemorySummary(): string | null {
     // neither the root nor memory_summary.md may redirect outside the workspace.
     const summaryPath = safeResolveMemoryPath("memory_summary.md")
     return withRegularFileNoFollow(summaryPath, fs.constants.O_RDONLY, (fd, stat) => {
+      const cached = cache.get(summaryPath)
       if (cached && cached.mtime === stat.mtimeMs) {
         return cached.content
       }
@@ -57,10 +70,10 @@ function readMemorySummary(): string | null {
       if (!raw) return null
 
       const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
-      cached = {
+      cache.set(summaryPath, {
         content: truncated,
         mtime: stat.mtimeMs,
-      }
+      })
       return truncated
     })
   } catch {
@@ -69,7 +82,7 @@ function readMemorySummary(): string | null {
 }
 
 export function invalidateCache(): void {
-  cached = null
+  cache.clear()
 }
 
 export function buildMemorySystemPrompt(dedicatedTools: boolean): string | null {
@@ -77,8 +90,12 @@ export function buildMemorySystemPrompt(dedicatedTools: boolean): string | null 
   if (!summary) return null
 
   const template = readTemplate()
+  const v2 = currentMemoryVersion() === "v2"
+  const searchStep = dedicatedTools
+    ? (v2 ? SEARCH_STEP_TOOLS_V2 : SEARCH_STEP_TOOLS)
+    : (v2 ? SEARCH_STEP_FILES_V2 : SEARCH_STEP_FILES)
   return fillTemplate(template, {
-    search_step: dedicatedTools ? SEARCH_STEP_TOOLS : SEARCH_STEP_FILES,
+    search_step: searchStep,
     update_instructions: dedicatedTools ? UPDATE_INSTRUCTIONS_TOOLS : UPDATE_INSTRUCTIONS_FILES,
     // Filled last so {{ base_path }} nested inside the snippets above resolves.
     base_path: memoryRoot(),

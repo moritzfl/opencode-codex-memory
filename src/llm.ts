@@ -15,6 +15,8 @@ import {
 } from "./host-client.js"
 import { catalogVariantKeys, nearestReasoningVariant } from "./reasoning-variant.js"
 import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
+import type { MemoryVersion } from "./options.js"
+import { currentMemoryVersion } from "./memory-version.js"
 import { SCAN_LIMIT } from "./store.js"
 import { isProviderCapacityError, ProviderCapacityError } from "./ratelimit.js"
 
@@ -121,6 +123,10 @@ async function createSession(title: string): Promise<string> {
       body: {
         title,
         metadata: { [SUBSESSION_METADATA_KEY]: true },
+        ...(title === "codex-memory-consolidate" ? { permission: [
+          { permission: "external_directory", pattern: "*", action: "deny" as const },
+          { permission: "external_directory", pattern: path.join(memoryRoot(), "*"), action: "allow" as const },
+        ] } : {}),
       },
       signal: controller.signal,
     }),
@@ -437,6 +443,16 @@ const EXTRACTION_SCHEMA = {
   required: ["raw_memory", "rollout_summary", "rollout_slug"],
 } as const
 
+const EXTRACTION_SCHEMA_V2 = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    rollout_summary: { type: "string" },
+    rollout_slug: { type: "string" },
+  },
+  required: ["rollout_summary", "rollout_slug"],
+} as const
+
 /**
  * Returns null when the extractor reported a no-op (nothing worth remembering).
  *
@@ -449,7 +465,8 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
   const agent = "memorize-extract"
   const subId = await createSession(`codex-memory-extract-${sessionId}`)
   try {
-    const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript)
+    const version = currentMemoryVersion()
+    const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript, version)
     // extract_model option > opencode small_model > session default.
     const model = await resolveExtractionModel(opts.model)
     const data = await runPrompt(subId, prompt, agent, {
@@ -457,13 +474,13 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
       // and a near-600k-char transcript on a slow model can easily exceed a
       // short one — repeated timeouts would exhaust the job's retries.
       timeoutMs: opts.timeoutMs ?? 3600_000,
-      system: readTemplate("stage_one_system.md"),
+      system: readTemplate(version === "v2" ? "stage_one_system_v2.md" : "stage_one_system.md"),
       model,
       signal: opts.signal ?? pluginShutdownSignal(),
       // opencode enforces json_schema output via a forced StructuredOutput tool
       // call (toolChoice: required) — which is why memorize-extract must allow
       // that one otherwise-denied tool.
-      format: { type: "json_schema", schema: EXTRACTION_SCHEMA },
+      format: { type: "json_schema", schema: version === "v2" ? EXTRACTION_SCHEMA_V2 : EXTRACTION_SCHEMA },
       // Codex extraction ReasoningEffort::Low. Host maps variant → reasoningEffort.
       // If the model has no `low`, pick the nearest listed effort (host-only).
       variant: await resolveReasoningVariant(EXTRACT_VARIANT, model),
@@ -474,9 +491,9 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
     // without the feature, or a model that emitted JSON as plain text).
     const structured = hostStructuredOutput(data)
     if (structured) {
-      return validateExtraction(structured as Partial<ExtractionResult>)
+      return validateExtraction(structured as Partial<ExtractionResult>, version)
     }
-    return parseExtraction(extractAssistantText(data))
+    return parseExtraction(extractAssistantText(data), version)
   } finally {
     // Fire-and-forget on purpose (unlike consolidation): stage 1 has no codex
     // agent-shutdown step, and memorize-extract has no write tools, so a
@@ -701,7 +718,15 @@ export function fillTemplate(tmpl: string, vars: Record<string, string>): string
   return out
 }
 
-function buildExtractionInput(sessionId: string, cwd: string, transcript: string): string {
+function buildExtractionInput(sessionId: string, cwd: string, transcript: string, version: MemoryVersion): string {
+  if (version === "v2") {
+    return fillTemplate(readTemplate("stage_one_input_v2.md"), {
+      session_id: sessionId,
+      session_cwd: cwd,
+      session_git_branch: "unknown",
+      transcript,
+    })
+  }
   return fillTemplate(readTemplate("stage_one_input.md"), {
     session_id: sessionId,
     session_cwd: cwd,
@@ -745,7 +770,8 @@ export function buildConsolidationPrompt(memoryRoot: string, diffFileName: strin
     extensionsExist = fs.statSync(extensionsRoot).isDirectory()
   } catch {}
   const blockVars = { memory_extensions_root: extensionsRoot }
-  return fillTemplate(readTemplate("consolidation.md"), {
+  const template = currentMemoryVersion() === "v2" ? "consolidation_v2.md" : "consolidation.md"
+  return fillTemplate(readTemplate(template), {
     memory_root: memoryRoot,
     phase2_workspace_diff_file: diffFileName,
     memory_extensions_folder_structure: extensionsExist ? fillTemplate(EXTENSIONS_FOLDER_STRUCTURE, blockVars) : "",
@@ -762,8 +788,22 @@ function readTemplate(name: string): string {
  * all-empty no-op. Shared by the structured-output path (AssistantMessage.
  * structured) and the text parser below.
  */
-export function validateExtraction(obj: Partial<ExtractionResult>): ExtractionResult | null {
-  if (typeof obj.raw_memory !== "string" || typeof obj.rollout_summary !== "string") {
+export function validateExtraction(
+  obj: Partial<ExtractionResult>,
+  version: MemoryVersion = currentMemoryVersion(),
+): ExtractionResult | null {
+  if (typeof obj.rollout_summary !== "string") {
+    throw new Error("extraction response missing required fields")
+  }
+  if (version === "v2") {
+    if (!obj.rollout_summary.trim()) return null
+    return {
+      raw_memory: "",
+      rollout_summary: obj.rollout_summary,
+      rollout_slug: typeof obj.rollout_slug === "string" && obj.rollout_slug.trim() ? obj.rollout_slug : null,
+    }
+  }
+  if (typeof obj.raw_memory !== "string") {
     throw new Error("extraction response missing required fields")
   }
   // codex phase1: either field empty → SucceededNoOutput (not a partial upsert).
@@ -790,12 +830,12 @@ export function validateExtraction(obj: Partial<ExtractionResult>): ExtractionRe
  * Parses stage-1 JSON from assistant text. Fallback for when structured output
  * is unavailable; the primary path reads AssistantMessage.structured directly.
  */
-export function parseExtraction(raw: string): ExtractionResult | null {
+export function parseExtraction(raw: string, version: MemoryVersion = currentMemoryVersion()): ExtractionResult | null {
   const cleaned = raw.replace(/^```(?:json)?/gim, "").replace(/```$/gim, "").trim()
   const start = cleaned.indexOf("{")
   const end = cleaned.lastIndexOf("}")
   if (start === -1 || end === -1 || end <= start) {
     throw new Error("extraction response contained no JSON object")
   }
-  return validateExtraction(JSON.parse(cleaned.slice(start, end + 1)) as Partial<ExtractionResult>)
+  return validateExtraction(JSON.parse(cleaned.slice(start, end + 1)) as Partial<ExtractionResult>, version)
 }

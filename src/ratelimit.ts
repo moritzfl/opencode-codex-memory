@@ -1,4 +1,5 @@
 import { pluginOptions } from "./options.js"
+import { memoryDbPath } from "./paths.js"
 
 export interface RateLimitInfo {
   ok: boolean
@@ -39,7 +40,7 @@ export class ProviderCapacityError extends Error {
  * - phase 2 has no 30s timer; the DB claim + 6h cooldown serialize it.
  *   The observed-quota stamp still skips phase 2 (Codex start.rs skips both).
  */
-let lastPhase1Work = 0
+const lastPhase1Work = new Map<string, number>()
 const providerCapacityUntil = new Map<string, number>()
 
 const MIN_PHASE1_INTERVAL_MS = 30_000
@@ -121,7 +122,7 @@ export async function checkRateLimit(kind: MemoryPhase = "phase1", model?: strin
   if (pluginOptions.test) return { ok: true }
 
   const now = Date.now()
-  if (now - lastPhase1Work < MIN_PHASE1_INTERVAL_MS) {
+  if (now - (lastPhase1Work.get(memoryDbPath()) ?? 0) < MIN_PHASE1_INTERVAL_MS) {
     return { ok: false, reason: "phase1 rate limit (30s since last claimed work)" }
   }
   return { ok: true }
@@ -129,11 +130,11 @@ export async function checkRateLimit(kind: MemoryPhase = "phase1", model?: strin
 
 /** Call after a phase-1 pass claimed at least one job (token-using work started). */
 export function markRateLimitUsed(kind: "phase1" | "phase2" = "phase1"): void {
-  if (kind === "phase1") lastPhase1Work = Date.now()
+  if (kind === "phase1") lastPhase1Work.set(memoryDbPath(), Date.now())
 }
 
 /** Test seam: reset the process-local stamps. */
 export function resetRateLimitForTest(): void {
-  lastPhase1Work = 0
+  lastPhase1Work.clear()
   providerCapacityUntil.clear()
 }

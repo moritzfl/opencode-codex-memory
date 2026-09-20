@@ -12,8 +12,10 @@
  * without marking the whole plugin as shutting down.
  */
 
+import { memoryRoot } from "./paths.js"
+
 let shuttingDown = false
-let phase2Abort: AbortController | null = null
+const phase2Aborts = new Map<string, AbortController>()
 /** Fresh each boot; aborted on dispose. Extract (and others) subscribe here. */
 let shutdownAbort = new AbortController()
 
@@ -30,7 +32,7 @@ export function pluginShutdownSignal(): AbortSignal {
 export function beginPluginShutdown(): void {
   shuttingDown = true
   if (!shutdownAbort.signal.aborted) shutdownAbort.abort()
-  phase2Abort?.abort()
+  for (const controller of phase2Aborts.values()) controller.abort()
 }
 
 /**
@@ -39,8 +41,8 @@ export function beginPluginShutdown(): void {
  * glitched boot order cannot orphan a still-running phase-2 prompt.
  */
 export function resetPluginLifecycle(): void {
-  phase2Abort?.abort()
-  phase2Abort = null
+  for (const controller of phase2Aborts.values()) controller.abort()
+  phase2Aborts.clear()
   shutdownAbort = new AbortController()
   shuttingDown = false
 }
@@ -50,16 +52,18 @@ export function resetPluginLifecycle(): void {
  * is claimed; aborted on heartbeat loss, dispose, or run end.
  */
 export function beginPhase2AbortScope(): AbortSignal {
-  phase2Abort?.abort()
-  phase2Abort = new AbortController()
-  return phase2Abort.signal
+  const root = memoryRoot()
+  phase2Aborts.get(root)?.abort()
+  const controller = new AbortController()
+  phase2Aborts.set(root, controller)
+  return controller.signal
 }
 
 export function endPhase2AbortScope(): void {
-  phase2Abort = null
+  phase2Aborts.delete(memoryRoot())
 }
 
 /** Abort the current consolidator from outside phase2 (dispose). */
 export function abortPhase2Consolidation(): void {
-  phase2Abort?.abort()
+  phase2Aborts.get(memoryRoot())?.abort()
 }

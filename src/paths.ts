@@ -1,9 +1,13 @@
 import path from "path"
 import os from "os"
 import { xdgData } from "xdg-basedir"
+import type { MemoryVersion } from "./options.js"
+import { currentMemoryVersion } from "./memory-version.js"
 
-const MEMORY_DIR_NAME = "memories"
-const MEMORY_DB_NAME = "memory.db"
+const MEMORY_DIR_V1 = "memories"
+const MEMORY_DIR_V2 = "memories_v2"
+const MEMORY_DB_V1 = "memory.db"
+const MEMORY_DB_V2 = "memory_v2.db"
 
 const TEST_ROOT_ENV = "OPENCODE_CODEX_MEMORY_TEST_ROOT"
 const HOME_ENV = "OPENCODE_CODEX_MEMORY_HOME"
@@ -75,14 +79,28 @@ export function memoryHomeSource(): MemoryHomeSource {
   return "default"
 }
 
-export function memoryRoot(): string {
-  return path.join(dataRoot(), MEMORY_DIR_NAME)
+export function memoryRoot(version: MemoryVersion = currentMemoryVersion()): string {
+  return path.join(dataRoot(), version === "v2" ? MEMORY_DIR_V2 : MEMORY_DIR_V1)
 }
 
-export function memoryDbPath(): string {
-  return path.join(dataRoot(), MEMORY_DB_NAME)
+/** Jobs/outputs DB for the selected version. Session mode/pollution lives in sessionMetaDbPath. */
+export function memoryDbPath(version: MemoryVersion = currentMemoryVersion()): string {
+  return path.join(dataRoot(), version === "v2" ? MEMORY_DB_V2 : MEMORY_DB_V1)
 }
 
-export function memorySummaryPath(): string {
-  return path.join(memoryRoot(), "memory_summary.md")
+/** Shared catalog (memory_session_meta). Always the v1 db file, like Codex sharing the thread DB. */
+export function sessionMetaDbPath(): string {
+  return path.join(dataRoot(), MEMORY_DB_V1)
+}
+
+export function allMemoryRoots(): string[] {
+  return [path.join(dataRoot(), MEMORY_DIR_V1), path.join(dataRoot(), MEMORY_DIR_V2)]
+}
+
+export function allJobDbPaths(): string[] {
+  return [path.join(dataRoot(), MEMORY_DB_V1), path.join(dataRoot(), MEMORY_DB_V2)]
+}
+
+export function memorySummaryPath(version: MemoryVersion = currentMemoryVersion()): string {
+  return path.join(memoryRoot(version), "memory_summary.md")
 }

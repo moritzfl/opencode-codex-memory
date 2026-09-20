@@ -31,6 +31,8 @@ afterEach(() => {
   resetPluginLifecycle()
   resetRateLimitForTest()
   setPluginInput({ client: undefined } as any)
+  const { applyPluginOptions } = require("../src/index.js")
+  applyPluginOptions({})
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   fs.rmSync(TEST_ROOT, { recursive: true, force: true })
 })
@@ -145,6 +147,32 @@ describe("phase 2 orchestration", () => {
     expect(fs.existsSync(link)).toBe(false)
     expect(fs.readFileSync(outside, "utf8")).toBe("outside content")
     expect(fs.existsSync(path.join(memoryRoot(), "phase2_workspace_diff.md"))).toBe(true)
+  })
+
+  it("v2 succeeds with only memory_summary.md and does not write raw_memories.md", async () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    applyPluginOptions({ version: "v2" })
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-v2" } }),
+          prompt: async () => {
+            fs.writeFileSync(
+              path.join(memoryRoot(), "memory_summary.md"),
+              "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n",
+            )
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    const result = await runPhase2(new MemoryStore())
+    expect(result.status).toBe("succeeded")
+    expect(fs.existsSync(path.join(memoryRoot(), "MEMORY.md"))).toBe(false)
+    expect(fs.existsSync(path.join(memoryRoot(), "raw_memories.md"))).toBe(false)
+    expect(fs.readFileSync(path.join(memoryRoot(), "memory_summary.md"), "utf8")).toContain("## What's in Memory")
   })
 
   it("skips claiming when provider capacity is exhausted", async () => {

@@ -94,6 +94,8 @@ export interface TranscriptMessage {
   type: string
   role?: string
   text?: string
+  /** Native question-tool replies are human evidence, paired with the question. */
+  userReply?: { question: string; answer: string }
 }
 
 /** Official transcript surface: GET /session/{id}/message via the plugin's authenticated client. */
@@ -134,10 +136,18 @@ export async function loadTranscript(sessionId: string): Promise<TranscriptMessa
   for (const row of rows) {
     const role = row?.info?.role
     for (const part of row?.parts ?? []) {
+      const question = part as { tool?: string; ignored?: boolean; state?: { input?: unknown; output?: unknown } }
+      const answer = question?.state?.output
+      const userReply = question?.tool === "question" && question.ignored !== true
+        && typeof answer === "string" && answer.startsWith("User has answered your questions:")
+        && /"="(?!Unanswered")[^"]+"/.test(answer)
+        ? { question: JSON.stringify(question.state?.input ?? {}), answer }
+        : undefined
       out.push({
         type: hostPartType(part),
         role,
         text: extractText(part),
+        ...(userReply ? { userReply } : {}),
       })
     }
   }

@@ -1,5 +1,6 @@
 import { MemoryStore, STAGE1_CONCURRENCY } from "./store.js"
 import { loadTranscript, selectEligibleSessions } from "./capture.js"
+import { serializeTieredInput } from "./rollout-input.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
 import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
@@ -13,6 +14,10 @@ import {
 } from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
+import { currentMemoryVersion, withMemoryVersion } from "./memory-version.js"
+import { truncateToBytes } from "./token.js"
+
+const V2_SUMMARY_MAX_BYTES = 9_000
 
 export interface Phase1Options {
   maxAgeDays: number
@@ -47,6 +52,14 @@ export async function runPhase1(
   store: MemoryStore,
   opts: Phase1Options = DEFAULT_PHASE1_OPTIONS,
   rateLimitCheck: typeof checkRateLimit = checkRateLimit,
+): Promise<void> {
+  return withMemoryVersion(store.version, () => runVersionPhase1(store, opts, rateLimitCheck))
+}
+
+async function runVersionPhase1(
+  store: MemoryStore,
+  opts: Phase1Options,
+  rateLimitCheck: typeof checkRateLimit,
 ): Promise<void> {
   if (isPluginShuttingDown()) return
   // Prune first (no tokens), matching codex start.rs ordering before the gate.
@@ -126,11 +139,14 @@ export async function runPhase1(
         store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
         return
       }
+      const summary = currentMemoryVersion() === "v2"
+        ? truncateToBytes(redact(result.rollout_summary), V2_SUMMARY_MAX_BYTES)
+        : redact(result.rollout_summary)
       store.markStage1Succeeded(sid, claim.ownershipToken, {
         session_id: sid,
         source_updated_at: sourceUpdatedAt,
-        raw_memory: redact(result.raw_memory),
-        rollout_summary: redact(result.rollout_summary),
+        raw_memory: currentMemoryVersion() === "v2" ? "" : redact(result.raw_memory),
+        rollout_summary: summary,
         // codex redacts the slug too — it becomes a filename.
         rollout_slug: result.rollout_slug ? redact(result.rollout_slug) : result.rollout_slug,
         cwd: session?.directory ?? null,
@@ -152,6 +168,10 @@ export async function runPhase1(
 export async function buildTranscript(sessionId: string): Promise<string> {
   const msgs = await loadTranscript(sessionId)
   if (msgs.length === 0) return ""
+  if (currentMemoryVersion() === "v2") {
+    const tiered = serializeTieredInput(msgs, TRANSCRIPT_MAX_CHARS)
+    return redact(stripCitations(tiered))
+  }
   const lines: string[] = []
   for (const m of msgs) {
     if (m.type === "system") continue

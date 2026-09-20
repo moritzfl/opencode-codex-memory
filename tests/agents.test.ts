@@ -67,6 +67,22 @@ describe("agent auto-registration", () => {
     expect(config.agent!["memorize-extract"].permission.external_directory).toBeUndefined()
   })
 
+  it("grants memorize the v2 memory root when version=v2", () => {
+    const { injectAgentDefinitions, applyPluginOptions } = require("../src/index.js")
+    const { memoryRoot } = require("../src/paths.js")
+    try {
+      applyPluginOptions({ version: "v2" })
+      const config: { agent?: Record<string, any> } = {}
+      injectAgentDefinitions(config)
+      expect(config.agent!["memorize"].permission.external_directory).toEqual({
+        [path.join(memoryRoot(), "*")]: "allow",
+      })
+      expect(memoryRoot()).toContain("memories_v2")
+    } finally {
+      applyPluginOptions({})
+    }
+  })
+
   it("leaves user-defined agents of the same name untouched", () => {
     const { injectAgentDefinitions } = require("../src/index.js")
     const userDef = { mode: "subagent", model: "my/model", prompt: "custom" }

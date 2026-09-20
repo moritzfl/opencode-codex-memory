@@ -6,7 +6,7 @@ import {
   writeRolloutSummaries,
   pruneExtensionResources,
   writeWorkspaceDiff,
-  validateConsolidationArtifacts,
+  validateConsolidationArtifactsForVersion,
   removeMemorySymlinks,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
@@ -18,6 +18,7 @@ import {
 } from "./llm.js"
 import { hostSessionLiveness, withHostTimeout } from "./host-client.js"
 import { invalidateCache } from "./source.js"
+import { withMemoryVersion } from "./memory-version.js"
 import { memoryRoot } from "./paths.js"
 import {
   abortPhase2Consolidation,
@@ -117,11 +118,11 @@ function maybeExportToCodex(interop: ReturnType<typeof resolveCodexInterop>): vo
   }
 }
 
-let phase2InFlight = false
+const phase2InFlight = new Set<string>()
 
 /** True while THIS process runs a consolidation (memory_reset refuses then). */
 export function isPhase2InFlight(): boolean {
-  return phase2InFlight
+  return phase2InFlight.size > 0
 }
 
 /** Release the claim when dispose raced the prep path; return true if released. */
@@ -143,9 +144,17 @@ export async function runPhase2(
   store: MemoryStore,
   opts: Phase2Options = DEFAULT_PHASE2_OPTIONS,
 ): Promise<{ status: string }> {
+  return withMemoryVersion(store.version, () => runVersionPhase2(store, opts))
+}
+
+async function runVersionPhase2(
+  store: MemoryStore,
+  opts: Phase2Options,
+): Promise<{ status: string }> {
   if (isPluginShuttingDown()) return { status: "shutting_down" }
-  if (phase2InFlight) return { status: "already_running" }
-  phase2InFlight = true
+  const root = memoryRoot()
+  if (phase2InFlight.has(root)) return { status: "already_running" }
+  phase2InFlight.add(root)
   try {
     // No 30s process gate: codex serializes phase 2 only via the DB claim.
     // An observed quota stamp still skips both phases (Codex start.rs).
@@ -185,7 +194,7 @@ export async function runPhase2(
       }
 
       const outputs = await selectLivePhase2Inputs(store, opts.maxRaw, opts.maxUnusedDays)
-      rebuildRawMemories(outputs)
+      if (store.version === "v1") rebuildRawMemories(outputs)
       writeRolloutSummaries(outputs)
       pruneExtensionResources(opts.extensionRetentionDays)
 
@@ -225,7 +234,7 @@ export async function runPhase2(
       // already valid. Invalid/empty summary (e.g. ensureLayout's empty file)
       // falls through so the consolidator can INIT/repair.
       if (diff.changes.length === 0) {
-        const valid = validateConsolidationArtifacts()
+        const valid = validateConsolidationArtifactsForVersion(root, store.version)
         if (valid.ok) {
           store.markPhase2Succeeded(claim.ownershipToken, outputs)
           maybeExportToCodex(interop)
@@ -321,7 +330,7 @@ export async function runPhase2(
 
       // codex failed_invalid_artifacts: do not reset baseline on bad output so
       // the next run still sees a diff / can re-INIT.
-      const artifacts = validateConsolidationArtifacts()
+      const artifacts = validateConsolidationArtifactsForVersion(root, store.version)
       if (!artifacts.ok) {
         store.markPhase2Failed(claim.ownershipToken, `failed_invalid_artifacts: ${artifacts.reason}`)
         return { status: "failed_invalid_artifacts" }
@@ -349,6 +358,6 @@ export async function runPhase2(
       endPhase2AbortScope()
     }
   } finally {
-    phase2InFlight = false
+    phase2InFlight.delete(root)
   }
 }

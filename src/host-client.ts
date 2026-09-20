@@ -86,6 +86,7 @@ export async function withHostTimeout<T>(
 export interface SessionCreateBody {
   title?: string
   metadata?: Record<string, unknown>
+  permission?: { permission: string; pattern: string; action: "allow" | "deny" }[]
 }
 
 /** GET /provider. V1 SDK types omit model.variants; parse the payload loosely. */

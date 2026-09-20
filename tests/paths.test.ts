@@ -10,6 +10,8 @@ beforeEach(() => {
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
 afterEach(() => {
+  const { applyPluginOptions } = require("../src/index.js")
+  applyPluginOptions({})
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   delete process.env.OPENCODE_CODEX_MEMORY_HOME
   try {
@@ -40,6 +42,22 @@ describe("paths", () => {
   it("memorySummaryPath is inside memoryRoot", () => {
     const { memorySummaryPath, memoryRoot } = require("../src/paths.js")
     expect(memorySummaryPath()).toBe(path.join(memoryRoot(), "memory_summary.md"))
+  })
+
+  it("v2 uses memories_v2 and memory_v2.db but keeps session meta on memory.db", () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { pluginOptions } = require("../src/options.js")
+    const { memoryRoot, memoryDbPath, sessionMetaDbPath, memorySummaryPath } = require("../src/paths.js")
+    try {
+      applyPluginOptions({ version: "v2" })
+      expect(memoryRoot()).toBe(path.join(TEST_ROOT, "memories_v2"))
+      expect(memoryDbPath()).toBe(path.join(TEST_ROOT, "memory_v2.db"))
+      expect(sessionMetaDbPath()).toBe(path.join(TEST_ROOT, "memory.db"))
+      expect(memorySummaryPath()).toBe(path.join(TEST_ROOT, "memories_v2", "memory_summary.md"))
+    } finally {
+      applyPluginOptions({})
+      expect(pluginOptions.version).toBe("v1")
+    }
   })
 })
 

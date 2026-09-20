@@ -1,6 +1,8 @@
 import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
+import type { MemoryVersion } from "./options.js"
+import { currentMemoryVersion } from "./memory-version.js"
 import { memoryRoot } from "./paths.js"
 import {
   assertMemoryRootSafe,
@@ -79,8 +81,10 @@ export function ensureLayout(): void {
   for (const dir of [ROLLOUT_DIR, SKILLS_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]) {
     fs.mkdirSync(safeResolveMemoryPath(dir), { recursive: true })
   }
-  const memoryMd = safeResolveMemoryPath("MEMORY.md")
-  if (!fs.existsSync(memoryMd)) writeRegularFileNoFollow(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n")
+  if (currentMemoryVersion() === "v1") {
+    const memoryMd = safeResolveMemoryPath("MEMORY.md")
+    if (!fs.existsSync(memoryMd)) writeRegularFileNoFollow(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n")
+  }
   const summary = safeResolveMemoryPath("memory_summary.md")
   if (!fs.existsSync(summary)) writeRegularFileNoFollow(summary, "")
   const adhocInstructions = safeResolveMemoryPath(path.join(EXTENSIONS_DIR, "ad_hoc", "instructions.md"))
@@ -93,7 +97,23 @@ export function ensureLayout(): void {
  * a regular file and memory_summary.md must start with the exact line `v1`.
  * Invalid artifacts force a consolidator re-run and block baseline reset.
  */
+const V2_SUMMARY_HEADINGS = ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"] as const
+
+export function isValidV2Summary(summary: string): boolean {
+  if (summary.split(/\r?\n/, 1)[0] !== "v1") return false
+  if (Buffer.byteLength(summary, "utf8") >= 10_000) return false
+  const lines = summary.split(/\r?\n/).map((line) => line.trim())
+  return V2_SUMMARY_HEADINGS.every((heading) => lines.includes(heading))
+}
+
 export function validateConsolidationArtifacts(root: string = memoryRoot()): { ok: true } | { ok: false; reason: string } {
+  return validateConsolidationArtifactsForVersion(root, "v1")
+}
+
+export function validateConsolidationArtifactsForVersion(
+  root: string = memoryRoot(),
+  version: MemoryVersion = currentMemoryVersion(),
+): { ok: true } | { ok: false; reason: string } {
   let removedSymlinks: number
   try {
     removedSymlinks = removeMemorySymlinks(root)
@@ -104,12 +124,14 @@ export function validateConsolidationArtifacts(root: string = memoryRoot()): { o
     return { ok: false, reason: `removed ${removedSymlinks} symbolic links from consolidated memory workspace` }
   }
 
-  const memoryPath = path.join(root, "MEMORY.md")
-  try {
-    const st = fs.lstatSync(memoryPath)
-    if (!st.isFile()) return { ok: false, reason: `consolidated memory artifact is not a file: ${memoryPath}` }
-  } catch {
-    return { ok: false, reason: `missing consolidated memory artifact: ${memoryPath}` }
+  if (version === "v1") {
+    const memoryPath = path.join(root, "MEMORY.md")
+    try {
+      const st = fs.lstatSync(memoryPath)
+      if (!st.isFile()) return { ok: false, reason: `consolidated memory artifact is not a file: ${memoryPath}` }
+    } catch {
+      return { ok: false, reason: `missing consolidated memory artifact: ${memoryPath}` }
+    }
   }
 
   const summaryPath = path.join(root, "memory_summary.md")
@@ -125,6 +147,9 @@ export function validateConsolidationArtifacts(root: string = memoryRoot()): { o
   const first = summary.split(/\r?\n/, 1)[0]
   if (first !== "v1") {
     return { ok: false, reason: `memory summary artifact does not start with v1: ${summaryPath}` }
+  }
+  if (version === "v2" && !isValidV2Summary(summary)) {
+    return { ok: false, reason: "invalid v2 memory summary" }
   }
   return { ok: true }
 }

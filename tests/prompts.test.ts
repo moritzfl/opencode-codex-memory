@@ -10,6 +10,8 @@ beforeEach(() => {
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
 afterEach(() => {
+  const { applyPluginOptions } = require("../src/index.js")
+  applyPluginOptions({})
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
@@ -40,6 +42,25 @@ describe("buildConsolidationPrompt", () => {
     const prompt = buildConsolidationPrompt(memoryRoot(), "phase2_workspace_diff.md")
     expect(prompt).not.toMatch(PLACEHOLDER_RE)
     expect(prompt).not.toContain("Memory extensions (under")
+  })
+
+  it("fills the v2 consolidation template without MEMORY.md instructions", () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { ensureLayout } = require("../src/workspace.js")
+    const { buildConsolidationPrompt } = require("../src/llm.js")
+    const { memoryRoot } = require("../src/paths.js")
+    try {
+      applyPluginOptions({ version: "v2" })
+      ensureLayout()
+      const prompt = buildConsolidationPrompt(memoryRoot(), "phase2_workspace_diff.md")
+      expect(prompt).not.toMatch(PLACEHOLDER_RE)
+      expect(prompt).toContain("memory_summary.md")
+      expect(prompt).not.toContain("Create or update `MEMORY.md`")
+      expect(prompt).toContain("session_id=")
+      expect(prompt).toContain("phase2_workspace_diff.md")
+    } finally {
+      applyPluginOptions({})
+    }
   })
 })
 
@@ -79,6 +100,34 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     // citation contract is tool-independent and must survive
     expect(prompt).toContain("<memory-citation>")
     expect(prompt).toContain("<session_ids>")
+  })
+
+  it("v2 injects recap-oriented guidance without a MEMORY.md hop", () => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memorySummaryPath, memoryRoot } = require("../src/paths.js")
+    try {
+      applyPluginOptions({ version: "v2" })
+      ensureMemoryLayout()
+      fs.writeFileSync(memorySummaryPath(), "v1\n\n## User Profile\ntest\n")
+      invalidateCache()
+      const prompt = buildMemorySystemPrompt(true)!
+      expect(prompt).not.toMatch(PLACEHOLDER_RE)
+      expect(prompt).toContain("<memory-citation>")
+      expect(prompt).toContain("<session_ids>")
+      expect(prompt).toContain("memory_search")
+      expect(prompt).toContain("memory_read")
+      expect(prompt).toContain("memory_add_note")
+      expect(prompt).not.toContain("MEMORY.md")
+      expect(prompt).toContain("rollout_summaries/")
+      const files = buildMemorySystemPrompt(false)!
+      expect(files).not.toContain("memory_search")
+      expect(files).toContain(`Search ${memoryRoot()}/rollout_summaries/`)
+      expect(files).not.toContain("MEMORY.md")
+    } finally {
+      applyPluginOptions({})
+      invalidateCache()
+    }
   })
 
   it("refuses to inject when the memory root is a symlink", () => {
@@ -145,14 +194,23 @@ describe("template placeholder inventory", () => {
     const dir = path.join(import.meta.dirname, "..", "src", "templates")
     const known: Record<string, string[]> = {
       "read_path.md": ["base_path", "memory_summary", "search_step", "update_instructions"],
+      "read_path_v2.md": ["base_path", "memory_summary", "search_step", "update_instructions"],
       "consolidation.md": [
         "memory_root",
         "phase2_workspace_diff_file",
         "memory_extensions_folder_structure",
         "memory_extensions_primary_inputs",
       ],
+      "consolidation_v2.md": [
+        "memory_root",
+        "phase2_workspace_diff_file",
+        "memory_extensions_folder_structure",
+        "memory_extensions_primary_inputs",
+      ],
       "stage_one_input.md": ["session_id", "session_cwd", "transcript"],
+      "stage_one_input_v2.md": ["session_id", "session_cwd", "session_git_branch", "transcript"],
       "stage_one_system.md": [],
+      "stage_one_system_v2.md": [],
     }
     for (const [file, allowed] of Object.entries(known)) {
       const text = fs.readFileSync(path.join(dir, file), "utf8")
@@ -160,5 +218,18 @@ describe("template placeholder inventory", () => {
       const unexpected = found.filter((name) => !allowed.includes(name))
       expect({ file, unexpected }).toEqual({ file, unexpected: [] })
     }
+  })
+
+  it("read_path_v2 keeps the port citation contract and has no MEMORY.md hop", () => {
+    const text = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "templates", "read_path_v2.md"), "utf8")
+    expect(text).toContain("<memory-citation>")
+    expect(text).toContain("<session_ids>")
+    expect(text).toContain("ses_")
+    expect(text).not.toContain("oai-mem-citation")
+    expect(text).not.toContain("rollout_ids")
+    expect(text).not.toContain("MEMORY.md")
+    expect(text).toContain("rollout_summaries/")
+    expect(text).toContain("{{ search_step }}")
+    expect(text).toContain("{{ update_instructions }}")
   })
 })

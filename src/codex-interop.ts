@@ -1,6 +1,7 @@
 import fs from "fs"
 import path from "path"
 import os from "os"
+import { currentMemoryVersion } from "./memory-version.js"
 import { memoryRoot } from "./paths.js"
 import { readRegularFileNoFollow, safeResolveUnderRoot, writeRegularFileNoFollow } from "./path-guard.js"
 
@@ -202,6 +203,12 @@ function overlaps(a: string, b: string): boolean {
  */
 export function resolveCodexInterop(opts: CodexInteropOptions): ResolvedCodexInterop | null {
   if (!opts.import && !opts.export) return null
+  if (currentMemoryVersion() === "v2") {
+    console.warn(
+      "[opencode-codex-memory] codex_interop disabled: handbook exchange is v1-only while version=v2",
+    )
+    return null
+  }
   // codex find_codex_home ignores an EMPTY env var (home-dir/src/lib.rs);
   // without the filter "" would resolve to a cwd-relative "memories" path.
   const envHome = process.env[CODEX_HOME_ENV]

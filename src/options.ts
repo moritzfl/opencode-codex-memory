@@ -13,11 +13,16 @@ import { setConfiguredHome } from "./paths.js"
  * claude_import, and home are opencode-facing knobs (Codex has no equivalent
  * of relocating just the memory files away from the host data dir).
  */
+/** Codex MemoriesToml.version. Default v1; v2 is opt-in. */
+export type MemoryVersion = "v1" | "v2"
+
 export interface PluginOptionsState {
   generate_memories: boolean
   use_memories: boolean
   dedicated_tools: boolean
   disable_on_external_context: boolean
+  version: MemoryVersion
+  dual_write: boolean
   extract_model?: string
   consolidation_model?: string
   /** Resolved absolute plugin home (parent of memory.db + memories/). Unset = default. */
@@ -42,6 +47,8 @@ const DEFAULT_PLUGIN_OPTIONS: PluginOptionsState = {
   use_memories: true,
   dedicated_tools: true,
   disable_on_external_context: false,
+  version: "v1",
+  dual_write: false,
   max_raw_memories_for_consolidation: 256,
   max_unused_days: 30,
   max_rollout_age_days: 10,

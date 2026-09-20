@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite"
 import fs from "fs"
 import path from "path"
-import { memoryDbPath } from "./paths.js"
+import { memoryDbPath, sessionMetaDbPath } from "./paths.js"
+import type { MemoryVersion } from "./options.js"
 
 const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS memory_stage1_outputs (
@@ -45,11 +46,9 @@ const SCHEMA_V1 = [
   )`,
 ]
 
-let dbInstance: Database | null = null
+const connections = new Map<string, Database>()
 
-export function openDb(): Database {
-  if (dbInstance) return dbInstance
-  const dbPath = memoryDbPath()
+function openSqlite(dbPath: string): Database {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true })
   const db = new Database(dbPath, { create: true, readwrite: true, strict: false })
   try {
@@ -60,12 +59,35 @@ export function openDb(): Database {
     db.run("PRAGMA busy_timeout=5000")
     db.run("PRAGMA auto_vacuum=INCREMENTAL")
     runMigrations(db)
-    dbInstance = db
     return db
   } catch (err) {
     db.close()
     throw err
   }
+}
+
+function connection(dbPath: string): Database {
+  let db = connections.get(dbPath)
+  if (!db) {
+    db = openSqlite(dbPath)
+    connections.set(dbPath, db)
+  }
+  return db
+}
+
+/** Both versioned handles stay open while their pipelines run concurrently. */
+export function openDb(version?: MemoryVersion): Database {
+  return connection(memoryDbPath(version))
+}
+
+/** One-shot connection for reset across versioned files. Caller must close. */
+export function openTransientDb(dbPath: string): Database {
+  return openSqlite(dbPath)
+}
+
+/** Always memory.db — shared session_meta catalog across versions. */
+export function openSessionMetaDb(): Database {
+  return connection(sessionMetaDbPath())
 }
 
 function runMigrations(db: Database): void {
@@ -92,12 +114,22 @@ function runMigrations(db: Database): void {
       )`)
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(2, Date.now())
     }
+    if (currentVersion < 3) {
+      db.run(`CREATE TABLE consolidation_progress (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        max_thread_count INTEGER NOT NULL DEFAULT 0
+      )`)
+      db.run("INSERT INTO consolidation_progress (singleton, max_thread_count) VALUES (1, 0)")
+      db.run(`CREATE TABLE memory_session_versions (
+        session_id TEXT PRIMARY KEY,
+        version TEXT NOT NULL CHECK (version IN ('v1', 'v2'))
+      )`)
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(3, Date.now())
+    }
   }).immediate()
 }
 
 export function closeDb(): void {
-  if (dbInstance) {
-    dbInstance.close()
-    dbInstance = null
-  }
+  for (const db of connections.values()) db.close()
+  connections.clear()
 }

@@ -3,7 +3,7 @@
   "agent": {
     "memorize": {
       "mode": "subagent",
-      "prompt": "You are a memory consolidation agent. Read the workspace diff file and update MEMORY.md, memory_summary.md, and skills/ under the memory workspace only. Do not read or edit project source files outside that memory root. Keep memory_summary.md under 10000 chars (2500 tokens). Prune stale entries. Do not access the network.",
+      "prompt": "You are a memory consolidation agent. Follow the supplied version-specific consolidation contract and update only its requested artifacts under the supplied memory workspace. Do not read or edit project source files or a different memory workspace. Keep memory_summary.md under 10000 bytes. Prune stale entries. Do not access the network.",
       "permission": {
         "*": "deny",
         "bash": "deny",
@@ -20,7 +20,7 @@
     },
     "memorize-extract": {
       "mode": "subagent",
-      "prompt": "You are a memory extraction agent. The session transcript is provided inline in the prompt. Extract raw_memory, rollout_summary, and rollout_slug as JSON. Exclude AGENTS.md/instruction content. Redact secrets.",
+      "prompt": "You are a memory extraction agent. The session transcript is provided inline in the prompt. Follow the supplied version-specific JSON schema. Exclude AGENTS.md/instruction content. Redact secrets.",
       "permission": {
         "*": "deny",
         "bash": "deny",

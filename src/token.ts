@@ -19,3 +19,16 @@ export function truncateToTokens(input: string, maxTokens: number): string {
   const tail = keep - head
   return input.slice(0, head) + TRUNCATION_MARKER + input.slice(input.length - tail)
 }
+
+/** UTF-8-safe head/tail truncation for Codex's byte-bounded V2 artifacts. */
+export function truncateToBytes(input: string, maxBytes: number): string {
+  const bytes = Buffer.from(input, "utf8")
+  if (bytes.length <= maxBytes) return input
+  const keep = Math.max(0, maxBytes - Buffer.byteLength(TRUNCATION_MARKER))
+  let head = Math.ceil(keep / 2)
+  let tail = bytes.length - Math.floor(keep / 2)
+  while (head > 0 && (bytes[head] & 0xc0) === 0x80) head--
+  while (tail < bytes.length && (bytes[tail] & 0xc0) === 0x80) tail++
+  if (keep === 0) return Buffer.byteLength(TRUNCATION_MARKER) <= maxBytes ? TRUNCATION_MARKER : ""
+  return bytes.subarray(0, head).toString("utf8") + TRUNCATION_MARKER + bytes.subarray(tail).toString("utf8")
+}
