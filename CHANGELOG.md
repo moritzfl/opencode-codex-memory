@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-20
+
 ### Added
 
 - Codex memory V2: provenance-ranked extraction, bounded session recaps,
@@ -26,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reset and session deletion cover both namespaces; reset also clears readiness
   progress and citation dedupe while preserving session modes and routing.
 - Live e2e tests cover dual-write warmup and explicit V2 cutover on both hosts.
+
+### Fixed
+
+- Live e2e accepts a clean cooldown-pending Phase 2 as consolidated. A late
+  extraction may re-enqueue consolidation after a successful run, leaving the
+  job pending with no error; Codex treats the workspace diff as the dirty
+  check, so the harness no longer requires a literal `status=done`.
 
 ## [0.7.7] - 2026-09-19
 

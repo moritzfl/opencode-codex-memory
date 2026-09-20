@@ -53,7 +53,7 @@ If you want the mental model — learning, remembering, forgetting — see
 
 ```json
 {
-  "plugin": ["opencode-codex-memory@0.7.7"]
+  "plugin": ["opencode-codex-memory@0.8.0"]
 }
 ```
 
@@ -73,7 +73,7 @@ V2 plugin syntax:
 
 ```jsonc
 {
-  "plugins": [{ "package": "opencode-codex-memory@0.7.7" }],
+  "plugins": [{ "package": "opencode-codex-memory@0.8.0" }],
 }
 ```
 
@@ -210,7 +210,7 @@ To set options, turn the plugin entry into a `[name, options]` pair:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.7.7", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory@0.8.0", { "disable_on_external_context": true, "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
@@ -323,7 +323,7 @@ dedicated directory:
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.7.7", { "home": "/path/to/opencode-memory" }]
+    ["opencode-codex-memory@0.8.0", { "home": "/path/to/opencode-memory" }]
   ]
 }
 ```
@@ -333,7 +333,7 @@ OpenCode 2:
 ```jsonc
 {
   "plugins": [
-    { "package": "opencode-codex-memory@0.7.7", "options": { "home": "/path/to/opencode-memory" } }
+    { "package": "opencode-codex-memory@0.8.0", "options": { "home": "/path/to/opencode-memory" } }
   ]
 }
 ```
@@ -368,7 +368,7 @@ Off by default; no changes to Codex's own config are required.
 {
   "plugin": [
     [
-      "opencode-codex-memory@0.7.7",
+      "opencode-codex-memory@0.8.0",
       { "codex_interop": { "import": true, "export": true } }
     ]
   ]
@@ -425,7 +425,7 @@ from the project memories Claude already keeps on your machine. **One-way only**
 ```json
 {
   "plugin": [
-    ["opencode-codex-memory@0.7.7", { "claude_import": { "enabled": true } }]
+    ["opencode-codex-memory@0.8.0", { "claude_import": { "enabled": true } }]
   ]
 }
 ```
@@ -452,7 +452,7 @@ Claude names each project with an opaque id (a folder under
 {
   "plugin": [
     [
-      "opencode-codex-memory@0.7.7",
+      "opencode-codex-memory@0.8.0",
       {
         "claude_import": {
           "enabled": true,
