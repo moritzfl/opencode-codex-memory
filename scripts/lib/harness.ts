@@ -25,6 +25,7 @@ export type Sandbox = {
   /** XDG_DATA_HOME/opencode — also OPENCODE_CODEX_MEMORY_TEST_ROOT */
   opencodeData: string
   memories: string
+  memoryVersion: "v1" | "v2"
   password: string
   pluginFileUrl: string
   env: NodeJS.ProcessEnv
@@ -182,6 +183,7 @@ export type CreateSandboxOpts = {
   model?: string
   smallModel?: string
   pluginOptions?: Record<string, unknown>
+  memoryVersion?: "v1" | "v2"
   /** Skip writing plugin into config (contract checks that only need bare host). */
   bare?: boolean
 }
@@ -195,7 +197,8 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   const stateHome = path.join(root, "state")
   const project = path.join(root, "project")
   const opencodeData = path.join(dataHome, "opencode")
-  const memories = path.join(opencodeData, "memories")
+  const memoryVersion = opts.memoryVersion ?? "v1"
+  const memories = path.join(opencodeData, memoryVersion === "v2" ? "memories_v2" : "memories")
   const password = `ocm-${process.pid}-${Date.now().toString(36)}`
 
   fs.mkdirSync(memories, { recursive: true })
@@ -215,6 +218,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     test: true,
     min_rollout_idle_hours: 0.01,
     max_rollouts_per_startup: 8,
+    ...(memoryVersion === "v2" ? { version: "v2" } : {}),
     ...(opts.pluginOptions ?? {}),
   }
 
@@ -300,6 +304,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     project,
     opencodeData,
     memories,
+    memoryVersion,
     password,
     pluginFileUrl,
     env,
@@ -693,8 +698,8 @@ export function openSandboxDb(dbPath: string): Database {
   return new Database(dbPath, { readonly: false, create: false, strict: false })
 }
 
-export function memoryDbPath(sandbox: Sandbox): string {
-  return path.join(sandbox.opencodeData, "memory.db")
+export function memoryDbPath(sandbox: Sandbox, version: "v1" | "v2" = sandbox.memoryVersion): string {
+  return path.join(sandbox.opencodeData, version === "v2" ? "memory_v2.db" : "memory.db")
 }
 
 export function opencodeDbPath(sandbox: Sandbox): string {
@@ -779,7 +784,7 @@ export function clearPhase2Job(sandbox: Sandbox): void {
   sqlRun(
     dbPath,
     `DELETE FROM memory_jobs
-     WHERE kind = 'memory_consolidate_global' AND job_key = 'global'`,
+     WHERE kind = 'memory_consolidate_global' AND job_key = 'global' AND status != 'running'`,
   )
 }
 

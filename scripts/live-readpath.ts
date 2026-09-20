@@ -25,10 +25,16 @@ import {
 
 async function main() {
   const models = requireModels()
+  const memoryVersion = process.argv.includes("--version") && process.argv[process.argv.indexOf("--version") + 1] === "v2"
+    ? "v2"
+    : process.env.OPENCODE_LIVE_MEMORY_VERSION === "v2"
+      ? "v2"
+      : "v1"
   const sandbox = createSandbox({
     keep: process.argv.includes("--keep"),
     model: models.model,
     smallModel: models.smallModel,
+    memoryVersion,
   })
   try {
     requireAuth()
@@ -39,6 +45,7 @@ async function main() {
     log("read", `sandbox ${sandbox.root}`)
     log("read", `plugin ${sandbox.pluginFileUrl}`)
     log("read", `model ${models.model}`)
+    log("read", `memory version ${sandbox.memoryVersion} root ${sandbox.memories}`)
 
     const out = runOpencode(
       sandbox,

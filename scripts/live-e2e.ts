@@ -79,6 +79,8 @@ type Args = {
   keep: boolean
   skipReset: boolean
   skipCitation: boolean
+  memoryVersion: "v1" | "v2"
+  dualWrite: boolean
   phase1TimeoutMs: number
   phase2TimeoutMs: number
 }
@@ -88,6 +90,13 @@ function parseArgs(argv: string[]): Args {
     keep: argv.includes("--keep") || process.env.OPENCODE_LIVE_KEEP === "1",
     skipReset: argv.includes("--skip-reset"),
     skipCitation: argv.includes("--skip-citation"),
+    dualWrite: argv.includes("--dual-write"),
+    memoryVersion:
+      argv.includes("--version") && argv[argv.indexOf("--version") + 1] === "v2"
+        ? "v2"
+        : process.env.OPENCODE_LIVE_MEMORY_VERSION === "v2"
+          ? "v2"
+          : "v1",
     phase1TimeoutMs: numEnv("OPENCODE_LIVE_PHASE1_TIMEOUT_MS", 12 * 60_000),
     phase2TimeoutMs: numEnv("OPENCODE_LIVE_PHASE2_TIMEOUT_MS", 20 * 60_000),
   }
@@ -109,10 +118,11 @@ function stage1Rows(sandbox: Sandbox) {
   return sqlAll<{
     session_id: string
     raw_memory: string
+    rollout_summary: string
     usage_count: number
   }>(
     memoryDbPath(sandbox),
-    `SELECT session_id, raw_memory, usage_count FROM memory_stage1_outputs ORDER BY source_updated_at DESC`,
+    `SELECT session_id, raw_memory, rollout_summary, usage_count FROM memory_stage1_outputs ORDER BY source_updated_at DESC`,
   )
 }
 
@@ -142,14 +152,22 @@ async function main() {
     keep: args.keep,
     model: models.model,
     smallModel: models.smallModel,
+    memoryVersion: args.memoryVersion,
     // Extraction/consolidation quality is the point of this suite — pin both
     // to the main model so a tiny small_model cannot no-op every stage1 job.
     pluginOptions: {
       extract_model: models.model,
       consolidation_model: models.model,
+      dual_write: args.dualWrite,
     },
   })
   let serve: ServeHandle | null = null
+  const shadow: Sandbox = {
+    ...sandbox,
+    memoryVersion: sandbox.memoryVersion === "v1" ? "v2" : "v1",
+    memories: path.join(sandbox.opencodeData, sandbox.memoryVersion === "v1" ? "memories_v2" : "memories"),
+  }
+  const targets = args.dualWrite ? [sandbox, shadow] : [sandbox]
   let failures = 0
   const check = (ok: boolean, step: string, msg: string) => {
     if (ok) log(step, `OK — ${msg}`)
@@ -164,6 +182,7 @@ async function main() {
     writeSummary(sandbox, `${MARKER_LINE}\n`)
     log("e2e", `sandbox ${sandbox.root}`)
     log("e2e", `plugin ${sandbox.pluginFileUrl}`)
+    log("e2e", `memory version ${sandbox.memoryVersion} root ${sandbox.memories}`)
 
     // ----- Step 1: read path -----
     serve = await startServe(sandbox)
@@ -221,7 +240,7 @@ async function main() {
     const idleMs = 45_000
     log("idle", `waiting ${idleMs}ms for min_rollout_idle_hours=0.01`)
     await sleep(idleMs)
-    clearPhase2Job(sandbox)
+    for (const target of targets) clearPhase2Job(target)
     log("idle", "triggering idle via short session")
     await triggerIdle(serve, sandbox)
     log("idle", `memory.db ${fs.existsSync(memoryDbPath(sandbox)) ? "present" : "missing"}`)
@@ -264,17 +283,9 @@ async function main() {
       throw new Error(`phase1: ${e instanceof Error ? e.message : String(e)}`)
     }
 
-    const rows = stage1Rows(sandbox)
+    let rows = stage1Rows(sandbox)
     log("phase1", `${rows.length} stage1 row(s)`)
-    check(rows.length >= 1, "phase1", `at least one raw_memory row (got ${rows.length})`)
-
-    const blob = rows.map((r) => r.raw_memory).join("\n")
-    const factHits = FACTS.filter((f) => blob.includes(f.fact.split(":")[0]!))
-    check(
-      factHits.length >= 1,
-      "phase1",
-      `raw_memory mentions work facts (${factHits.length}/${FACTS.length} markers)`,
-    )
+    check(rows.length >= 1, "phase1", `at least one stage1 row (got ${rows.length})`)
 
     // Extra triggers if still under-filled (max_rollouts already 8, but rate gate is 30s).
     if (rows.length < 2) {
@@ -282,6 +293,32 @@ async function main() {
       await sleep(35_000)
       await triggerIdle(serve, sandbox)
       await sleep(15_000)
+      rows = stage1Rows(sandbox)
+      log("phase1", `${rows.length} stage1 row(s) after extra trigger`)
+    }
+
+    const blob = rows.map((r) => `${r.raw_memory}\n${r.rollout_summary}`).join("\n")
+    const factHits = FACTS.filter((f) => blob.includes(f.fact.split(":")[0]!))
+    if (sandbox.memoryVersion === "v2") {
+      const paraphrased = /csv|result type|readme|typed rows|two-phase/i.test(blob)
+      check(
+        rows.some((r) => (r.rollout_summary ?? "").trim().length > 0),
+        "phase1",
+        "v2 rows have non-empty rollout_summary",
+      )
+      check(
+        factHits.length >= 1 || paraphrased,
+        "phase1",
+        factHits.length >= 1
+          ? `stage1 summaries mention work facts (${factHits.length}/${FACTS.length} markers)`
+          : `stage1 summaries paraphrase work facts (markers=${factHits.length}; v2 may omit E2E_FACT_* ids)`,
+      )
+    } else {
+      check(
+        factHits.length >= 1,
+        "phase1",
+        `stage1 output mentions work facts (${factHits.length}/${FACTS.length} markers)`,
+      )
     }
 
     // ----- Step 5: Phase 2 -----
@@ -302,7 +339,8 @@ async function main() {
           if (job?.status === "failed") {
             throw new Error(`phase2 failed: ${job.last_error ?? "unknown"}`)
           }
-          if (job?.status === "done") return true
+          if (job?.status === "done" && sqlAll<{ max_thread_count: number }>(memoryDbPath(sandbox),
+            "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count > 0) return true
 
           const mem = path.join(sandbox.memories, "MEMORY.md")
           const sum = path.join(sandbox.memories, "memory_summary.md")
@@ -310,7 +348,7 @@ async function main() {
           const hasRollouts =
             fs.existsSync(rollouts) && fs.readdirSync(rollouts).some((f) => f.endsWith(".md"))
           // Progress only — keep waiting for job done so reset is not refused.
-          if (!loggedArtifacts && fs.existsSync(mem) && hasRollouts) {
+          if (!loggedArtifacts && sandbox.memoryVersion === "v1" && fs.existsSync(mem) && hasRollouts) {
             loggedArtifacts = true
             log("phase2", "artifacts present; waiting for job status=done")
           } else if (!loggedArtifacts && fs.existsSync(sum)) {
@@ -342,11 +380,23 @@ async function main() {
     const memoryMd = path.join(sandbox.memories, "MEMORY.md")
     const summaryMd = path.join(sandbox.memories, "memory_summary.md")
     const rollouts = path.join(sandbox.memories, "rollout_summaries")
-    check(fs.existsSync(memoryMd), "phase2", "MEMORY.md exists")
+    if (sandbox.memoryVersion === "v2") {
+      check(!fs.existsSync(memoryMd), "phase2", "v2 has no MEMORY.md")
+      check(!fs.existsSync(path.join(sandbox.memories, "raw_memories.md")), "phase2", "v2 has no raw_memories.md")
+    } else {
+      check(fs.existsSync(memoryMd), "phase2", "MEMORY.md exists")
+    }
     check(fs.existsSync(summaryMd), "phase2", "memory_summary.md exists")
     const summaryText = fs.existsSync(summaryMd) ? fs.readFileSync(summaryMd, "utf8") : ""
     check(summaryText.length > 0, "phase2", `memory_summary non-empty (${summaryText.length} chars)`)
     check(summaryText.length < 20_000, "phase2", "memory_summary under 20k chars")
+    if (sandbox.memoryVersion === "v2") {
+      check(summaryText.split(/\r?\n/, 1)[0] === "v1", "phase2", "v2 summary starts with v1")
+      for (const heading of ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"]) {
+        check(summaryText.split(/\r?\n/).some((line) => line.trim() === heading), "phase2", `v2 heading ${heading}`)
+      }
+      check(Buffer.byteLength(summaryText, "utf8") < 10_000, "phase2", "v2 summary under 10k bytes")
+    }
     const rolloutFiles = fs.existsSync(rollouts)
       ? fs.readdirSync(rollouts).filter((f) => f.endsWith(".md"))
       : []
@@ -379,6 +429,23 @@ async function main() {
     }
 
     // ----- Step 7: closed loop -----
+    if (args.dualWrite) {
+      await waitFor("shadow pipeline consolidated", () => {
+        const job = phase2Job(shadow)
+        if (job?.status === "failed") throw new Error(`shadow phase2 failed: ${job.last_error}`)
+        const count = sqlAll<{ max_thread_count: number }>(memoryDbPath(shadow),
+          "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count ?? 0
+        return job?.status === "done" && count > 0
+      }, { timeoutMs: args.phase2TimeoutMs, intervalMs: 3000 })
+      const shadowRows = stage1Rows(shadow).filter((row) => workIds.includes(row.session_id))
+      check(shadowRows.length > 0, "dual", "same work sessions learned in shadow pipeline")
+      if (shadow.memoryVersion === "v2") {
+        check(shadowRows.every((row) => row.raw_memory === ""), "dual", "V2 extraction remains summary-only")
+        check(!fs.existsSync(path.join(shadow.memories, "MEMORY.md")), "dual", "V2 creates no V1 handbook")
+      }
+      const shadowNotes = path.join(shadow.memories, "extensions/ad_hoc/notes")
+      check(!fs.existsSync(shadowNotes) || fs.readdirSync(shadowNotes).length === 0, "dual", "shadow learning came from extraction")
+    }
     {
       const sid = await createSession(serve, sandbox, "e2e-closed-loop")
       const text = await promptSession(
@@ -432,6 +499,37 @@ async function main() {
       check(saved, "remember", "explicit remember request persisted a durable note")
     }
 
+    if (args.dualWrite && sandbox.memoryVersion === "v1") {
+      // Restart the same isolated host with only the read-version changed.
+      // No copying/conversion of memories: V2 must already contain its learning.
+      await serve.stop()
+      const configFile = path.join(sandbox.configHome, "opencode/opencode.json")
+      const config = JSON.parse(fs.readFileSync(configFile, "utf8"))
+      config.plugin[0][1].version = "v2"
+      config.plugins[0].options.version = "v2"
+      fs.writeFileSync(configFile, JSON.stringify(config, null, 2))
+      serve = await startServe(sandbox)
+      const oldId = workIds[0]!
+      const freshId = await createSession(serve, sandbox, "e2e-v2-cutover")
+      const reply = await promptSession(serve, sandbox, freshId,
+        "What did we work on in previous sessions in this project? Use memory tools to check a relevant recap, recall a specific implementation decision, and cite the recap you read.",
+        { timeoutMs: 180_000 })
+      check(/000742|leading zero|LEDGER_NEGATIVE_AMOUNT|bun test/i.test(reply), "cutover", "fresh session recalls learned V2 implementation decisions")
+      const meta = path.join(sandbox.opencodeData, "memory.db")
+      const versions = sqlAll<{ session_id: string; version: string }>(meta,
+        "SELECT session_id, version FROM memory_session_versions WHERE session_id IN (?, ?)", [oldId, freshId])
+      check(versions.some((row) => row.session_id === oldId && row.version === "v1"), "cutover", "existing session retains V1 namespace")
+      check(versions.some((row) => row.session_id === freshId && row.version === "v2"), "cutover", "new session reads V2 namespace")
+      check(stage1Rows(shadow).some((row) => row.usage_count > 0), "cutover", "V2 recap citation credited to V2")
+      if (serve.v2) {
+        const status = await api(serve, sandbox, "POST", "/api/rpc/opencode-codex-memory/status", {
+          input: { sessionID: freshId, minConsolidatedThreads: 1 },
+        }, { "location[directory]": sandbox.project })
+        const state = (status.json as { output?: { v2Ready?: boolean; version?: string } })?.output
+        check(state?.v2Ready === true && state.version === "v2", "cutover", "readiness RPC confirms successfully warmed V2")
+      }
+    }
+
     // ----- Step 9: reset -----
     if (!args.skipReset) {
       // Belt-and-suspenders: wait out any late consolidator so memory_reset
@@ -439,8 +537,7 @@ async function main() {
       await waitFor(
         "phase2 idle before reset",
         () => {
-          const job = phase2Job(sandbox)
-          return !job || job.status === "done" || job.status === "failed" || job.status === "pending"
+          return targets.every((target) => phase2Job(target)?.status !== "running")
         },
         { timeoutMs: 120_000, intervalMs: 2000 },
       ).catch(() => {
@@ -476,6 +573,13 @@ async function main() {
       check(stage1Left === 0, "reset", `stage1_outputs empty (count=${stage1Left})`)
       if (left.length > 0 || stage1Left > 0) {
         console.error("reset reply:", resetReply.slice(0, 800))
+      }
+      if (args.dualWrite) {
+        check(stage1Rows(shadow).length === 0, "reset", "shadow stage1 outputs empty")
+        check(!fs.existsSync(shadow.memories) || fs.readdirSync(shadow.memories).length === 0, "reset", "shadow workspace empty")
+        const progress = sqlAll<{ max_thread_count: number }>(memoryDbPath(shadow),
+          "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count
+        check(progress === 0, "reset", "shadow readiness progress reset")
       }
     } else {
       log("reset", "skipped (--skip-reset)")
