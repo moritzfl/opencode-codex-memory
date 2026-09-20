@@ -26,6 +26,7 @@
  */
 import type { Plugin } from "@opencode/plugin"
 import { memoryRoot } from "../paths.js"
+import { consolidationPermissions } from "./agents.js"
 import { invalidateOwnService, lastServiceFailure, ownServiceClient, type V2ServiceClient } from "./service.js"
 
 export type V2Context = Plugin.Context
@@ -468,6 +469,9 @@ export function buildV1ClientShim(): unknown {
         const res = await (ctx().session as any).create({
           ...(opts?.body?.title ? { title: opts.body.title } : {}),
           ...(opts?.body?.metadata ? { metadata: opts.body.metadata } : {}),
+          ...(opts?.body?.title === "codex-memory-consolidate"
+            ? { permissions: consolidationPermissions(memoryRoot()) }
+            : {}),
           location: { directory: opts?.query?.directory ?? memoryRoot() },
         })
         return { data: { id: und(res)?.id } }
@@ -479,7 +483,7 @@ export function buildV1ClientShim(): unknown {
       try {
         return await v2promptWithWait(opts.path.id, opts.body, opts.signal)
       } catch (e) {
-        return { error: e }
+        return { error: e instanceof Error ? { message: e.message } : e }
       }
     },
     messages: async (opts: { path: { id: string } }) => {

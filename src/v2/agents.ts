@@ -16,16 +16,17 @@
 import path from "path"
 import { memoryRoot } from "../paths.js"
 import { pluginOptions } from "../options.js"
+import { writeMemoryVersions } from "../memory-version.js"
 import { recordAgentConfig } from "../agent-health.js"
 
 export const MEMORIZE_AGENT_ID = "memorize"
 export const MEMORIZE_EXTRACT_AGENT_ID = "memorize-extract"
 
 export const MEMORIZE_SYSTEM =
-  "You are a memory consolidation agent. Read the workspace diff file and update MEMORY.md, memory_summary.md, and skills/ under the memory workspace only. Do not read or edit project source files outside that memory root. Keep memory_summary.md under 10000 chars (2500 tokens). Prune stale entries. Do not access the network."
+  "You are a memory consolidation agent. Follow the supplied version-specific consolidation contract and update only its requested artifacts under the supplied memory workspace. Do not read or edit project source files or a different memory workspace. Keep memory_summary.md under 10000 bytes. Prune stale entries. Do not access the network."
 
 export const MEMORIZE_EXTRACT_SYSTEM =
-  "You are a memory extraction agent. The session transcript is provided inline in the prompt. Extract raw_memory, rollout_summary, and rollout_slug as JSON. Exclude AGENTS.md/instruction content. Redact secrets."
+  "You are a memory extraction agent. The session transcript is provided inline in the prompt. Follow the supplied version-specific JSON schema. Exclude AGENTS.md/instruction content. Redact secrets."
 
 export const MEMORIZE_DESCRIPTION = "Memory consolidation agent (opencode-codex-memory)"
 export const MEMORIZE_EXTRACT_DESCRIPTION = "Memory extraction agent (opencode-codex-memory)"
@@ -39,22 +40,33 @@ export interface V2AgentDefinition {
 }
 
 /** V2-native memorize definition (V2 action names: edit covers write/patch). */
-export function buildMemorizeAgent(): V2AgentDefinition {  return {
+export function buildMemorizeAgent(): V2AgentDefinition {
+  return {
     description: MEMORIZE_DESCRIPTION,
     mode: "subagent",
     system: MEMORIZE_SYSTEM,
     permissions: [
       { action: "*", resource: "*", effect: "deny" },
-      { action: "read", resource: path.join(memoryRoot(), "*"), effect: "allow" },
-      { action: "edit", resource: path.join(memoryRoot(), "*"), effect: "allow" },
-      { action: "glob", resource: path.join(memoryRoot(), "*"), effect: "allow" },
-      { action: "grep", resource: path.join(memoryRoot(), "*"), effect: "allow" },
       // Memories live outside every project: without this grant the wildcard
       // deny blocks consolidation from touching the memory workspace (same
       // role as external_directory in the V1 definition).
-      { action: "external_directory", resource: path.join(memoryRoot(), "*"), effect: "allow" },
+      ...writeMemoryVersions().flatMap((version) =>
+        ["read", "edit", "glob", "grep", "external_directory"].map((action) => ({
+          action, resource: path.join(memoryRoot(version), "*"), effect: "allow" as const,
+        })),
+      ),
     ],
   }
+}
+
+/** Session rules run after agent rules: a concurrent helper gets one root only. */
+export function consolidationPermissions(root: string): V2AgentDefinition["permissions"] {
+  return [
+    { action: "*", resource: "*", effect: "deny" },
+    ...["read", "edit", "glob", "grep", "external_directory"].map((action) => ({
+      action, resource: path.join(root, "*"), effect: "allow" as const,
+    })),
+  ]
 }
 
 /**

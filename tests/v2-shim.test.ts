@@ -23,6 +23,8 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { catalogVariantKeys } from "../src/reasoning-variant.js"
+import { withMemoryVersion } from "../src/memory-version.js"
+import { memoryRoot } from "../src/paths.js"
 
 const ASSISTANT_TOOL_MSG = {
   id: "msg_tool1",
@@ -195,6 +197,22 @@ describe("catalog/mcp adapters", () => {
 })
 
 describe("V1 client shim", () => {
+  it("restricts concurrent consolidators to their own versioned workspace", async () => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx)
+    const client = buildV1ClientShim() as any
+    await Promise.all((["v1", "v2"] as const).map((version) => withMemoryVersion(version, () =>
+      client.session.create({ body: { title: "codex-memory-consolidate", metadata: { version } } }),
+    )))
+    const rules = calls.filter((call) => call.name === "create").map((call) => call.args as any)
+    expect(rules).toHaveLength(2)
+    for (const version of ["v1", "v2"] as const) {
+      const permissions = rules.find((row) => row.metadata.version === version).permissions
+      expect(permissions[0]).toEqual({ action: "*", resource: "*", effect: "deny" })
+      expect(permissions.slice(1).every((rule: any) => rule.resource === path.join(memoryRoot(version), "*"))).toBe(true)
+    }
+  })
+
   it("accepts only the registered service owned by this host process", async () => {
     const calls: string[] = []
     const endpoint = { url: "http://127.0.0.1:4096", auth: { type: "basic" as const, username: "opencode", password: "secret" } }
@@ -574,7 +592,7 @@ describe("V1 client shim", () => {
       body: { agent: "memorize", model: { providerID: "acme", modelID: "m1" }, parts: [{ type: "text", text: "DO" }] },
     })
     expect(calls.map((c) => c.name)).toEqual(["switchAgent", "switchModel", "prompt", "wait"])
-    expect((calls[2].args as any).text).toBe("DO")
+    expect((calls.find((call) => call.name === "prompt")!.args as any).text).toBe("DO")
   })
 
   it("releases sessionless extraction handles without calling host session APIs", async () => {

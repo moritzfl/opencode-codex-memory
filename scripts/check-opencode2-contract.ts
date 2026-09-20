@@ -107,6 +107,31 @@ async function main(): Promise<void> {
     const response = await api(serve, sandbox, "GET", "/openapi.json")
     if (response.status !== 200) throw new Error(`OpenAPI HTTP ${response.status}`)
     doc = response.json as typeof doc
+    // Verify the create-time sandbox on the real host. Some hosts expose no
+    // permission.rules method despite older SDK/docs advertising it.
+    const { consolidationPermissions } = await import("../dist/src/v2/agents.js")
+    for (const version of ["v1", "v2"] as const) {
+      const own = path.join(sandbox.opencodeData, version === "v1" ? "memories" : "memories_v2")
+      const other = path.join(sandbox.opencodeData, version === "v1" ? "memories_v2" : "memories")
+      const created = await api(serve, sandbox, "POST", "/api/session", {
+        title: `contract-memory-${version}`,
+        location: { directory: sandbox.project },
+        permissions: consolidationPermissions(own),
+      })
+      const id = (created.json as { data?: { id?: string } })?.data?.id
+      if (!id) throw new Error(`sandbox session create HTTP ${created.status}`)
+      for (const [action, resource, expected] of [
+        ["edit", path.join(own, "memory_summary.md"), "allow"],
+        ["edit", path.join(other, "memory_summary.md"), "deny"],
+        ["read", path.join(other, "memory_summary.md"), "deny"],
+        ["edit", path.join(sandbox.project, "source.ts"), "deny"],
+        ["shell", "echo forbidden", "deny"],
+      ]) {
+        const checked = await api(serve, sandbox, "POST", `/api/session/${id}/permission`, { action, resources: [resource] })
+        const effect = (checked.json as { data?: { effect?: string } })?.data?.effect
+        note(effect === expected, `${version} helper ${action}: ${expected} ${resource}`)
+      }
+    }
   } catch (e) {
     throw new Error(`could not fetch /openapi.json: ${e instanceof Error ? e.message : String(e)}`)
   } finally {

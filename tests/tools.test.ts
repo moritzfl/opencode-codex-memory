@@ -402,6 +402,52 @@ describe("memory_reset", () => {
     await running
     expect(phase2.isPhase2InFlight()).toBe(false)
   })
+
+  it("wipes both version roots and job DBs but keeps session modes", async () => {
+    const { MemoryStore } = require("../src/store.js")
+    const { closeDb } = require("../src/db.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const { memory_reset } = require("../tools/control.js")
+    const v1Root = path.join(TEST_ROOT, "memories")
+    const v2Root = path.join(TEST_ROOT, "memories_v2")
+    fs.writeFileSync(path.join(v1Root, "keep-me.md"), "v1")
+    fs.mkdirSync(v2Root, { recursive: true })
+    fs.writeFileSync(path.join(v2Root, "keep-me.md"), "v2")
+
+    const v1 = new MemoryStore()
+    v1.setMemoryMode("ses_keep", "disabled")
+    v1.claimStage1Jobs([{ id: "ses_v1", updated_at: 1000 }])
+    applyPluginOptions({ version: "v2" })
+    closeDb()
+    const v2 = new MemoryStore()
+    v2.claimStage1Jobs([{ id: "ses_v2", updated_at: 1000 }])
+    applyPluginOptions({ version: "v1" })
+    closeDb()
+
+    try {
+      const r = await memory_reset.execute({ confirm: true }, CTX)
+      expect(r.output).toContain("Memory reset complete")
+      expect(fs.existsSync(path.join(v1Root, "keep-me.md"))).toBe(false)
+      expect(fs.existsSync(path.join(v2Root, "keep-me.md"))).toBe(false)
+      expect(new MemoryStore().getMemoryMode("ses_keep")).toBe("disabled")
+      expect(new MemoryStore().stage1Outputs()).toEqual([])
+      applyPluginOptions({ version: "v2" })
+      closeDb()
+      expect(new MemoryStore().stage1Outputs()).toEqual([])
+    } finally {
+      applyPluginOptions({})
+      closeDb()
+    }
+  })
+
+  it("refuses reset when memories_v2 is a symlink", async () => {
+    const { memory_reset } = require("../tools/control.js")
+    const target = path.join(TEST_ROOT, "elsewhere")
+    fs.mkdirSync(target, { recursive: true })
+    fs.symlinkSync(target, path.join(TEST_ROOT, "memories_v2"))
+    const r = await memory_reset.execute({ confirm: true }, CTX)
+    expect(r.output).toContain("Reset refused: memory root is a symlink")
+  })
 })
 
 describe("memory_read paging", () => {
@@ -594,6 +640,9 @@ describe("memory_inspect", () => {
     const r = await memory_inspect.execute({}, CTX)
     expect(r.output).toContain("Effective options:")
     expect(r.output).toContain("generate_memories: true")
+    expect(r.output).toContain("version: v1")
+    expect(r.output).toContain("memory_root:")
+    expect(r.output).toContain("jobs_db:")
     expect(r.output).toContain("codex_interop: off")
     expect(r.output).toContain("claude_import: off")
     expect(r.output).toContain(`home: ${TEST_ROOT} (test root)`)
@@ -677,6 +726,7 @@ describe("memory_inspect", () => {
     expect(r.output).toContain("claude_import.projects must be an array of strings")
     expect(pluginOptions.generate_memories).toBe(true)
     expect(pluginOptions.max_raw_memories_for_consolidation).toBe(256)
+    expect(pluginOptions.version).toBe("v1")
     expect(pluginOptions.codex_interop.import).toBe(false)
     expect(pluginOptions.claude_import.enabled).toBe(false)
   })
@@ -694,6 +744,29 @@ describe("memory_inspect", () => {
     applyPluginOptions({ min_rollout_idle_hours: 6 })
     expect(pluginOptions.min_rollout_idle_hours).toBe(6)
     expect(pluginOptions.test).toBe(false)
+  })
+
+  it("accepts version v2 and rejects unknown versions", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const { pluginOptions, resetConfigWarningsForTest } = require("../src/options.js")
+    try {
+      applyPluginOptions({ version: "v2" })
+      const r = await memory_inspect.execute({}, CTX)
+      expect(pluginOptions.version).toBe("v2")
+      expect(r.output).toContain("version: v2")
+      expect(r.metadata.effective_options.version).toBe("v2")
+      expect(r.output).toContain("config_warnings: none")
+
+      applyPluginOptions({ version: "v3" })
+      const r2 = await memory_inspect.execute({}, CTX)
+      expect(pluginOptions.version).toBe("v1")
+      expect(r2.output).toContain('version must be "v1" or "v2"; using default v1')
+      expect(r2.metadata.effective_options.version).toBe("v1")
+    } finally {
+      resetConfigWarningsForTest()
+      applyPluginOptions({})
+    }
   })
 
   it("reports the resolved codex memories root when interop is enabled", async () => {

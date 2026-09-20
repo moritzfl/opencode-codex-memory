@@ -21,6 +21,13 @@ export type MemoryStatusActivity = (typeof MEMORY_STATUS_ACTIVITIES)[number]
 
 export interface MemoryStatus {
   activity: MemoryStatusActivity
+  version: "v1" | "v2"
+  sessionVersion: "v1" | "v2"
+  dualWrite: boolean
+  v2ConsolidatedThreads: number
+  v2Ready: boolean
+  minConsolidatedThreads: number
+  pipelines: { version: "v1" | "v2"; stage1Count: number; extracting: number; phase2Status: string | null; lastError: string | null }[]
   useMemories: boolean
   generateMemories: boolean
   extractModel: string | null
@@ -60,14 +67,38 @@ export const MemoryStatusRpc = {
     status: {
       input: {
         type: "object",
-        properties: { sessionID: { type: "string" } },
+        properties: {
+          sessionID: { type: "string" },
+          minConsolidatedThreads: { type: "integer", minimum: 1, maximum: 4096 },
+        },
         additionalProperties: false,
       },
       output: {
         type: "object",
         properties: {
           activity: { type: "string", enum: [...MEMORY_STATUS_ACTIVITIES] },
+          version: { type: "string", enum: ["v1", "v2"] },
+          sessionVersion: { type: "string", enum: ["v1", "v2"] },
+          dualWrite: { type: "boolean" },
+          v2ConsolidatedThreads: { type: "integer", minimum: 0 },
+          v2Ready: { type: "boolean" },
+          minConsolidatedThreads: { type: "integer", minimum: 1, maximum: 4096 },
           useMemories: { type: "boolean" },
+          pipelines: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                version: { type: "string", enum: ["v1", "v2"] },
+                stage1Count: { type: "integer", minimum: 0 },
+                extracting: { type: "integer", minimum: 0 },
+                phase2Status: { type: ["string", "null"] },
+                lastError: { type: ["string", "null"] },
+              },
+              required: ["version", "stage1Count", "extracting", "phase2Status", "lastError"],
+              additionalProperties: false,
+            },
+          },
           generateMemories: { type: "boolean" },
           extractModel: { type: ["string", "null"] },
           consolidationModel: { type: ["string", "null"] },
@@ -81,6 +112,7 @@ export const MemoryStatusRpc = {
         },
         required: [
           "activity",
+          "version", "sessionVersion", "dualWrite", "v2ConsolidatedThreads", "v2Ready", "minConsolidatedThreads", "pipelines",
           "useMemories",
           "generateMemories",
           "extractModel",
@@ -151,9 +183,21 @@ export function isMemoryStatus(value: unknown): value is MemoryStatus {
   ) {
     return false
   }
-  for (const key of ["useMemories", "generateMemories", "codexImport"] as const) {
+  for (const key of ["useMemories", "generateMemories", "codexImport", "dualWrite", "v2Ready"] as const) {
     if (typeof value[key] !== "boolean") return false
   }
+  for (const key of ["version", "sessionVersion"] as const) {
+    if (value[key] !== "v1" && value[key] !== "v2") return false
+  }
+  if (!Number.isInteger(value.v2ConsolidatedThreads) || (value.v2ConsolidatedThreads as number) < 0) return false
+  if (!Number.isInteger(value.minConsolidatedThreads) || (value.minConsolidatedThreads as number) < 1 || (value.minConsolidatedThreads as number) > 4096) return false
+  if (!Array.isArray(value.pipelines) || !value.pipelines.every((pipeline) =>
+    isRecord(pipeline) && (pipeline.version === "v1" || pipeline.version === "v2")
+    && Number.isInteger(pipeline.stage1Count) && (pipeline.stage1Count as number) >= 0
+    && Number.isInteger(pipeline.extracting) && (pipeline.extracting as number) >= 0
+    && (pipeline.phase2Status === null || typeof pipeline.phase2Status === "string")
+    && (pipeline.lastError === null || typeof pipeline.lastError === "string")
+  )) return false
   for (const key of ["extractModel", "consolidationModel", "lastSuccessAt", "retryAt"] as const) {
     const v = value[key]
     if (v !== null && typeof v !== (key === "extractModel" || key === "consolidationModel" ? "string" : "number")) {

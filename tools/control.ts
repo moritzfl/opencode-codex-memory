@@ -1,8 +1,8 @@
 import fs from "fs"
 import path from "path"
 import { tool } from "@opencode-ai/plugin"
-import { memoryRoot, memorySummaryPath, dataRoot, memoryHomeSource } from "../src/paths.js"
-import { MemoryStore, PHASE2_COOLDOWN_MS } from "../src/store.js"
+import { allMemoryRoots, memoryDbPath, memoryRoot, memorySummaryPath, sessionMetaDbPath, dataRoot, memoryHomeSource } from "../src/paths.js"
+import { clearAllVersionMemoryData, MemoryStore, PHASE2_COOLDOWN_MS } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
 import { assertMemoryRootSafe, readRegularFileNoFollow } from "../src/path-guard.js"
@@ -18,14 +18,19 @@ import {
 import { isPluginShuttingDown } from "../src/lifecycle.js"
 import { getAgentHealth } from "../src/agent-health.js"
 import { activeProviderCapacityBackoffs } from "../src/ratelimit.js"
+import { readMigrationStatus, memoryPipelineSnapshots } from "../src/migration.js"
+import { peekSessionMemoryVersion } from "../src/session-version.js"
+import { withMemoryVersion, writeMemoryVersions } from "../src/memory-version.js"
 
 function isSymlinkedRoot(): boolean {
-  try {
-    assertMemoryRootSafe()
-    return false
-  } catch {
-    return true
+  for (const root of allMemoryRoots()) {
+    try {
+      if (fs.lstatSync(root).isSymbolicLink()) return true
+    } catch {
+      // Missing root is fine.
+    }
   }
+  return false
 }
 
 // Mirrors codex clear_memory_root_contents: deletes EVERY entry including
@@ -34,8 +39,7 @@ function isSymlinkedRoot(): boolean {
 // every remove failure up, and a swallowed error here would report a
 // successful reset while secrets/memories survive on disk. lstat semantics:
 // a symlinked entry is unlinked itself, never followed.
-function wipeMemoriesDir(): void {
-  const root = memoryRoot()
+function wipeMemoryRoot(root: string): void {
   if (!fs.existsSync(root)) return
   for (const entry of fs.readdirSync(root)) {
     const abs = path.join(root, entry)
@@ -58,6 +62,10 @@ function homeSourceLabel(source: ReturnType<typeof memoryHomeSource>): string {
   }
 }
 
+function wipeMemoriesDir(): void {
+  for (const root of allMemoryRoots()) wipeMemoryRoot(root)
+}
+
 /**
  * Renders the effective (post-parse, post-clamp) plugin options plus any
  * problems recorded while applying them. The plugin never hard-fails on bad
@@ -72,6 +80,11 @@ function renderEffectiveConfig(): string[] {
     "Effective options:",
     `  generate_memories: ${o.generate_memories}`,
     `  use_memories: ${o.use_memories}`,
+    `  version: ${o.version}`,
+    `  dual_write: ${o.dual_write}`,
+    `  memory_root: ${memoryRoot()}`,
+    `  jobs_db: ${memoryDbPath()}`,
+    `  session_meta_db: ${sessionMetaDbPath()}`,
     `  dedicated_tools: ${o.dedicated_tools}`,
     `  disable_on_external_context: ${o.disable_on_external_context}`,
     `  extract_model: ${o.extract_model ?? "(unset — opencode small_model, else agent/provider default)"}`,
@@ -87,8 +100,10 @@ function renderEffectiveConfig(): string[] {
   if (!ci.import && !ci.export) {
     lines.push("  codex_interop: off")
   } else {
-    const resolved = resolveCodexInterop(ci)
-    if (!resolved) {
+    const resolved = withMemoryVersion("v1", () => resolveCodexInterop(ci))
+    if (!writeMemoryVersions().includes("v1")) {
+      lines.push("  codex_interop: disabled (handbook exchange requires the v1 writer)")
+    } else if (!resolved) {
       lines.push(
         `  codex_interop: MISCONFIGURED — the Codex memory root overlaps the plugin memory root (${memoryRoot()}); interop is disabled`,
       )
@@ -99,7 +114,7 @@ function renderEffectiveConfig(): string[] {
         `    codex memories: ${resolved.codexMemoryRoot}${reachable ? "" : " (not found yet — nothing is imported/exported until Codex's memory feature creates it)"}`,
       )
       if (reachable) {
-        const mt = codexInteropMtimes(resolved.codexMemoryRoot)
+        const mt = withMemoryVersion("v1", () => codexInteropMtimes(resolved.codexMemoryRoot))
         const fmt = (ms: number | null) => (ms == null ? "none" : new Date(ms).toISOString())
         lines.push(
           `    last import mtimes: MEMORY.md=${fmt(mt.importMemoryMd)} summary=${fmt(mt.importSummary)}`,
@@ -183,8 +198,8 @@ function renderAgentHealth(): string[] {
 export const memory_reset = tool({
   description:
     "Reset all persistent memory. Wipes the plugin's extracted memories and jobs tables and the entire " +
-    "contents of the memories directory (including git history). Per-session memory modes are preserved, " +
-    "so disabled/polluted sessions stay excluded. Refuses to run if the memory root is a symlink.",
+    "contents of the memories and memories_v2 directories (including git history). Per-session memory modes are preserved, " +
+    "so disabled/polluted sessions stay excluded. Refuses to run if a memory root is a symlink.",
   args: {
     confirm: tool.schema.boolean().describe("Must be true to perform the reset."),
   },
@@ -205,8 +220,7 @@ export const memory_reset = tool({
       return { output: "Reset refused: memory consolidation is currently running. Try again in a few minutes." }
     }
     try {
-      const store = new MemoryStore()
-      store.clearMemoryData()
+      clearAllVersionMemoryData()
       wipeMemoriesDir()
       // codex keeps its state DB pool open across resets (clear_memory_roots_contents
       // only wipes directories); closing here would strand cached handles elsewhere.
@@ -259,8 +273,16 @@ export const memory_inspect = tool({
     "(on-disk; injection caps at ~2500), a listing of the memories directory, the " +
     "effective plugin options, and any configuration warnings. Use it to verify " +
     "configuration and debug why memory is not building. Read-only.",
-  args: {},
-  async execute() {
+  args: {
+    min_consolidated_threads: tool.schema.number().int().min(1).max(4096).optional()
+      .describe("V2 readiness threshold: distinct sessions in a successful consolidation (default 20)."),
+  },
+  async execute(args, ctx) {
+    return withMemoryVersion(peekSessionMemoryVersion(ctx?.sessionID), () => inspect(args, ctx))
+  },
+})
+
+function inspect(args: { min_consolidated_threads?: number }, ctx?: { sessionID?: string }) {
     try {
       // Refuse to walk/report through a symlinked root (same rule as reset).
       assertMemoryRootSafe()
@@ -345,12 +367,19 @@ export const memory_inspect = tool({
         ? capacityBackoffs.map((b) => `provider_capacity_backoff ${b.scope}: retry_at=${fmtUnixSec(b.retry_at)}`)
         : ["provider_capacity_backoff: none"]
       const diagnostics = getRecentDiagnostics(12)
+      const migration = readMigrationStatus(args.min_consolidated_threads)
+      const pipelines = memoryPipelineSnapshots()
       const diagnosticLines =
         diagnostics.length > 0
           ? ["recent_events:", ...diagnostics.map((e) => `  ${formatDiagnosticLine(e)}`)]
           : ["recent_events: none"]
       const out = [
         `stage1_outputs: ${outputs.length}`,
+        `read_version: ${peekSessionMemoryVersion(ctx?.sessionID)}`,
+        `dual_write: ${pluginOptions.dual_write}`,
+        `v2_ready: ${migration.v2Ready}`,
+        `v2_consolidated_threads: ${migration.v2ConsolidatedThreads} (minimum ${migration.minConsolidatedThreads})`,
+        ...pipelines.map((p) => `pipeline_${p.version}: outputs=${p.stage1Count}, phase2=${p.phase2?.status ?? "none"}, root=${p.root}`),
         ...stage1Lines,
         ...phase2Lines,
         discoveryLine,
@@ -374,6 +403,9 @@ export const memory_inspect = tool({
         output: out,
         metadata: {
           stage1_count: outputs.length,
+          migration,
+          pipelines,
+          read_version: peekSessionMemoryVersion(ctx?.sessionID),
           stage1_jobs: stage1Jobs.by_status,
           stage1_failures: stage1Jobs.by_failure_class,
           stage1_stale_exhausted: stage1Jobs.stale_exhausted,
@@ -409,8 +441,7 @@ export const memory_inspect = tool({
     } catch (err) {
       return { output: `memory_inspect error: ${(err as Error).message}` }
     }
-  },
-})
+}
 
 export const memory_mode = tool({
   description:

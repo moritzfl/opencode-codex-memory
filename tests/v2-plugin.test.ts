@@ -388,6 +388,13 @@ describe("v2 tui status panel", () => {
 
   const FULL_STATUS = {
     activity: "idle",
+    version: "v1",
+    sessionVersion: "v1",
+    dualWrite: true,
+    v2ConsolidatedThreads: 12,
+    v2Ready: false,
+    minConsolidatedThreads: 20,
+    pipelines: [],
     useMemories: true,
     generateMemories: true,
     extractModel: "m",

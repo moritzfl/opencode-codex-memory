@@ -94,6 +94,14 @@ type Row = { label: string; value: string; tone?: "ok" | "warn" | "muted" }
 function statusRows(s: MemoryStatus, now: number): Row[] {
   return [
     { label: "Activity", value: labels[s.activity] },
+    { label: "Memory version", value: `${s.sessionVersion} (default ${s.version})` },
+    { label: "Learning pipelines", value: s.dualWrite ? "v1 + v2" : s.version },
+    { label: "V2 readiness", value: `${s.v2Ready ? "Ready" : "Warming"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`, tone: s.v2Ready ? "ok" : "muted" },
+    ...s.pipelines.map((pipeline) => ({
+      label: `${pipeline.version.toUpperCase()} pipeline`,
+      value: `${pipeline.stage1Count} recaps · ${pipeline.extracting ? "extracting" : pipeline.phase2Status ?? "idle"}`,
+      tone: (pipeline.lastError ? "warn" : "muted") as Row["tone"],
+    })),
     { label: "Read memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
     { label: "Write memories", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },
     ...(s.sessionMode

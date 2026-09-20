@@ -49,9 +49,32 @@ sessions: ses_abc123 ses_def456
 
 `
 
-export function overlayV2CitationInstructions(prompt: string): string {
-  const start = prompt.indexOf("Memory citation requirements:")
+const SUMMARY_ONLY_CITATIONS = `Memory citation requirements:
+
+- When a read rollout summary informs the answer, append exactly one fenced
+  \`memory-citation\` block as the VERY LAST content of the final reply.
+  Answer first, then a blank line, then the opening fence at column 0.
+- Cite only memory files actually read and used. Do not cite memory_summary.md.
+  Do not reread files solely to construct citations. Never cite in pull requests.
+- Use relative paths and nonblank line ranges. Notes must be short and single-line.
+- Include unique session ids already available; omit the sessions line if none.
+- Use this exact structure (never XML tags):
+\`\`\`\`
+answer text ends here.
+
+\`\`\`memory-citation
+rollout_summaries/2026-02-17T21-23-02-ln3m-example.md:10-12|note=weekly report format
+sessions: ses_abc123 ses_def456
+\`\`\`
+\`\`\`\`
+
+`
+
+export function overlayV2CitationInstructions(prompt: string, version: "v1" | "v2" = "v1"): string {
+  let start = prompt.indexOf("Memory citation requirements:")
+  if (start === -1) start = prompt.indexOf("Memory citations:")
   const end = prompt.indexOf("Updating memories:")
-  if (start === -1 || end === -1 || end <= start) return `${prompt.trimEnd()}\n\n${V2_CITATION_INSTRUCTIONS}`
-  return prompt.slice(0, start) + V2_CITATION_INSTRUCTIONS + prompt.slice(end)
+  const instructions = version === "v2" ? SUMMARY_ONLY_CITATIONS : V2_CITATION_INSTRUCTIONS
+  if (start === -1 || end === -1 || end <= start) return `${prompt.trimEnd()}\n\n${instructions}`
+  return prompt.slice(0, start) + instructions + prompt.slice(end)
 }

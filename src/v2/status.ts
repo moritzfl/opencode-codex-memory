@@ -8,10 +8,22 @@ import { resolveCodexInterop } from "../codex-interop.js"
 import type { MemoryStatus } from "./status-rpc.js"
 import { injectionTotals, sessionInjection } from "./injection.js"
 import { memoryRoot } from "../paths.js"
+import { readMigrationStatus, memoryPipelineSnapshots } from "../migration.js"
+import { peekSessionMemoryVersion } from "../session-version.js"
+import { withMemoryVersion, writeMemoryVersions } from "../memory-version.js"
 
 /** Read the same snapshots as memory_inspect; never claim or advance a job. */
-export function readMemoryStatus(sessionID?: string | null): MemoryStatus {
-  const store = new MemoryStore()
+export function readMemoryStatus(sessionID?: string | null, minConsolidatedThreads?: number): MemoryStatus {
+  const sessionVersion = peekSessionMemoryVersion(sessionID)
+  const store = withMemoryVersion(sessionVersion, () => new MemoryStore())
+  const pipelines = memoryPipelineSnapshots().map((pipeline) => ({
+    version: pipeline.version,
+    stage1Count: pipeline.stage1Count,
+    extracting: pipeline.stage1Jobs.running ?? 0,
+    phase2Status: pipeline.phase2?.status ?? null,
+    lastError: pipeline.phase2?.last_error ?? null,
+  }))
+  const active = pipelines.filter((pipeline) => writeMemoryVersions().includes(pipeline.version))
   const options = pluginOptions
   const now = Date.now()
   const staleBeforeSec = Math.floor(now / 1000) - options.max_rollout_age_days * 86_400
@@ -32,13 +44,17 @@ export function readMemoryStatus(sessionID?: string | null): MemoryStatus {
     warnings.push(...health.agents.memorize.issues.map((issue) => `memorize: ${issue}`))
   }
   if (phase2?.last_error) warnings.push("Consolidation failed; see memory_inspect for details.")
+  for (const pipeline of active) {
+    if (pipeline.version !== sessionVersion && pipeline.lastError) warnings.push(`${pipeline.version}: consolidation failed; see memory_inspect.`)
+  }
   if (phase1.by_failure_class.due > 0) warnings.push("Some extraction jobs are due to retry.")
   if (phase1.by_failure_class.other_exhausted > phase1.stale_exhausted) {
     warnings.push("Some extraction jobs exhausted their retries.")
   }
   if (phase1.by_failure_class.provider_capacity > 0) warnings.push("Some extraction jobs hit provider capacity limits.")
-  const codexImport = options.codex_interop.import && resolveCodexInterop(options.codex_interop) !== null
-  if (options.codex_interop.import && !codexImport) warnings.push("Codex import is misconfigured.")
+  const importsV1 = options.codex_interop.import && writeMemoryVersions().includes("v1")
+  const codexImport = importsV1 && withMemoryVersion("v1", () => resolveCodexInterop(options.codex_interop)) !== null
+  if (importsV1 && !codexImport) warnings.push("Codex import is misconfigured.")
 
   // A `running` row this process does not own is either another opencode
   // instance's live job or an orphaned lease (e.g. a server restart killed the
@@ -57,13 +73,18 @@ export function readMemoryStatus(sessionID?: string | null): MemoryStatus {
   let activity: MemoryStatus["activity"] = "idle"
   if (isPluginShuttingDown()) activity = "stopping"
   else if (isPhase2InFlight()) activity = "consolidating"
-  else if ((phase1.by_status.running ?? 0) > 0) activity = "extracting"
+  else if (active.some((pipeline) => pipeline.extracting > 0)) activity = "extracting"
   else if (!options.generate_memories) activity = options.use_memories ? "read_only" : "disabled"
   else if (retryAt !== null) activity = "retrying"
   else if (warnings.length > 0) activity = "error"
 
   return {
     activity,
+    version: options.version,
+    sessionVersion,
+    pipelines,
+    dualWrite: options.dual_write,
+    ...readMigrationStatus(minConsolidatedThreads),
     useMemories: options.use_memories,
     generateMemories: options.generate_memories,
     extractModel: options.extract_model ?? null,
@@ -74,7 +95,7 @@ export function readMemoryStatus(sessionID?: string | null): MemoryStatus {
     retryAt,
     warnings,
     sessionMode: sessionID ? store.getMemoryMode(sessionID) : null,
-    memoryRoot: memoryRoot(),
+    memoryRoot: memoryRoot(sessionVersion),
     injected: {
       sessionTokens: session.tokens,
       sessionRequests: session.requests,

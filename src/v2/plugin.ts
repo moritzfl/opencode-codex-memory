@@ -20,9 +20,9 @@
  */
 import { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } from "../source.js"
 import { stripCitations, extractCitedSessionIds, hasCitationMarkup } from "../citation.js"
-import { MemoryStore } from "../store.js"
-import { runPhase1 } from "../phase1.js"
-import { runPhase2 } from "../phase2.js"
+import { MemoryStore, existingMemoryStores } from "../store.js"
+import { runMemoryPipeline, runMemoryConsolidation } from "../pipeline.js"
+import { sessionMemoryVersion, withSessionMemoryVersion } from "../session-version.js"
 import {
   setPluginInput,
   setSubSessionDirectory,
@@ -31,7 +31,7 @@ import {
   abortActiveSubSessions,
 } from "../llm.js"
 import { pluginOptions, clearConfigWarnings, resetPluginOptions } from "../options.js"
-import { memoryDbPath } from "../paths.js"
+import { dataRoot } from "../paths.js"
 import { closeDb } from "../db.js"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "../lifecycle.js"
 import { hostMcpStatus } from "../host-client.js"
@@ -52,7 +52,6 @@ import { recordInjection, resetInjectionStats } from "./injection.js"
 import { overlayV2CitationInstructions } from "./citation-overlay.js"
 import { estimateTokens } from "../token.js"
 
-let phase1InFlight = false
 let shimClient: unknown = null
 const backgroundTasks = new Set<Promise<void>>()
 const statusListeners = new Set<() => void>()
@@ -78,7 +77,6 @@ export async function waitForV2BackgroundTasks(): Promise<void> {
 
 /** Test seam: reset module state between tests. */
 export function resetV2ModuleStateForTest(): void {
-  phase1InFlight = false
   statusListeners.clear()
   backgroundTasks.clear()
   seenTurnSessions.clear()
@@ -92,7 +90,7 @@ function getStore(): MemoryStore {
 function recordV2Citations(sessionId: string, assistantMessageId: string, text: string): void {
   if (!hasCitationMarkup(text)) return
   const ids = extractCitedSessionIds(text)
-  if (ids.length > 0) getStore().recordUsageOnce(sessionId, assistantMessageId, ids)
+  if (ids.length > 0) withSessionMemoryVersion(sessionId, () => getStore().recordUsageOnce(sessionId, assistantMessageId, ids))
 }
 
 function stripAndReconcileCitations(sessionId: string, messages: any[] | undefined): void {
@@ -190,6 +188,7 @@ async function classifyExternalContextTool(toolName: string): Promise<boolean | 
 function stampAndPump(sid: string, directory?: string | null): void {
   rememberV2Session(sid, directory ?? null)
   try {
+    sessionMemoryVersion(sid)
     getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
   } catch (e) {
     console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
@@ -198,52 +197,17 @@ function stampAndPump(sid: string, directory?: string | null): void {
 }
 
 async function triggerPhase1(currentSessionId: string): Promise<void> {
-  if (phase1InFlight || !pluginOptions.generate_memories || isPluginShuttingDown()) return
-  phase1InFlight = true
   notifyStatusChanged()
   try {
-    await runPhase1(getStore(), {
-      maxAgeDays: pluginOptions.max_rollout_age_days,
-      minIdleHours: pluginOptions.min_rollout_idle_hours,
-      maxClaimed: pluginOptions.max_rollouts_per_startup,
-      maxUnusedDays: pluginOptions.max_unused_days,
-      excludeSession: currentSessionId,
-      extractModel: pluginOptions.extract_model,
-    })
-  } catch (err) {
-    console.error("[opencode-codex-memory] phase1 error:", err)
-    recordDiagnostic("error", "phase1", err instanceof Error ? err.message : String(err))
+    await runMemoryPipeline(currentSessionId)
   } finally {
-    phase1InFlight = false
     notifyStatusChanged()
   }
-  trackBackgroundTask(triggerPhase2().then(() => {}))
 }
 
-async function triggerPhase2(bypassCooldown = false): Promise<string> {
-  if (isPluginShuttingDown()) return "shutting_down"
+async function triggerPhase2(): Promise<string> {
   try {
-    const result = await runPhase2(getStore(), {
-      maxRaw: pluginOptions.max_raw_memories_for_consolidation,
-      maxUnusedDays: pluginOptions.max_unused_days,
-      extensionRetentionDays: 7,
-      consolidationModel: pluginOptions.consolidation_model,
-      codexInterop: pluginOptions.codex_interop,
-      claudeImport: pluginOptions.claude_import,
-      bypassCooldown,
-    })
-    if (result.status !== "already_running" && result.status !== "skipped_cooldown" && result.status !== "skipped_running") {
-      recordDiagnostic(
-        result.status === "succeeded" || result.status === "no_workspace_changes" ? "info" : "warn",
-        "phase2",
-        result.status,
-      )
-    }
-    return result.status
-  } catch (err) {
-    console.error("[opencode-codex-memory] phase2 error:", err)
-    recordDiagnostic("error", "phase2", err instanceof Error ? err.message : String(err))
-    return "failed"
+    return (await runMemoryConsolidation()).join(", ")
   } finally {
     notifyStatusChanged()
   }
@@ -251,25 +215,12 @@ async function triggerPhase2(bypassCooldown = false): Promise<string> {
 
 /** /memory "Consolidate now": one phase-1 pass over idle sessions, then phase 2 without cooldown. */
 async function consolidateNow(): Promise<string> {
-  if (phase1InFlight) return "already_running"
-  if (!pluginOptions.generate_memories) return "generation_disabled"
-  phase1InFlight = true
   notifyStatusChanged()
   try {
-    await runPhase1(getStore(), {
-      maxAgeDays: pluginOptions.max_rollout_age_days,
-      minIdleHours: pluginOptions.min_rollout_idle_hours,
-      maxClaimed: pluginOptions.max_rollouts_per_startup,
-      maxUnusedDays: pluginOptions.max_unused_days,
-      extractModel: pluginOptions.extract_model,
-    })
-  } catch (err) {
-    recordDiagnostic("error", "phase1", err instanceof Error ? err.message : String(err))
+    return (await runMemoryPipeline(undefined, true)).join(", ")
   } finally {
-    phase1InFlight = false
     notifyStatusChanged()
   }
-  return triggerPhase2(true)
 }
 
 export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
@@ -285,16 +236,17 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
   const rawOptions = ctx.options as Record<string, unknown> | undefined
   if (rawOptions && Object.keys(rawOptions).length > 0) applyPluginOptions(rawOptions)
   else {
-    const previousDb = memoryDbPath()
+    const previousDb = dataRoot()
     resetPluginOptions()
-    if (memoryDbPath() !== previousDb) closeDb()
+    if (dataRoot() !== previousDb) closeDb()
   }
   await ensureV2Agents(ctx as any)
 
   const statusRegistration = await ctx.rpc.register(MemoryStatusRpc, {
     status: async (input: unknown) => {
       const sessionID = (input as { sessionID?: unknown } | undefined)?.sessionID
-      return readMemoryStatus(typeof sessionID === "string" ? sessionID : null)
+      const minimum = (input as { minConsolidatedThreads?: number } | undefined)?.minConsolidatedThreads
+      return readMemoryStatus(typeof sessionID === "string" ? sessionID : null, minimum)
     },
     setOption: async (input: unknown) => {
       const { key, value } = (input ?? {}) as { key?: unknown; value?: unknown }
@@ -358,10 +310,12 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       console.error("[opencode-codex-memory] v2 citation handling failed:", e)
     }
     if (!inject || !pluginOptions.use_memories) return
-    ensureMemoryLayout()
-    const memoryPrompt = buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+    const memoryPrompt = withSessionMemoryVersion(sid, () => {
+      ensureMemoryLayout()
+      return buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+    })
     if (!memoryPrompt) return
-    const text = overlayV2CitationInstructions(memoryPrompt)
+    const text = overlayV2CitationInstructions(memoryPrompt, sessionMemoryVersion(sid))
     if (!Array.isArray(ev.system)) ev.system = []
     ev.system.push({ type: "text", text })
     recordInjection(sid, estimateTokens(text))
@@ -405,8 +359,10 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
   // Bounded reseed before the event loop can see leftover helpers as user sessions.
   await cleanupOldSubSessions()
   try {
-    if (getStore().releaseOrphanedPhase2Job()) {
-      console.warn("[opencode-codex-memory] released a consolidation lease orphaned by a dead process")
+    for (const store of existingMemoryStores()) {
+      if (store.releaseOrphanedPhase2Job()) {
+        console.warn(`[opencode-codex-memory] released orphaned ${store.version} consolidation lease`)
+      }
     }
   } catch (err) {
     console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
@@ -444,7 +400,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
               const sid = sessionIdFromV2Event(data)
               if (sid) {
                 try {
-                  handleSessionDeleted(sid, getStore(), () => {
+                  handleSessionDeleted(sid, undefined, () => {
                     if (pluginOptions.generate_memories) trackBackgroundTask(triggerPhase2().then(() => {}))
                   })
                 } catch (err) {
