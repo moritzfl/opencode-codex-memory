@@ -141,6 +141,21 @@ function phase2Job(sandbox: Sandbox) {
   )[0]
 }
 
+/**
+ * A clean phase-2 success. The row may read `pending` again when a late
+ * extraction enqueued consolidation after the successful run: Codex keeps
+ * `finished_at`/`last_error` NULL then the claim is cooldown-skipped, and it
+ * documents that the watermark is not a dirty check — the workspace diff is.
+ * Requiring literal `done` flakes whenever that enqueue lands after success.
+ */
+function phase2Consolidated(sandbox: Sandbox): boolean {
+  const job = phase2Job(sandbox)
+  if (!job || job.last_error !== null || job.finished_at === null) return false
+  if (job.status !== "done" && job.status !== "pending") return false
+  return (sqlAll<{ max_thread_count: number }>(memoryDbPath(sandbox),
+    "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count ?? 0) > 0
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const models = requireModels()
@@ -339,8 +354,9 @@ async function main() {
           if (job?.status === "failed") {
             throw new Error(`phase2 failed: ${job.last_error ?? "unknown"}`)
           }
-          if (job?.status === "done" && sqlAll<{ max_thread_count: number }>(memoryDbPath(sandbox),
-            "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count > 0) return true
+          // A late enqueue after a clean success flips the row back to
+          // `pending`; the claim is then cooldown-skipped. See phase2Consolidated.
+          if (phase2Consolidated(sandbox)) return true
 
           const mem = path.join(sandbox.memories, "MEMORY.md")
           const sum = path.join(sandbox.memories, "memory_summary.md")
@@ -433,9 +449,7 @@ async function main() {
       await waitFor("shadow pipeline consolidated", () => {
         const job = phase2Job(shadow)
         if (job?.status === "failed") throw new Error(`shadow phase2 failed: ${job.last_error}`)
-        const count = sqlAll<{ max_thread_count: number }>(memoryDbPath(shadow),
-          "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count ?? 0
-        return job?.status === "done" && count > 0
+        return phase2Consolidated(shadow)
       }, { timeoutMs: args.phase2TimeoutMs, intervalMs: 3000 })
       const shadowRows = stage1Rows(shadow).filter((row) => workIds.includes(row.session_id))
       check(shadowRows.length > 0, "dual", "same work sessions learned in shadow pipeline")
