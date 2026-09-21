@@ -25,6 +25,7 @@ import path from "path"
 import { catalogVariantKeys } from "../src/reasoning-variant.js"
 import { withMemoryVersion } from "../src/memory-version.js"
 import { memoryRoot } from "../src/paths.js"
+import { extractViaSubagent, setPluginInput } from "../src/llm.js"
 
 const ASSISTANT_TOOL_MSG = {
   id: "msg_tool1",
@@ -183,6 +184,42 @@ describe("adaptV2Messages", () => {
 })
 
 describe("catalog/mcp adapters", () => {
+  it("uses selectable model ids and distinguishes unknown from empty variants", () => {
+    const catalog = adaptProviderCatalog([
+      { providerID: "acme", id: "alias", modelID: "wire-name", variants: [{ id: "medium" }] },
+      { providerID: "acme", id: "plain", variants: [] },
+      { providerID: "acme", id: "unknown" },
+    ])
+    expect(catalogVariantKeys(catalog, "acme", "alias")).toEqual(["medium"])
+    expect(catalogVariantKeys(catalog, "acme", "wire-name")).toBeUndefined()
+    expect(catalogVariantKeys(catalog, "acme", "plain")).toEqual([])
+    expect(catalogVariantKeys(catalog, "acme", "unknown")).toBeUndefined()
+  })
+
+  it.each([false, true])("selects nearest extraction effort using current model API (legacy also present: %s)", async (legacy) => {
+    const { ctx, calls } = fakeCtx()
+    if (!legacy) delete ctx.catalog
+    ctx.model = { list: async () => [
+      { providerID: "acme", id: "alias", modelID: "wire-name", variants: [{ id: "medium" }, { id: "high" }] },
+    ] }
+    setV2Context(ctx)
+    setPluginInput({ client: buildV1ClientShim() } as any)
+    try {
+      await withMemoryVersion("v1", () => extractViaSubagent("ses_source", "transcript", {
+        model: "acme/alias", signal: new AbortController().signal,
+      }))
+      expect((calls.find((c) => c.name === "generate")?.args as any).model).toEqual({ providerID: "acme", id: "alias", variant: "medium" })
+    } finally {
+      setPluginInput({ client: undefined } as any)
+    }
+  })
+
+  it("retains the legacy model catalog on older hosts", async () => {
+    setV2Context(fakeCtx().ctx)
+    const response = await (buildV1ClientShim() as any).provider.list()
+    expect(catalogVariantKeys(response.data, "acme", "m1")).toEqual(["low", "high"])
+  })
+
   it("adapts provider catalog for variant mapping", () => {
     const v1 = adaptProviderCatalog({ data: [{ providerID: "acme", modelID: "m1", variants: [{ id: "low" }, { id: "high" }] }] })
     expect(catalogVariantKeys(v1, "acme", "m1")?.sort()).toEqual(["high", "low"])

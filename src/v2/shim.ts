@@ -18,7 +18,7 @@
  *   the V1 shutdown/liveness logic keeps working across hosts.
  * - config.get → public service config documents adapted for the V1 resolver;
  *   callers fall back to session defaults if the service is unavailable.
- * - provider.list → catalog.model.list adapted to the V1 catalog shape for
+ * - provider.list → model.list adapted to the V1 catalog shape for
  *   reasoning-variant mapping.
  * - mcp.status → mcp.list adapted to the V1 status map.
  *
@@ -229,7 +229,7 @@ export function adaptV2Messages(msgs: unknown): Array<{ info?: { role?: string }
   return rows
 }
 
-/** V2 catalog.model.list → V1 provider-list shape for catalogVariantKeys. */
+/** V2 model.list (legacy catalog.model.list) → V1 provider-list shape. */
 export function adaptProviderCatalog(v2: unknown): unknown {
   const items = und(v2)
   const list: any[] = Array.isArray(items) ? items : (items as any)?.data ?? []
@@ -237,7 +237,9 @@ export function adaptProviderCatalog(v2: unknown): unknown {
   for (const m of list) {
     if (!m || typeof m !== "object") continue
     const providerID = (m as any).providerID
-    const modelID = (m as any).modelID ?? (m as any).id
+    // id is the selectable OpenCode alias; modelID can be a different provider
+    // wire name. Legacy catalogs exposed only modelID.
+    const modelID = (m as any).id ?? (m as any).modelID
     if (typeof providerID !== "string" || typeof modelID !== "string") continue
     if (!providers.has(providerID)) providers.set(providerID, {})
     const variants: Record<string, unknown> = {}
@@ -246,7 +248,7 @@ export function adaptProviderCatalog(v2: unknown): unknown {
         variants[(v as any).id] = { ...(typeof (v as any).disabled === "boolean" ? { disabled: (v as any).disabled } : {}) }
       }
     }
-    ;(providers.get(providerID) as Record<string, unknown>)[modelID] = { variants }
+    ;(providers.get(providerID) as Record<string, unknown>)[modelID] = { ...(m.variants !== undefined ? { variants } : {}) }
   }
   return { all: [...providers.entries()].map(([id, models]) => ({ id, models })) }
 }
@@ -678,7 +680,10 @@ export function buildV1ClientShim(): unknown {
   const provider = {
     list: async () => {
       try {
-        const res = await (ctx() as any).catalog.model.list()
+        const c = ctx() as V2Context & { model?: { list(): Promise<unknown> } }
+        const models = c.model ?? (c as any).catalog?.model
+        if (typeof models?.list !== "function") throw new Error("host does not support model.list")
+        const res = await models.list()
         return { data: adaptProviderCatalog(res) }
       } catch (e) {
         return { error: e }
