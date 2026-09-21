@@ -226,6 +226,13 @@ also spawns a configured model client for extraction. Reasoning pins stay Codex
 `low`/`medium` when the model lists them; otherwise `src/reasoning-variant.ts`
 picks the nearest OpenCode effort (host-only — Codex does not need this).
 
+OpenCode 2 extraction uses the tool-less `generate.text` API instead of a
+helper session. That API accepts one prompt, without a separate system role or
+structured-output schema. The V2 shim prepends extraction instructions, then
+appends a task reminder and the requested memory-version schema after the
+historical transcript. Shared extraction parsing and validation check the JSON
+reply. Consolidation still uses a sandboxed helper session.
+
 #### Background model selection
 
 Precedence is plugin option (`extract_model` / `consolidation_model`) →

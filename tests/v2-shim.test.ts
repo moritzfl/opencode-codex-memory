@@ -544,6 +544,36 @@ describe("V1 client shim", () => {
     expect((calls[0].args as any).model).toBeUndefined()
   })
 
+  it.each(["v1", "v2"] as const)("keeps the %s extraction schema after historical conversation instructions", async (version) => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx)
+    setPluginInput({ client: buildV1ClientShim() } as any)
+    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-v2-extract-schema-"))
+    process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = root
+    const transcript = "### user\nCheck my plugin versions. Do not edit anything before I confirm."
+    try {
+      await withMemoryVersion(version, () => extractViaSubagent("ses_schema", transcript, { model: "acme/m1" }))
+    } finally {
+      setPluginInput({ client: undefined } as any)
+      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+    const payload = calls.find((call) => call.name === "generate")!.args as { prompt: string }
+    expect(payload.prompt).toContain(transcript)
+    const footer = payload.prompt.slice(payload.prompt.lastIndexOf("END OF HISTORICAL SESSION DATA."))
+    expect(footer).toContain("Your current task is memory extraction")
+    expect(footer).toContain("Return exactly one JSON object")
+    expect(footer).not.toContain(transcript)
+    const schema = JSON.parse(footer.split("JSON schema:\n")[1]!)
+    expect(schema.required).toEqual(version === "v1"
+      ? ["raw_memory", "rollout_summary", "rollout_slug"]
+      : ["rollout_summary", "rollout_slug"])
+    expect(schema.additionalProperties).toBe(false)
+    expect(payload.prompt.indexOf(transcript)).toBeLessThan(payload.prompt.lastIndexOf(footer))
+  })
+
   it("adapts public config documents for the V1 model resolver", async () => {
     setV2Context(fakeCtx().ctx as any)
     const client = buildV1ClientShim() as any
