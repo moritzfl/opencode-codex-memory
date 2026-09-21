@@ -2,6 +2,11 @@
 
 [Documentation home](../README.md#start-here) · [Configuration](configuration.md)
 
+**Both Memory V1 and Memory V2 are direct ports from
+[OpenAI Codex](https://github.com/openai/codex), which offers the same two
+memory versions.** This plugin brings each version's learning and recall
+behavior to OpenCode, with adaptations for OpenCode's plugin APIs.
+
 ## Which version do I need?
 
 **Memory V1 is the default; Memory V2 is opt-in.** Both work on OpenCode 1.x

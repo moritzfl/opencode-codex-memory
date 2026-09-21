@@ -21,6 +21,8 @@ model providers; there is no separate memory service or MCP server.
 
 ## Install
 
+The plugin works with its default settings; no extra memory configuration is needed.
+
 ### 1. Add the plugin for your OpenCode version
 
 Run `opencode --version` if you are unsure which version you use. Add the entry
@@ -47,9 +49,9 @@ to your existing global `~/.config/opencode/opencode.jsonc` or `opencode.json`
 }
 ```
 
-Both examples use [**Memory V1**, the default](#choose-how-memory-learns). Pin a published package version
-as shown; see [Updating the plugin](./docs/troubleshooting.md#updating-the-plugin)
-for updates.
+Keep a published package version pinned as shown. See
+[Updating the plugin](./docs/troubleshooting.md#updating-the-plugin) when a
+new release is available.
 
 ### 2. Restart OpenCode and check status
 
@@ -88,17 +90,6 @@ about where they came from, while general preferences can follow you into a
 new repo. Files live under `~/.local/share/opencode/` by default. See
 [Storage and privacy](./docs/storage-and-privacy.md) for the layout, model-call
 privacy, backups, and relocation.
-
-## Choose how memory learns
-
-| | Best fit | Trade-off |
-|---|---|---|
-| **Memory V1** — default | You want the agent to anticipate your working style, using a searchable handbook of past lessons | Can turn a one-time request into an overly broad preference |
-| **Memory V2** — opt-in | You want more cautious preferences and task history, kept in a compact summary with session recaps | May need more repetition; no separate handbook |
-
-Both work on OpenCode 1.x and 2.x. Keep the default if it suits you, or
-[compare the implementations and try Memory V2](./docs/memory-versions.md).
-You can let both learn before switching, with an option to switch back.
 
 ## Start here
 
