@@ -265,7 +265,19 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
           return { ok: false }
         }
       }
+      const previous = pluginOptions[key]
       pluginOptions[key] = value
+      if (key === "use_memories" && value !== previous) {
+        try {
+          // Transforms capture options but the host only replays them after an
+          // explicit registry invalidation. Affect future tool snapshots now.
+          await ctx.tool.reload()
+        } catch (error) {
+          pluginOptions[key] = previous
+          console.error("[opencode-codex-memory] failed to reload V2 memory tools:", error)
+          return { ok: false }
+        }
+      }
       invalidateCache()
       notifyStatusChanged()
       return { ok: true }

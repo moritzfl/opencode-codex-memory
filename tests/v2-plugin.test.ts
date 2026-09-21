@@ -15,6 +15,12 @@ const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2plugin-${process.pid}`)
 
 function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
   const added: any[] = []
+  const toolTransforms: ((editor: any) => void)[] = []
+  let toolReloads = 0
+  const rebuildTools = () => {
+    added.length = 0
+    for (const transform of toolTransforms) transform({ add: (t: any) => added.push(t), update: () => {} })
+  }
   const hooks: Record<string, ((ev: any) => unknown)[]> = {}
   const agentUpdates: string[] = []
   const rpcHandlers: Record<string, () => Promise<unknown>> = {}
@@ -40,8 +46,10 @@ function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
     },
     tool: {
       transform: async (cb: (e: any) => void) => {
-        cb({ add: (t: any) => added.push(t), update: () => {} })
+        toolTransforms.push(cb)
+        rebuildTools()
       },
+      reload: async () => { toolReloads++; rebuildTools() },
       hook: async (name: string, cb: (e: any) => unknown) => {
         ;(hooks[name] ??= []).push(cb)
       },
@@ -68,7 +76,7 @@ function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
       },
     },
   }
-  return { ctx, added, hooks, agentUpdates, rpcHandlers }
+  return { ctx, added, hooks, agentUpdates, rpcHandlers, toolReloads: () => toolReloads }
 }
 
 beforeEach(() => {
@@ -219,6 +227,32 @@ describe("v2 setup", () => {
     expect(await handlers.setOption({ key: "generate_memories", value: true })).toEqual({ ok: true })
     expect(f.agentUpdates).toEqual(["memorize", "memorize-extract"])
     expect(parseMemoryStatus(await handlers.status()).generateMemories).toBe(true)
+    await cleanup?.()
+  })
+
+  it.each([true, false])("refreshes read tools on both toggle directions (dedicated tools: %s)", async (dedicated) => {
+    const f = fakeCtx({ generate_memories: false, use_memories: false, dedicated_tools: dedicated })
+    const cleanup = await setup(f.ctx)
+    const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
+    const names = () => f.added.map((tool) => tool.name)
+    expect(names()).toEqual(["memory_reset", "memory_inspect", "memory_mode"])
+    expect(await handlers.setOption({ key: "use_memories", value: true })).toEqual({ ok: true })
+    expect(names().includes("memory_read")).toBe(dedicated)
+    expect(names().includes("memory_add_note")).toBe(dedicated)
+    expect(await handlers.setOption({ key: "use_memories", value: false })).toEqual({ ok: true })
+    expect(names()).toEqual(["memory_reset", "memory_inspect", "memory_mode"])
+    expect(await handlers.setOption({ key: "use_memories", value: false })).toEqual({ ok: true })
+    expect(f.toolReloads()).toBe(2)
+    await cleanup?.()
+  })
+
+  it("rolls back the read toggle if tool reload fails", async () => {
+    const f = fakeCtx({ generate_memories: false, use_memories: false })
+    const cleanup = await setup(f.ctx)
+    f.ctx.tool.reload = async () => { throw new Error("reload failed") }
+    const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
+    expect(await handlers.setOption({ key: "use_memories", value: true })).toEqual({ ok: false })
+    expect(parseMemoryStatus(await handlers.status()).useMemories).toBe(false)
     await cleanup?.()
   })
 
