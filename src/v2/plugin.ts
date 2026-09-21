@@ -95,13 +95,16 @@ function recordV2Citations(sessionId: string, assistantMessageId: string, text: 
 }
 
 function stripAndReconcileCitations(sessionId: string, messages: any[] | undefined): void {
-  for (const [i, msg] of (messages ?? []).entries()) {
-    if (msg?.type !== "assistant" || !Array.isArray(msg.content)) continue
+  for (const msg of messages ?? []) {
+    // Model-bound LLM.Message uses role; persisted/legacy rows use type.
+    if ((msg?.role ?? msg?.type) !== "assistant" || !Array.isArray(msg.content)) continue
     for (const part of msg.content) {
       if (part?.type !== "text" || typeof part.text !== "string") continue
       if (!hasCitationMarkup(part.text)) continue
       try {
-        recordV2Citations(sessionId, String(msg.id ?? `context-part-${i}`), part.text)
+        // Context fragments may have no durable id. Inventing one would count
+        // the same citation again after text.ended (and after compaction).
+        if (typeof msg.id === "string") recordV2Citations(sessionId, msg.id, part.text)
       } catch (e) {
         console.error("[opencode-codex-memory] citation recording failed:", e)
       }

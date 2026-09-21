@@ -276,7 +276,7 @@ describe("v2 setup", () => {
       messages: [
         {
           id: "m1",
-          type: "assistant",
+          role: "assistant",
           content: [{ type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" }],
         },
       ],
@@ -296,7 +296,7 @@ describe("v2 setup", () => {
       messages: [
         {
           id: "m1",
-          type: "assistant",
+          role: "assistant",
           content: [{ type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" }],
         },
       ],
@@ -335,12 +335,32 @@ describe("v2 setup", () => {
       system: [],
       messages: [{
         id: "msg_durable",
-        type: "assistant",
+        role: "assistant",
         content: [{ type: "text", text: "answer\n```memory-citation\nsessions: ses_cited\n```" }],
       }],
     }
     await f.hooks.context[0](ev)
     expect(new MemoryStore().stage1Outputs().find((row) => row.session_id === "ses_cited")?.usage_count).toBe(1)
+  })
+
+  it.each(["context", "compaction", "generate"])("strips id-less %s context without double-counting durable citations", async (hook) => {
+    const text = "answer\n```memory-citation\nsessions: ses_cited\n```"
+    const store = new MemoryStore()
+    store.upsertStage1Output({ session_id: "ses_cited", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    const f = fakeCtx({}, [{ type: "session.text.ended", data: { sessionID: "ses_main", assistantMessageID: "msg_reply", text } }])
+    const cleanup = await setup(f.ctx)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (let i = 0; i < 2; i++) {
+      const ev: any = { sessionID: "ses_main", system: [], messages: [
+        { role: "user", content: [{ type: "text", text }] },
+        { role: "tool", content: [{ type: "text", text }] },
+        { role: "assistant", content: [{ type: "text", text }] },
+      ] }
+      await f.hooks[hook][0](ev)
+      expect(ev.messages.map((m: any) => m.content[0].text)).toEqual([text, text, "answer"])
+    }
+    expect(store.stage1Outputs()[0].usage_count).toBe(1)
+    await cleanup?.()
   })
 
   it("tool hook marks websearch sessions polluted when the guard is on", async () => {
