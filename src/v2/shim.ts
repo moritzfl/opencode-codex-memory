@@ -6,10 +6,9 @@
  * V2 plugin context. Only genuinely missing V2 surfaces are adapted:
  *
  * - session list/discovery → ctx.session.list when the host exposes it,
- *   else the authenticated public client for THIS process's registered
- *   service. A PID mismatch (IDE `serve --port 0` vs `serve --service`)
- *   does not list another host; it falls back to sessions this process
- *   has observed.
+ *   else the authenticated public client for the registered local service.
+ *   A loopback PID mismatch (IDE `serve --port 0` vs `serve --service`)
+ *   is supported; unavailable services fall back to observed sessions.
  * - session.prompt agent/system/model/format/variant → V2 create-time
  *   agent/model (via switchAgent/switchModel) + generate.text for the
  *   json_schema extraction path (V2 prompts carry text only).
@@ -32,9 +31,16 @@ import { invalidateOwnService, lastServiceFailure, ownServiceClient, serviceRequ
 export type V2Context = Plugin.Context
 
 let v2ctx: V2Context | null = null
+let discoveryStatus: { source: "context" | "service" | "observed"; warning: string | null } | null = null
+
+/** Last completed list's scope; inspect/status must not initiate discovery. */
+export function getV2DiscoveryStatus(): typeof discoveryStatus {
+  return discoveryStatus ? { ...discoveryStatus } : null
+}
 
 export function setV2Context(ctx: V2Context | null): void {
   v2ctx = ctx
+  discoveryStatus = null
 }
 
 function ctx(): V2Context {
@@ -141,6 +147,7 @@ function listObservedSessions(limit: number, cursor?: string | number, search?: 
 export function resetV2ShimStateForTest(): void {
   releasedSubSessions.clear()
   observedSessions.clear()
+  discoveryStatus = null
   invalidateOwnService()
 }
 
@@ -499,13 +506,21 @@ export function buildV1ClientShim(): unknown {
   async function listGlobalSessions(limit: number, cursor?: string | number, search?: string): Promise<{ data: unknown[] }> {
     const localList = v2ctx ? (v2ctx.session as { list?: unknown }).list : undefined
     if (typeof localList === "function") {
-      return paginateSessionList((input) => localList(input), limit, cursor, search)
+      const result = await paginateSessionList((input) => localList(input), limit, cursor, search)
+      discoveryStatus = { source: "context", warning: null }
+      return result
     }
     const client = await ownServiceClient()
     if (client && typeof client.session.list === "function") {
-      return paginateSessionList((input) => serviceRequest(client, () => client.session.list(input)), limit, cursor, search)
+      const result = await paginateSessionList((input) => serviceRequest(client, () => client.session.list(input)), limit, cursor, search)
+      discoveryStatus = { source: "service", warning: null }
+      return result
     }
     if (client) throw new Error("registered service does not support session.list")
+    discoveryStatus = {
+      source: "observed",
+      warning: `Global session discovery unavailable: ${lastServiceFailure() ?? "no registered service"}; extraction limited to sessions observed by this process.`,
+    }
     return { data: listObservedSessions(limit, cursor, search) }
   }
 

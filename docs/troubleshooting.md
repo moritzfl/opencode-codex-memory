@@ -23,6 +23,7 @@ In `memory_inspect`, check:
 | `stage1_outputs`, `stage1_jobs` | How much extraction has completed and whether jobs are waiting or failing |
 | `phase2_status`, `phase2_last_error` | Whether consolidation has run, is waiting, or failed |
 | `discovery` | Whether the plugin could find past conversations |
+| `v2_discovery_source`, `v2_discovery_warning` | OpenCode 2 listing source: `service`/`context` for global discovery, `observed` for a limited fallback, or `not_checked`; the warning includes the failure reason |
 | `config_warnings`, effective options | What configuration actually took effect |
 | `agent_config` and agent health | Whether memory helpers have the required setup and permissions |
 
@@ -40,6 +41,7 @@ the consolidation cooldown but still respects session eligibility.
 | Memory V2 summary starts with `v1` | That first line is the summary **file-format marker**, not the selected memory behavior. Check `read_version` instead. |
 | `v2_ready` stays false | Memory V2 needs a valid summary and one successful consolidation consuming at least 20 distinct sessions by default. See [readiness](memory-versions.md#2-check-readiness-and-the-new-summary). |
 | `discovery` failed or the panel says **Unavailable** | Check OpenCode's server as described below. Existing memory can still be recalled. |
+| `discovery` says `ok`, but `v2_discovery_source` is `observed` | Only this process's observed sessions were listed. Check `v2_discovery_warning` for the global discovery failure; the memory panel also reports it. |
 | Extraction errors mention rate limits or usage limits | Check `provider_capacity_backoff` and retry times. Capacity errors retry after about an hour when quota returns; `other_exhausted` indicates other exhausted failures. |
 | Consolidation never completes | Read `phase2_last_error` and agent health. Failed artifacts leave workspace changes for a later retry. |
 | Codex sharing stopped after switching memory versions | Codex exchange needs the Memory V1 writer. Memory V2-only learning disables it; see [Integrations](integrations.md). |

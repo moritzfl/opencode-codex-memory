@@ -11,6 +11,7 @@ import { memoryRoot } from "../paths.js"
 import { readMigrationStatus, memoryPipelineSnapshots } from "../migration.js"
 import { peekSessionMemoryVersion } from "../session-version.js"
 import { withMemoryVersion, writeMemoryVersions } from "../memory-version.js"
+import { getV2DiscoveryStatus } from "./shim.js"
 
 /** Read the same snapshots as memory_inspect; never claim or advance a job. */
 export function readMemoryStatus(sessionID?: string | null, minConsolidatedThreads?: number): MemoryStatus {
@@ -38,6 +39,8 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
   ].filter((time): time is number => time != null && time * 1000 > now)
   const retryAt = retryTimes.length ? Math.min(...retryTimes) * 1000 : null
   const warnings = [...getConfigWarnings()]
+  const discoveryWarning = getV2DiscoveryStatus()?.warning
+  if (options.generate_memories && discoveryWarning) warnings.push(discoveryWarning)
   const health = getAgentHealth()
   if (options.generate_memories && health.observed) {
     // V2 extraction is sessionless; only the consolidator agent is used.

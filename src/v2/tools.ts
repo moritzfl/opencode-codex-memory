@@ -7,12 +7,13 @@
  * zod v4 satisfies natively, so the adapter just re-wraps the same validate
  * + execute path and maps the result shape:
  *   V1 string | {output, metadata}  →  V2 {content, metadata}
- * No V1 file is touched and behavior is identical by construction.
+ * Inspect additionally reports the V2 host discovery scope and fallback reason.
  */
 import { z } from "zod"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../../tools/memory.js"
 import { memory_reset, memory_inspect, memory_mode } from "../../tools/control.js"
 import { pluginOptions } from "../options.js"
+import { getV2DiscoveryStatus } from "./shim.js"
 
 interface V1Tool {
   description: string
@@ -45,6 +46,18 @@ function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
       }
       const res = await v1.execute(input, v1ctx)
       if (typeof res === "string") return { content: res }
+      if (name === "memory_inspect") {
+        const discovery = getV2DiscoveryStatus()
+        return {
+          content: [
+            `v2_discovery_source: ${discovery?.source ?? "not_checked"}`,
+            ...(discovery?.warning ? [`v2_discovery_warning: ${discovery.warning}`] : []),
+            "",
+            res.output ?? "",
+          ].join("\n"),
+          metadata: { ...(res.metadata && typeof res.metadata === "object" ? res.metadata : {}), v2_discovery: discovery },
+        }
+      }
       return { content: res.output ?? "", ...(res.metadata !== undefined ? { metadata: res.metadata } : {}) }
     },
   }

@@ -6,6 +6,10 @@ import { buildV2Tools } from "../src/v2/tools.js"
 import { resetPluginOptions } from "../src/options.js"
 import { applyPluginOptions } from "../src/index.js"
 import { MemoryStore } from "../src/store.js"
+import { buildV1ClientShim, rememberV2Session, resetV2ShimStateForTest, setV2Context } from "../src/v2/shim.js"
+import { setV2ServiceDependenciesForTest } from "../src/v2/service.js"
+import { readMemoryStatus } from "../src/v2/status.js"
+import { resetAgentHealth } from "../src/agent-health.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2tools-${process.pid}`)
 
@@ -17,6 +21,9 @@ beforeEach(() => {
   const root = path.join(TEST_ROOT, "memories")
   fs.mkdirSync(root, { recursive: true })
   resetPluginOptions()
+  resetAgentHealth()
+  resetV2ShimStateForTest()
+  setV2Context(null)
 })
 
 afterEach(() => {
@@ -26,6 +33,9 @@ afterEach(() => {
   } catch {
   }
   resetPluginOptions()
+  setV2ServiceDependenciesForTest(null)
+  resetV2ShimStateForTest()
+  setV2Context(null)
 })
 
 const TCTX = { sessionID: "ses_test", messageID: "msg_test", agent: "build" }
@@ -87,5 +97,43 @@ describe("adapted tool execution", () => {
     const def = buildV2Tools().find((t) => t.name === "memory_inspect")!
     const res = await def.execute({}, TCTX)
     expect(res.content).toContain("stage1_outputs")
+    expect(res.content).toContain("v2_discovery_source: not_checked")
+  })
+
+  it.each(["service", "context"])("reports observed-only discovery until %s listing recovers", async (source) => {
+    let available = false
+    let probes = 0
+    const session = { list: async () => ({ data: [] }) }
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      make: () => ({ session }),
+      probe: async () => {
+        probes++
+        if (!available) throw new Error("GET /api/info 401")
+        return { version: "2.0.12", pid: process.pid }
+      },
+    })
+    const shim = buildV1ClientShim() as any
+    rememberV2Session("ses_observed", "/project")
+    expect((await shim._client.get({ url: "/experimental/session" })).data).toHaveLength(1)
+    const inspect = buildV2Tools().find((tool) => tool.name === "memory_inspect")!
+    const fallback = await inspect.execute({}, TCTX)
+    expect(fallback.content).toContain("v2_discovery_source: observed")
+    expect(fallback.content).toContain("GET /api/info 401")
+    expect(fallback.content).toContain("extraction limited to sessions observed by this process")
+    expect(fallback.metadata).toMatchObject({ v2_discovery: { source: "observed" } })
+    const status = readMemoryStatus()
+    expect(status.activity).toBe("error")
+    expect(status.warnings.some((warning) => warning.includes("GET /api/info 401"))).toBe(true)
+    expect(probes).toBe(1) // Inspection/status do not probe or run extraction.
+
+    available = true
+    if (source === "context") setV2Context({ session } as any)
+    await shim._client.get({ url: "/experimental/session" })
+    const recovered = await inspect.execute({}, TCTX)
+    expect(recovered.content).toContain(`v2_discovery_source: ${source}`)
+    expect(recovered.content).not.toContain("v2_discovery_warning")
+    expect(readMemoryStatus().warnings).toEqual([])
+    expect(readMemoryStatus().activity).toBe("idle")
   })
 })
