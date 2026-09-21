@@ -587,12 +587,46 @@ describe("V1 client shim", () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
-    await client.session.prompt({
+    messagePageResponses = [{ data: [
+      { id: "msg_1", type: "user" },
+      { id: "msg_2", type: "assistant", time: { completed: 2 }, finish: "stop", content: [{ type: "text", text: "done" }] },
+      { type: "idle", outcome: "succeeded" },
+    ] }]
+    const result = await client.session.prompt({
       path: { id: "ses_y" },
       body: { agent: "memorize", model: { providerID: "acme", modelID: "m1" }, parts: [{ type: "text", text: "DO" }] },
     })
     expect(calls.map((c) => c.name)).toEqual(["switchAgent", "switchModel", "prompt", "wait"])
     expect((calls.find((call) => call.name === "prompt")!.args as any).text).toBe("DO")
+    expect(result).toEqual({ data: { info: {}, parts: [{ type: "text", text: "done" }] } })
+  })
+
+  it.each([
+    ["missing prompt", [{ type: "assistant", time: { completed: 2 }, finish: "stop" }]],
+    ["stale reply", [{ type: "assistant", time: { completed: 2 }, finish: "stop" }, { id: "msg_1", type: "user" }]],
+    ["partial turn", [{ id: "msg_1", type: "user" }, { type: "assistant", time: { completed: 2 }, finish: "tool-calls" }]],
+    ["interrupted turn", [{ id: "msg_1", type: "user" }, { type: "assistant", time: { completed: 2 }, finish: "stop" }, { type: "idle", outcome: "interrupted" }]],
+    ["unrelated reply", [{ id: "msg_1", type: "user" }, { id: "msg_other", type: "user" }, { type: "assistant", time: { completed: 2 }, finish: "stop" }]],
+  ])("rejects %s after a successful wait", async (_name, rows) => {
+    setV2Context(fakeCtx().ctx)
+    messagePageResponses = [{ data: rows }]
+    const client = buildV1ClientShim() as any
+    const result = await client.session.prompt({ path: { id: "ses_y" }, body: { agent: "memorize", parts: [] } })
+    expect(result.error).toBeDefined()
+    expect(result.data).toBeUndefined()
+  })
+
+  it("preserves terminal provider errors and status codes from paginated messages", async () => {
+    setV2Context(fakeCtx().ctx)
+    messagePageResponses = [
+      { data: [{ id: "msg_1", type: "user" }], cursor: { next: "reply" } },
+      { data: [
+        { type: "assistant", error: { type: "provider.rate-limit", message: "capacity", status: 429 } },
+        { type: "idle", outcome: "failed" },
+      ] },
+    ]
+    const result = await (buildV1ClientShim() as any).session.prompt({ path: { id: "ses_y" }, body: { agent: "memorize", parts: [] } })
+    expect(result.data.info.error).toEqual({ name: "provider.rate-limit", data: { message: "capacity", statusCode: 429 } })
   })
 
   it("releases sessionless extraction handles without calling host session APIs", async () => {

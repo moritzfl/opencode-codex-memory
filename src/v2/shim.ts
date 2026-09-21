@@ -286,6 +286,58 @@ function responseNextCursor(response: unknown): string | undefined {
   return typeof next === "string" && next.length > 0 ? next : undefined
 }
 
+/** Read durable messages in source order, including terminal errors/idle rows. */
+async function loadV2Messages(sessionID: string, context?: V2Context, signal?: AbortSignal): Promise<any[]> {
+  const client = await ownServiceClient()
+  if (typeof client?.message?.list === "function") {
+    const messages: unknown[] = []
+    const seenCursors = new Set<string>()
+    let cursor: string | undefined
+    while (true) {
+      const response = await client.message.list(
+        cursor ? { sessionID, cursor } : { sessionID, order: "asc" },
+        signal ? { signal } : undefined,
+      )
+      const rows = responseRows(response)
+      if (!rows) throw new Error("registered service returned an invalid message list")
+      messages.push(...rows)
+      const next = responseNextCursor(response)
+      if (!next) return messages
+      if (seenCursors.has(next)) throw new Error("registered service repeated a message cursor")
+      seenCursors.add(next)
+      cursor = next
+    }
+  }
+  const raw = await (context ?? ctx()).session.context({ sessionID } as any)
+  const rows = responseRows(raw)
+  if (!rows) throw new Error("session context returned an invalid message list")
+  return rows
+}
+
+function completedPromptResponse(rows: any[], promptID: unknown): { data: unknown } {
+  const boundary = typeof promptID === "string" ? rows.findIndex((m) => m?.id === promptID && m.type === "user") : -1
+  if (boundary < 0) throw new Error("submitted prompt missing from consolidation transcript")
+  const turn = rows.slice(boundary + 1)
+  const nextUser = turn.findIndex((m) => m?.type === "user")
+  const messages = nextUser < 0 ? turn : turn.slice(0, nextUser)
+  const assistant = messages.findLast((m) => m?.type === "assistant")
+  if (!assistant) throw new Error("no assistant reply after consolidation wait")
+  if (assistant.error) {
+    // V1 runPrompt recognizes info.error, including its quota status code.
+    const error = assistant.error
+    return { data: { info: { error: {
+      name: error.type ?? error.name,
+      data: { message: error.message ?? error.data?.message, statusCode: error.status ?? error.statusCode ?? error.data?.statusCode },
+    } }, parts: [] } }
+  }
+  const idle = messages.findLast((m) => m?.type === "idle")
+  if (idle && idle.outcome !== "succeeded") throw new Error(`consolidation ${idle.outcome} after session.wait`)
+  if (!assistant.time?.completed || !["stop", "length", "content-filter"].includes(assistant.finish)) {
+    throw new Error(`consolidation turn incomplete after session.wait (${assistant.finish ?? "no finish"})`)
+  }
+  return { data: { info: {}, parts: [{ type: "text", text: joinTextParts(assistant.content) }] } }
+}
+
 function adaptV2SessionRow(row: unknown): unknown {
   if (!row || typeof row !== "object") return row
   const record = row as Record<string, unknown>
@@ -384,7 +436,9 @@ async function v2promptWithWait(
   } else {
     await waitP
   }
-  return { data: { posted } }
+  // wait means idle, not successful. Codex requires Completed before phase 2
+  // may validate artifacts and reset the last-successful workspace baseline.
+  return completedPromptResponse(await loadV2Messages(sessionID, c, signal), und(posted)?.id)
 }
 
 /** Build the V1-shaped client. Passed to setPluginInput() by V2 setup(). */
@@ -489,30 +543,7 @@ export function buildV1ClientShim(): unknown {
     messages: async (opts: { path: { id: string } }) => {
       try {
         if (isReleasedSubSession(opts.path.id)) throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
-        const client = await ownServiceClient()
-        if (typeof client?.message?.list === "function") {
-          const messages: unknown[] = []
-          const seenCursors = new Set<string>()
-          let cursor: string | undefined
-          while (true) {
-            const response = await client.message.list(
-              cursor ? { sessionID: opts.path.id, cursor } : { sessionID: opts.path.id, order: "asc" },
-            )
-            const rows = responseRows(response)
-            if (!rows) throw new Error("registered service returned an invalid message list")
-            messages.push(...rows)
-            const next = responseNextCursor(response)
-            if (!next || seenCursors.has(next)) break
-            seenCursors.add(next)
-            cursor = next
-          }
-          return { data: adaptV2Messages(messages) }
-        }
-        const raw = await (ctx().session as { context: (input: { sessionID: string }) => Promise<unknown> }).context({
-          sessionID: opts.path.id,
-        })
-        const rows = Array.isArray(raw) ? raw : responseRows(raw) ?? []
-        return { data: adaptV2Messages(rows) }
+        return { data: adaptV2Messages(await loadV2Messages(opts.path.id)) }
       } catch (e) {
         return { error: e }
       }
