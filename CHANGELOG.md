@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-09-22
+
+### Fixed
+
+- OpenCode 2 service discovery uses the current `/api/info` endpoint, with
+  legacy readiness routes retained for older hosts. Removed `/api/status`
+  routes no longer silently restrict extraction to locally observed sessions.
+- `memory_inspect` and the OpenCode 2 memory panel report degraded global
+  discovery and its failure reason, clearing the warning after recovery.
+- OpenCode 2 extraction retains the requested JSON schema and restates the
+  extraction task after historical conversation data, preventing replies that
+  continue old user requests instead of extracting memories.
+- Lifecycle tests retain their temporary memory root until background work
+  finishes, preventing teardown from pruning the user's generated memory files.
+
 ## [0.8.2] - 2026-09-22
 
 ### Changed

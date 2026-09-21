@@ -21,7 +21,7 @@ Options go inside the plugin object's `options` field:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "opencode-codex-memory@0.8.2",
+      "package": "opencode-codex-memory@0.8.3",
       "options": {
         "min_rollout_idle_hours": 2
       }
@@ -38,7 +38,7 @@ Options are the second element of a `[package, options]` pair:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    ["opencode-codex-memory@0.8.2", { "min_rollout_idle_hours": 2 }]
+    ["opencode-codex-memory@0.8.3", { "min_rollout_idle_hours": 2 }]
   ]
 }
 ```
