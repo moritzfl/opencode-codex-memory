@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-22
+
 ### Changed
 
 - The OpenCode 2 memory panel opens with `/memory-inspect` or **Inspect memory**
@@ -23,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Loading, pending changes, and rejected actions show explicit feedback.
   Connection failures retain the last known status and pause controls until
   recovery; late responses cannot overwrite newer status or reopen a closed panel.
+- CI type checking no longer requires a prior build of the OpenCode 2
+  contract-check dependencies.
 
 ## [0.8.1] - 2026-09-21
 

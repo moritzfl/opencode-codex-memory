@@ -35,7 +35,7 @@ to your existing global `~/.config/opencode/opencode.jsonc` or `opencode.json`
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    { "package": "opencode-codex-memory@0.8.1" }
+    { "package": "opencode-codex-memory@0.8.2" }
   ]
 }
 ```
@@ -45,7 +45,7 @@ to your existing global `~/.config/opencode/opencode.jsonc` or `opencode.json`
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-codex-memory@0.8.1"]
+  "plugin": ["opencode-codex-memory@0.8.2"]
 }
 ```
 
