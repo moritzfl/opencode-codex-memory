@@ -1,0 +1,108 @@
+# Using memory
+
+[Documentation home](../README.md#start-here)
+
+After [installation](../README.md#install), use OpenCode normally. The plugin
+learns in the background and makes past context available to later
+conversations. You can steer it with ordinary requests.
+
+## What to expect after installation
+
+Memory takes time to build:
+
+1. A session becomes eligible for **extraction** after six hours of inactivity
+   by default. Sessions older than ten days are skipped by default.
+2. Extraction records useful information from eligible sessions. A conversation
+   with nothing durable to retain can produce no memory.
+3. **Consolidation** combines extracted records and explicit notes into the
+   files used for recall. It normally has a six-hour cooldown.
+4. Later model requests receive the updated summary automatically.
+
+The pipeline runs while OpenCode is running, triggered by conversation
+activity and idle events. It is not a separate scheduled service that keeps
+learning after OpenCode stops. See [Configuration](configuration.md#frequency-and-retention)
+to adjust the thresholds.
+
+## Recall past work
+
+Try asking:
+
+- “What do you know about how I work?”
+- “What was I working on in this repo last week?”
+- “How did we fix the deployment issue last time?”
+
+The agent receives a compact summary and can look up supporting memory files
+when useful. Memory V1 uses a handbook and recaps; Memory V2 primarily uses
+the summary and follows recap pointers for more detail. See
+[Memory V1 and Memory V2](memory-versions.md) if you want to choose between them.
+
+Memory is historical context. The agent is instructed to verify facts that
+may have changed when verification is useful, and to distinguish recalled
+information from currently confirmed behavior.
+
+## Save or correct a note
+
+Say “Remember that I deploy this project with `make release`.” With the default
+tools enabled, the agent saves a small note using `memory_add_note`; the next
+consolidation integrates it into memory. This is useful even before automatic
+learning has processed your first session.
+
+For a correction, be explicit: “Update your memory: we now use `bun test`, not
+`npm test`, in this repo.” The correction is recorded as a note for the
+consolidator. It does not rewrite the summary immediately.
+
+Notes go to the current conversation's selected memory version. During
+dual-write, they are not copied directly to the other workspace. See
+[reading and learning selection](memory-versions.md#how-reading-and-learning-are-selected).
+
+## Check progress
+
+Ask “Check my memory status” to have the agent run **`memory_inspect`**. It
+shows the current session's memory version, both pipelines' progress when
+present, effective options, resolved storage paths, recent errors, and config
+warnings. Checking status does not start learning.
+
+In **OpenCode 2's terminal UI**, open **`/memory`** (`/memory-status` is an
+alias). It shows status and offers controls, including **Consolidate now**.
+See [panel controls](opencode2.md#memory-panel-and-controls). On
+OpenCode 1.x or an interface without the panel, use `memory_inspect`.
+
+## Pause learning or recall
+
+Learning from a conversation and using existing memory are separate controls:
+
+| Goal | Control |
+|---|---|
+| Exclude this conversation from future extraction | Ask the agent to use `memory_mode` with `mode: "disabled"`. On OpenCode 2, turn off **Learn from this session**. |
+| Allow this conversation to be learned again | Use `memory_mode` with `mode: "enabled"`, or turn **Learn from this session** back on. |
+| Pause background learning globally | Set the plugin option `generate_memories: false`. OpenCode 2 also has a runtime **Learn from sessions** toggle. |
+| Stop injecting and looking up existing memory | Set `use_memories: false`. OpenCode 2 also has a runtime **Use memories** toggle. |
+| Stop both learning and recall | Set both `generate_memories` and `use_memories` to `false`. |
+
+The two global panel toggles last until the server restarts. Use the
+[configuration file](configuration.md) for persistent settings. Per-session
+learning modes persist across restarts and apply to both memory writers.
+
+Disabling a session controls future extraction; it does not immediately erase
+already consolidated information or hide existing memory from the conversation.
+For data removal, see [Editing, deleting, and resetting](storage-and-privacy.md#editing-deleting-and-resetting).
+
+## Tools the agent can use
+
+You normally describe what you want rather than calling tools yourself.
+
+| Tool | Purpose |
+|---|---|
+| `memory_read` | Read a file in the selected memory workspace |
+| `memory_search` | Search memory text, including time-scoped session recall |
+| `memory_list` | List files and directories in memory |
+| `memory_add_note` | Record something you explicitly asked to remember |
+| `memory_inspect` | Inspect status, configuration, and errors without changing memory |
+| `memory_mode` | Set a session's learning eligibility (`enabled`, `disabled`, or `polluted`) |
+| `memory_reset` | Clear learned memory in both versions after confirmation |
+
+The first four depend on `use_memories` and `dedicated_tools`; the maintenance
+tools remain available. See [File-based access](configuration.md#file-based-access)
+if you prefer ordinary file tools.
+
+If learning or recall seems stuck, start with [Troubleshooting](troubleshooting.md).

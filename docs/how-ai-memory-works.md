@@ -1,9 +1,23 @@
 # How OpenCode Codex Memory Works: Learning, Remembering, and Forgetting
 
+[Documentation home](../README.md#start-here) · [Choose a memory implementation](memory-versions.md)
+
 A tour of the memory architecture behind this plugin — the design it ports
 from Codex. It deliberately stays above code level: the pieces are described
 by responsibility, data flow, and trade-off, so a reader with general
 programming background can follow without knowing the implementation language.
+
+**Reading guide:** the illustrated walkthrough describes **Memory V1**, the
+default. [Memory V2 changes the learning and recall approach](#two-versions-v1-and-v2)
+while keeping the same background learning loop. For practical choices and
+switching instructions, use [Memory V1 and Memory V2](memory-versions.md).
+
+- [Storage and the learning loop](#the-big-picture-a-layered-store-and-three-jobs)
+- [Extraction](#learning-part-1-extracting-signal-from-one-session)
+- [Consolidation](#learning-part-2-consolidating-many-sessions-into-one-memory)
+- [Recall](#remembering-the-read-path) and [forgetting](#forgetting-entropy-as-a-feature)
+- [Citation feedback](#the-feedback-loop-citations-close-the-circuit)
+- [Memory V1 and Memory V2](#two-versions-v1-and-v2)
 
 ## Introduction
 
@@ -81,10 +95,10 @@ when the overview suggests it. It mirrors how you would use your own notes —
 you don't reread every lab notebook every morning; you keep a rough mental map
 of what exists and pull the specific page when you need it.
 
-That pyramid is the **v1** default. Codex later added an opt-in **v2** that
+That pyramid is the **Memory V1** default. Codex later added an opt-in **Memory V2** that
 drops the handbook and treats the injected summary as the memory itself. The
-tour below is still v1; the contrast is in
-[Two versions: v1 and v2](#two-versions-v1-and-v2).
+tour below follows Memory V1; the contrast is in
+[Memory V1 and Memory V2](#two-versions-v1-and-v2).
 
 ### Three jobs
 
@@ -509,14 +523,13 @@ it used.
 
 ![The memory feedback loop: an answer draws on memory and cites it; the
 citation is recorded; consolidation ranks and prunes; the next summary is
-sharper — and the loop closes. The invisible part, explained below: the
-citation markup is stripped before the user ever sees it.](memory-loop.svg)
+sharper — and the loop closes.](memory-loop.svg)
 
-The host never shows the user this block. A hook in the application catches
-the model's text before it is persisted or rendered, parses the citation,
-updates the usage counters in the database, and strips the markup — so neither
-history nor UI is polluted with bookkeeping. Fallback cleanup paths handle
-older data that might still carry the markers.
+The plugin parses the citation and updates usage counters in its database.
+On OpenCode 1.x, it removes the markup before the reply is stored. OpenCode
+2 can keep it in saved replies for native citation rendering, then strip it
+from subsequent model requests. Both support the same feedback loop; the
+display details do not change which memory implementation you choose.
 
 This is the system's answer to a question most memory designs never ask: *how
 do you know your memories are any good?* Counting what the agent actually used
@@ -598,21 +611,23 @@ any memory system designer will face:
   with conservative defaults, because the right forgetting cadence is a
   property of how *you* work.
 
-## Two versions: v1 and v2
+<a id="two-versions-v1-and-v2"></a>
 
-The pyramid and pipeline above are the original contract — **v1**, still the
-default. Codex later shipped an opt-in **v2** (`version: "v2"` in this plugin)
+## Memory V1 and Memory V2
+
+The pyramid and pipeline above are the original contract — **Memory V1**, still the
+default. Codex later shipped an opt-in **Memory V2** (`version: "v2"` in this plugin)
 that keeps the same outer loop — extract after a session, consolidate in the
 background, inject a small summary — and changes the *epistemic* contract:
 what the system is allowed to claim about you.
 
-v1 is built to **anticipate**. Extraction is told to mine a session for things
+Memory V1 is built to **anticipate**. Extraction is told to mine a session for things
 that should change the next agent's default behavior. A one-task request can
 be promoted into a standing preference; consolidation then lifts those
 takeaways into a searchable handbook (`MEMORY.md`) and a tiny always-on index.
 The dream is that you stop repeating yourself.
 
-v2 is built to **stop lying about you**. The failure v1 actually has is
+Memory V2 is built to **avoid inventing preferences**. A failure mode of Memory V1 is
 over-promotion: "show me the plan before editing *this*" becomes "the user
 prefers plans before edits," and that sentence then sits in every future
 session. v2's own extraction example is the opposite instruction — record the
@@ -622,7 +637,7 @@ request, do not write the personality trait.
 session recaps; v2 drops the handbook, extracts recaps only, and treats the
 summary as the memory.](memory-v1-v2.svg)
 
-### What v2 changes in each job
+### What Memory V2 changes in each job
 
 **Extract.** v1 serializes a filtered transcript and requires three fields:
 detailed `raw_memory`, a recap, and a filename slug. v2 spends the same
@@ -657,7 +672,7 @@ enabled/polluted flags stay shared. Reset clears both trees and keeps those
 flags. Skills and ad-hoc notes can still exist as extensions on whichever
 root is selected.
 
-### What you give up, and when to flip
+### Trade-offs and switching
 
 v2 is **less eager**. It will not learn a working style from one steering
 message. The agent will re-ask or re-discover more often until a preference
@@ -669,25 +684,11 @@ Keep v1 if the pain is an agent that does not anticipate enough. Choose v2
 if the pain is memory that is too confident — rules that hijack new work.
 Those are opposite optimizations. v2 is not v1 with a new folder.
 
-This plugin leaves v1 the default and supports Codex's **dual-write** migration:
-set `version: "v1", dual_write: true` to keep reading v1 while both independent
-pipelines learn from eligible conversations. Neither writer uses the other's
-generated handbook or recaps as its extraction source. The extra learning costs
-extra model calls.
-
-Inspect and OpenCode 2's `/memory` view show **V2 readiness**: a currently valid
-summary plus at least 20 distinct sessions consumed by one successful V2
-consolidation. This is a high-water mark, not a count of runs or a guarantee of
-quality. Pruning does not lower it; resetting memory clears it.
-
-Cutover is explicit: choose `version: "v2"`, restart the server, and start a new
-session. Existing conversations retain their original read version, so their
-injected summary, retrieval tools, dictated notes, and citation credits agree.
-Keep dual-write on while evaluating V2 to preserve a current V1 rollback path;
-turn it off when only V2 should learn. These are **memory pipeline** versions,
-independent of whether the host is OpenCode 1.x or 2.x. The
-[migration walkthrough](../README.md#migrating-from-memory-v1-to-v2) covers the
-configuration steps.
+The plugin supports **dual-write** so both implementations can learn
+independently before you switch. This costs additional model calls. The
+[memory-version guide](memory-versions.md#try-memory-v2-with-an-existing-memory-v1-store)
+covers setup, readiness, switching, and rollback. Existing conversations
+retain their selected memory version; a change applies to new conversations.
 
 ## Conclusion
 
@@ -698,10 +699,10 @@ refuse to invent them — but they share the same three disciplines:
 - **Learning** is retrospective, selective, and evidence-based. It happens in
   the background, passes through a minimum-signal gate that treats "not worth
   writing down" as a first-class answer, and keeps provenance from day one.
-- **Remembering** is layered. A tiny, cache-stable, always-on summary acts as
-  a map; the model itself walks from map to handbook to session recaps on
-  demand; and the deepest layer — the raw past — is never reprocessed, only
-  distilled.
+- **Remembering** starts small. Memory V1's summary routes the agent through
+  a handbook to supporting recaps; Memory V2's summary carries the memory
+  directly, with recaps for extra evidence. Both avoid rereading raw history
+  on every turn.
 - **Forgetting** is continuous and multi-channel. Usage counts make memory
   quality measurable; age without use triggers pruning; deletion of evidence
   propagates surgically into every derived layer; and the human can edit the

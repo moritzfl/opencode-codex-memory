@@ -6,9 +6,9 @@
   </defs>
   <rect width="1280" height="860" fill="#ffffff"/>
 
-  <text x="320" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">v1 — default</text>
+  <text x="320" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Memory V1 — default</text>
   <text x="320" y="66" text-anchor="middle" font-size="15" fill="#6b7280">anticipate the user through a handbook</text>
-  <text x="960" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">v2 — opt-in</text>
+  <text x="960" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#3a3f46">Memory V2 — opt-in</text>
   <text x="960" y="66" text-anchor="middle" font-size="15" fill="#6b7280">write task history; do not invent standing rules</text>
 
   <!-- ===== v1 pyramid (left) ===== -->

@@ -2,6 +2,9 @@
 
 Thanks for your interest in improving `opencode-codex-memory`.
 
+Looking for installation or configuration? Start with the
+[user documentation](README.md#start-here).
+
 ## What this project is (and isn't)
 
 This repo has one goal: **a faithful port of codex's memory system to
@@ -88,6 +91,20 @@ bun run live:e2e       # full write pipeline (Phase 1 + 2 + closed loop)
   `tests/agents.test.ts` enforces this sandbox.
 - On each opencode release: `bun run contract` (OpenAPI + hook surface), then
   prefer `bun run live:e2e` before bumping `@opencode-ai/plugin`.
+
+## Documentation
+
+- Keep the README focused on installation, first use, and choosing memory
+  behavior. Task guides in `docs/` hold configuration, storage, integrations,
+  and troubleshooting; `ARCHITECTURE.md` holds implementation details.
+- Use **Memory V1/V2** for the learning implementations. Explain their
+  trade-offs where users choose between them. Mention **OpenCode 1.x/2.x**
+  where setup or an available control differs, without requiring users to
+  understand the host APIs.
+- Keep full setup examples copyable for the labeled OpenCode version. Label
+  options-only snippets and link to where they belong in the config.
+- Keep operational instructions in one guide and link to them from the
+  conceptual tour. Check relative links and anchors when moving sections.
 
 ## Commits
 

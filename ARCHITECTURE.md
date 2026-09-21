@@ -5,6 +5,11 @@ standalone opencode plugin (no core changes, no MCP server, no separate process)
 This document explains *how the system is shaped and why*, and how to keep it
 aligned with upstream codex over time.
 
+For installation, configuration, and daily use, start with the
+[user documentation](./README.md#start-here). **OpenCode 1.x/2.x** below names
+the host API generation; **Memory V1/V2** names the learning implementation
+selected by the plugin's `version` option.
+
 For the conceptual tour — learning, remembering, forgetting, and the trade-offs
 behind each — see
 [How OpenCode Codex Memory works](./docs/how-ai-memory-works.md).
@@ -88,14 +93,18 @@ STORAGE
                                            discovery go through the plugin API (D4)
 ```
 
+The hook names in this overview are OpenCode 1.x APIs; the OpenCode 2 adapter
+provides the corresponding behavior through its own host APIs.
+
 Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `capture`, `phase1`, `phase2`, `workspace`, `git-baseline`, `redact`, `token`,
 `llm`, `rollout-input`, `reasoning-variant`, `ratelimit`, `paths`, `path-guard`, `host-client`,
 `lifecycle`, `options`, `diagnostics`, `agent-health`) plus external-agent exchange
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
-model-facing tools (`memory.ts`, `control.ts`). OpenCode2 host adapter lives in
-`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. User-facing notes:
-`docs/opencode2.md`. Per-file upstream provenance lives in `codex-map.yaml`.
+model-facing tools (`memory.ts`, `control.ts`). The OpenCode 2 host adapter lives in
+`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. User-facing
+[panel controls](docs/opencode2.md) have their own guide. Per-file upstream
+provenance lives in `codex-map.yaml`.
 
 **Versioned memory:** `version: "v2"` selects `memories_v2/` + `memory_v2.db`,
 summary-only extract/consolidate, and a recap-oriented read path. Default is V1.
@@ -215,6 +224,25 @@ also spawns a configured model client for extraction. Reasoning pins stay Codex
 `low`/`medium` when the model lists them; otherwise `src/reasoning-variant.ts`
 picks the nearest OpenCode effort (host-only — Codex does not need this).
 
+#### Background model selection
+
+Precedence is plugin option (`extract_model` / `consolidation_model`) →
+available host config (`small_model` / `model`) → a model on the
+`memorize-extract` / `memorize` helper agent → host/provider default. The
+first two are passed explicitly and win over an agent-level override.
+
+OpenCode 1.x's automatic small-model pick is internal to the host; the plugin
+can only use an explicitly configured `small_model`. OpenCode 2 has no
+general-purpose small-model field: legacy `small_model` config maps to the
+title agent. Its extraction therefore falls back to the helper session model
+unless `extract_model` is set; consolidation uses the configured `model`
+when available.
+
+Reasoning effort selects `low` for extraction and `medium` for consolidation
+when listed. Otherwise the nearest effort on
+`none < minimal < low < medium < high < xhigh < max` is used, with ties going
+higher. No listed effort variants means no pin.
+
 ### D4 — Retroactive transcript & session access (`src/capture.ts`)
 
 Phase 1 needs past transcripts and a cross-project session listing; the live
@@ -243,6 +271,20 @@ Trade-off accepted: discovery rides an experimental route (stable since
 1.17.x) rather than reading `opencode.db`. The only SQLite the plugin touches
 is its own `memory.db` (D5) — plugin-owned state with no API equivalent.
 
+#### OpenCode 2 discovery and citation handling
+
+The OpenCode 2 adapter lists sessions through a registered local service.
+A separate IDE `serve --port 0` process can use a healthy loopback service
+even when its PID differs from the service registration. A non-loopback PID
+mismatch is refused. Without a registered service, extraction is limited to
+conversations observed by this process; existing summary injection still works.
+
+OpenCode 2 can retain citation markup in persisted replies for native UI
+rendering. The adapter strips it before subsequent model calls, rather than
+relying on OpenCode 1.x's pre-persistence text-completion hook. Status reports
+service unavailability instead of presenting a stale idle state; successful
+consolidation timestamps are kept separate from failed attempts.
+
 ### D5 — Separate plugin DB (`src/db.ts`)
 
 The plugin owns `memory.db` (its own schema + migrations); opencode's own
@@ -262,6 +304,11 @@ schema change.
 #### Codex CLI (`src/codex-interop.ts`)
 
 Two-way exchange of *consolidated* global memory:
+
+The handbook exchange applies only to the **Memory V1 writer**. With
+dual-write enabled it runs through that writer even if new sessions read
+Memory V2; with only the Memory V2 writer enabled it is disabled. Claude
+import below works with either memory writer.
 
 - **Import** (`codex_interop.import`): inside each claimed phase-2 job —
   after the baseline, before the diff capture — Codex's consolidated

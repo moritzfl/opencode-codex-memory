@@ -1,73 +1,37 @@
-# OpenCode 2
+# Memory panel
 
-The same package runs on OpenCode 1.x and OpenCode 2. Memory still lives in
-the plugin home (OpenCode data dir by default, or `home` /
-`OPENCODE_CODEX_MEMORY_HOME`) and uses the same options. Pin the version —
-OpenCode installs a plugin spec once and does not follow “latest”.
+[Documentation home](../README.md#start-here) · [Using memory](usage.md)
 
-## Install
+In OpenCode 2's terminal UI, open **`/memory`** (alias **`/memory-status`**) or
+choose **Show memory status** from the command palette. A compact **Memory**
+indicator also appears in the session sidebar.
 
-In your OpenCode 2 config (`opencode.jsonc` or equivalent):
+The panel works with either memory implementation. On OpenCode 1.x or in an
+interface without this panel, ask the agent to run `memory_inspect` instead.
+For setup, see [Install](../README.md#install).
 
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    { "package": "opencode-codex-memory@0.8.0", "options": { "min_rollout_idle_hours": 1 } },
-  ],
-}
-```
+## Memory panel and controls
 
-OpenCode 1.x keeps the older `"plugin": ["opencode-codex-memory@0.8.0"]` form.
+Status shows which memory version your conversation uses, learning progress,
+Memory V2 readiness, settings, and warnings. It refreshes while open; checking
+status does not start learning. Memory is global, so work from another window
+can appear here.
 
-All V1 options apply unchanged: `generate_memories`, `use_memories`,
-`dedicated_tools`, `disable_on_external_context`, `extract_model`,
-`consolidation_model`, the numeric clamps, `codex_interop`, `claude_import`,
-and `home`.
+| Control | What it does |
+|---|---|
+| **Use memories** | Turn recall on or off |
+| **Learn from sessions** | Pause or resume background learning |
+| **Learn from this session** | Include or exclude this conversation from future learning |
+| **Consolidate now** | Process eligible sessions and update memory without waiting for the usual consolidation cooldown |
 
-## What you get
+The first two toggles last until the server restarts. Use
+[`use_memories` / `generate_memories` in config](configuration.md#learning-and-recall)
+for persistent settings. The per-session learning setting persists.
 
-On OpenCode 1.x the plugin still loads; there is no Memory sidebar there (that
-UI is OpenCode 2 only).
+**Consolidate now** requires learning to be enabled. Sessions must still meet
+the [idle and age limits](configuration.md#frequency-and-retention); it does
+not learn every conversation immediately.
 
-On OpenCode 2 the session sidebar grows a **Memory** section. `/memory-status`
-(also **Show memory status** in the command palette) opens the same snapshot
-`memory_inspect` uses: effective models, read/write settings, import status,
-retry eligibility, and warnings.
-
-- Status is global. Another window’s work shows up here.
-- The panel refreshes on its own while it is open. Opening it does not start
-  extraction or consolidation.
-- **Use memories** / **Learn from sessions** / **Learn from this session**
-  toggle injection and whether sessions are eligible.
-- **Consolidate now** extracts idle sessions and rebuilds the summary, skipping
-  the usual 6-hour cooldown. Turn learning on first. It runs in the background.
-- If the OpenCode 2 service is missing or not this process, the panel shows
-  **Unavailable**, not a stale Idle. **Last success** is only a clean
-  consolidation timestamp; `—` means there isn’t one for that attempt.
-
-## Where it differs from 1.x
-
-Same memories, not the same host. These are the limits that show up in use:
-
-**Background learning lists sessions from this machine’s registered local
-service.** Sessions live in the shared OpenCode database, so an IDE
-`serve --port 0` whose PID does not match `service.json` still uses a
-healthy loopback `--service` for the global list. A non-loopback PID
-mismatch is refused. If no service is registered, this process only
-extracts chats it has seen. Injection of an already-built summary always
-works.
-
-**Citation blocks can stay in the saved transcript** so the sidebar can render
-them. They are stripped before the next model call. OpenCode 1.x removes them
-before the reply is stored.
-
-**Set `extract_model` and `consolidation_model` if you care which models run
-in the background.** OpenCode 2 has no `small_model`. Unset extraction uses the
-session default; consolidation uses the configured `model` when present.
-
-**Helper work still cannot edit your repo.** OpenCode 2 registers the memory
-agents in the project you have open, so those short-lived sessions are created
-there. Their file tools are allowlisted only under the memory folder.
-
-Full 1.x install and configuration: [README](../README.md).
+If the panel shows **Unavailable**, or progress seems stuck, follow
+[Troubleshooting](troubleshooting.md). To choose a different memory
+implementation, use [Memory V1 and Memory V2](memory-versions.md).
