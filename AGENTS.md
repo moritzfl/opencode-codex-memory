@@ -55,7 +55,7 @@ via the drift script before proposing structural changes.
   allow shell, network, task delegation, IDE, or MCP tools; that is the sandbox
   (D2), and `tests/agents.test.ts` enforces it.
 - opencode2 support lives in `src/v2/` and reuses the V1 pipeline via a
-  V1-client shim (`src/v2/shim.ts`). User-facing notes: `docs/opencode2.md`.
+  V1-client shim (`src/v2/shim.ts`). User-facing controls: `docs/usage.md#memory-panel`.
   Rules: never edit V1 behavior for V2 needs (adapt
   in `src/v2/`); `opencode.json` stays the V1 `agent` bundle (same D2
   allowlist; V2 agents are provisioned at runtime; V2 action names: `edit`

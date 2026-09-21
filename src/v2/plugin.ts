@@ -13,7 +13,7 @@
  * - agent.transform    → memorize sub-agent provisioning (was config hook)
  * - tool.transform     → memory tool registration (was returned tool map)
  *
- * Known V2 adaptations (see docs/opencode2.md): global session reads use the
+ * Known V2 adaptations (see ARCHITECTURE.md): global session reads use the
  * registered public service; finalized citations are accounted from durable
  * text events and stripped from model-bound context; config documents are
  * adapted for the shared model resolver.

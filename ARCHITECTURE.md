@@ -103,7 +103,7 @@ Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
 model-facing tools (`memory.ts`, `control.ts`). The OpenCode 2 host adapter lives in
 `src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. User-facing
-[panel controls](docs/opencode2.md) have their own guide. Per-file upstream
+[panel controls](docs/usage.md#memory-panel) are covered in the usage guide. Per-file upstream
 provenance lives in `codex-map.yaml`.
 
 **Versioned memory:** `version: "v2"` selects `memories_v2/` + `memory_v2.db`,

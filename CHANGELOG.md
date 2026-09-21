@@ -133,7 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenCode 2, use the `plugins` package form. Same memory pipeline; V1
   `server()` is unchanged. OpenCode 2 also gets a Memory sidebar and
   `/memory-status`. Host limits (registered service, citations, models)
-  are in `docs/opencode2.md`.
+  are documented in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## [0.6.5] - 2026-08-31
 

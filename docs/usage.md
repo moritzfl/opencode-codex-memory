@@ -62,10 +62,21 @@ shows the current session's memory version, both pipelines' progress when
 present, effective options, resolved storage paths, recent errors, and config
 warnings. Checking status does not start learning.
 
-In **OpenCode 2's terminal UI**, open **`/memory`** (`/memory-status` is an
-alias). It shows status and offers controls, including **Consolidate now**.
-See [panel controls](opencode2.md#memory-panel-and-controls). On
-OpenCode 1.x or an interface without the panel, use `memory_inspect`.
+### Memory panel
+
+In **OpenCode 2's terminal UI**, open **`/memory`** (alias **`/memory-status`**)
+or choose **Show memory status** from the command palette. A compact
+**Memory** indicator also appears in the sidebar. The panel works with both
+memory implementations and refreshes while open. Because memory is global,
+work from another window can appear here too.
+
+The panel offers the [learning and recall controls](#pause-learning-or-recall)
+below, plus **Consolidate now**. This processes eligible sessions and updates
+memory without waiting for the usual consolidation cooldown. Learning must be
+enabled, and sessions must still meet the [idle and age limits](configuration.md#frequency-and-retention).
+
+On OpenCode 1.x or an interface without the panel, use `memory_inspect`.
+If the panel shows **Unavailable**, see [Troubleshooting](troubleshooting.md).
 
 ## Pause learning or recall
 

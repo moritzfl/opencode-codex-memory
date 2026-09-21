@@ -126,7 +126,7 @@ options are clamped to the following integer ranges.
 | `max_unused_days` | `30` | 0–365 | Retention horizon for unused extracted session records. |
 
 Consolidation normally has a six-hour cooldown. OpenCode 2's
-[Consolidate now control](opencode2.md#memory-panel-and-controls) can skip that
+[Consolidate now control](usage.md#memory-panel) can skip that
 cooldown; sessions must still meet extraction eligibility rules.
 
 ## Storage and integrations
