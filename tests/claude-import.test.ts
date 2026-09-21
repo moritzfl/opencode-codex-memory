@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test"
 import fs from "fs"
 import path from "path"
 import os from "os"
@@ -176,6 +176,66 @@ describe("syncClaudeImport", () => {
     expect(
       fs.existsSync(path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "orphan")),
     ).toBe(false)
+  })
+
+  it("preserves a scoped import when its project cwd becomes unavailable", () => {
+    const { syncClaudeImport } = mod()
+    seedProject("project-a", "cwd-a", { "MEMORY.md": "A" })
+    const options = { enabled: true, claude_home: CLAUDE_HOME }
+    syncClaudeImport(options)
+    fs.renameSync(path.join(TEST_ROOT, "cwd-a"), path.join(TEST_ROOT, "moved-cwd"))
+    const target = path.join(pluginMemoryRoot(), "extensions/external_agent_import/resources/project-a")
+    const scope = fs.readFileSync(path.join(target, "scope.json"), "utf8")
+    const result = syncClaudeImport(options)
+    expect(result.changed).toBe(false)
+    expect(result.skippedNoCwd).toEqual(["project-a"])
+    expect(fs.readFileSync(path.join(target, "MEMORY.md"), "utf8")).toBe("A")
+    expect(fs.readFileSync(path.join(target, "scope.json"), "utf8")).toBe(scope)
+    fs.unlinkSync(path.join(target, "scope.json"))
+    expect(syncClaudeImport(options).changed).toBe(true)
+    expect(fs.existsSync(target)).toBe(false)
+  })
+
+  it.each(["projects", "projects/project-a", "projects/project-a/memory", "projects/project-a/memory/topics"])(
+    "preserves imports when discovery cannot read %s", (relative) => {
+      const { syncClaudeImport } = mod()
+      seedProject("project-a", "cwd-a", { "MEMORY.md": "A", "topics/extra.md": "details" })
+      const options = { enabled: true, claude_home: CLAUDE_HOME }
+      syncClaudeImport(options)
+      const target = path.join(pluginMemoryRoot(), "extensions/external_agent_import/resources/project-a")
+      const readdir = fs.readdirSync
+      const blocked = path.join(CLAUDE_HOME, relative)
+      const spy = spyOn(fs, "readdirSync").mockImplementation(((dir: any, opts: any) => {
+        if (String(dir) === blocked) throw Object.assign(new Error("EACCES: source unreadable"), { code: "EACCES" })
+        return readdir(dir, opts)
+      }) as any)
+      try {
+        expect(() => syncClaudeImport(options)).toThrow("EACCES")
+        expect(fs.readFileSync(path.join(target, "MEMORY.md"), "utf8")).toBe("A")
+        expect(fs.readFileSync(path.join(target, "topics/extra.md"), "utf8")).toBe("details")
+      } finally {
+        spy.mockRestore()
+      }
+      expect(syncClaudeImport(options).changed).toBe(false)
+    },
+  )
+
+  it("does not treat source metadata errors as missing directories", () => {
+    const { syncClaudeImport } = mod()
+    const memory = seedProject("project-a", "cwd-a", { "MEMORY.md": "A" })
+    const options = { enabled: true, claude_home: CLAUDE_HOME }
+    syncClaudeImport(options)
+    const lstat = fs.lstatSync
+    const spy = spyOn(fs, "lstatSync").mockImplementation(((file: any, opts: any) => {
+      if (String(file) === memory) throw Object.assign(new Error("EIO: source unavailable"), { code: "EIO" })
+      return lstat(file, opts)
+    }) as any)
+    try {
+      expect(() => syncClaudeImport(options)).toThrow("EIO")
+      expect(fs.readFileSync(path.join(pluginMemoryRoot(), "extensions/external_agent_import/resources/project-a/MEMORY.md"), "utf8")).toBe("A")
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it("prunes owned projects outside a tightened allowlist", () => {

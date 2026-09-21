@@ -98,8 +98,9 @@ function lstatKind(p: string): "missing" | "file" | "dir" | "other" {
     if (st.isFile()) return "file"
     if (st.isDirectory()) return "dir"
     return "other"
-  } catch {
-    return "missing"
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "missing"
+    throw err
   }
 }
 
@@ -109,12 +110,7 @@ function lstatKind(p: string): "missing" | "file" | "dir" | "other" {
  * cwd that canonicalizes to an existing directory wins.
  */
 export function projectCwdFromSessions(projectRoot: string): string | null {
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(projectRoot, { withFileTypes: true })
-  } catch {
-    return null
-  }
+  const entries = fs.readdirSync(projectRoot, { withFileTypes: true })
   const sessions = entries
     .filter((e) => e.isFile() && e.name.endsWith(".jsonl"))
     .map((e) => {
@@ -164,12 +160,9 @@ function collectMarkdownFiles(
   projectCwd: string | null,
   out: ExternalMemoryFile[],
 ): void {
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(currentDir, { withFileTypes: true })
-  } catch {
-    return
-  }
+  // A partial scan is not a deletion signal. Codex propagates discovery errors
+  // before replacing/pruning any imported project.
+  const entries = fs.readdirSync(currentDir, { withFileTypes: true })
   entries.sort((a, b) => a.name.localeCompare(b.name))
   for (const entry of entries) {
     const full = path.join(currentDir, entry.name)
@@ -200,12 +193,7 @@ export function discoverExternalMemoryFiles(claudeHome: string): ExternalMemoryF
   if (lstatKind(projectsRoot) !== "dir") return []
 
   const files: ExternalMemoryFile[] = []
-  let projectEntries: fs.Dirent[]
-  try {
-    projectEntries = fs.readdirSync(projectsRoot, { withFileTypes: true })
-  } catch {
-    return []
-  }
+  const projectEntries = fs.readdirSync(projectsRoot, { withFileTypes: true })
   projectEntries.sort((a, b) => a.name.localeCompare(b.name))
   for (const entry of projectEntries) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue
@@ -336,6 +324,14 @@ function removeProjectResources(projectKey: string): boolean {
   return true
 }
 
+/** Codex project_has_unscoped_target: keep valid scoped imports when cwd is unavailable. */
+function projectHasUnscopedTarget(projectKey: string): boolean {
+  const target = path.join(memoryRoot(), "extensions", EXTENSION_NAME, "resources", projectKey)
+  const kind = lstatKind(target)
+  if (kind === "missing") return false
+  return kind !== "dir" || lstatKind(path.join(target, PROJECT_SCOPE_FILE)) !== "file"
+}
+
 function replaceProjectResources(
   projectKey: string,
   projectCwd: string,
@@ -399,7 +395,11 @@ export function syncClaudeImport(opts: ClaudeImportOptions): ClaudeImportSyncRes
   if (!opts.enabled) return empty
 
   const claudeHome = resolveClaudeHome(opts)
-  if (lstatKind(claudeHome) !== "dir") return empty
+  try {
+    if (lstatKind(claudeHome) !== "dir") return empty
+  } catch {
+    return empty // Unreachable home is the documented quiet no-op.
+  }
 
   const allFiles = discoverExternalMemoryFiles(claudeHome)
   const byProject = groupByProject(allFiles)
@@ -446,8 +446,7 @@ export function syncClaudeImport(opts: ClaudeImportOptions): ClaudeImportSyncRes
       skippedNoCwd.push(projectKey)
       // Unscoped leftovers under this key → remove (codex project_has_unscoped_target).
       try {
-        const target = path.join(memoryRoot(), "extensions", EXTENSION_NAME, "resources", projectKey)
-        if (lstatKind(target) !== "missing") {
+        if (projectHasUnscopedTarget(projectKey)) {
           if (removeProjectResources(projectKey)) {
             changed = true
             synchronizedProjects.push(projectKey)

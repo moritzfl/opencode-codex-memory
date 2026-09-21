@@ -392,7 +392,10 @@ mappings:
       project cwd from newest session *.jsonl with an absolute existing cwd
       (project_cwd_from_sessions), whole-project replace with scope.json +
       EXTENSION_INSTRUCTIONS (byte-equality change detection, source-gone
-      removes resources). DIVERGENCES: no migration UI / selected_memory list —
+      removes resources). Discovery I/O errors propagate before pruning;
+      unavailable cwd only removes unscoped targets (a regular scope.json
+      preserves existing resources), matching project_has_unscoped_target.
+      DIVERGENCES: no migration UI / selected_memory list —
       continuous phase-2 sync when claude_import.enabled (optional projects
       allowlist; omit = all with cwd); unreachable Claude home is a quiet no-op
       (not fatal); no state-DB enqueue (sync runs inside the claimed phase-2 job
