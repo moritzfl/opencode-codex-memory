@@ -230,9 +230,11 @@ describe("idle event handling", () => {
     require("../src/db.js").closeDb()
   })
   afterEach(async () => {
-    delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    // Phase 2 resolves workspace paths after awaiting phase 1. Keep the test
+    // root bound until every background write and DB handle has finished.
     await waitForBackgroundTasks()
     require("../src/db.js").closeDb()
+    delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
   })
 
