@@ -14,7 +14,7 @@
  * hidden definition preserves the health snapshot both agents report into.
  */
 import path from "path"
-import { memoryRoot } from "../paths.js"
+import { allMemoryRoots, memoryRoot } from "../paths.js"
 import { pluginOptions } from "../options.js"
 import { writeMemoryVersions } from "../memory-version.js"
 import { recordAgentConfig } from "../agent-health.js"
@@ -50,11 +50,7 @@ export function buildMemorizeAgent(): V2AgentDefinition {
       // Memories live outside every project: without this grant the wildcard
       // deny blocks consolidation from touching the memory workspace (same
       // role as external_directory in the V1 definition).
-      ...writeMemoryVersions().flatMap((version) =>
-        ["read", "edit", "glob", "grep", "external_directory"].map((action) => ({
-          action, resource: path.join(memoryRoot(version), "*"), effect: "allow" as const,
-        })),
-      ),
+      ...writeMemoryVersions().flatMap((version) => workspacePermissions(memoryRoot(version))),
     ],
   }
 }
@@ -63,9 +59,18 @@ export function buildMemorizeAgent(): V2AgentDefinition {
 export function consolidationPermissions(root: string): V2AgentDefinition["permissions"] {
   return [
     { action: "*", resource: "*", effect: "deny" },
-    ...["read", "edit", "glob", "grep", "external_directory"].map((action) => ({
-      action, resource: path.join(root, "*"), effect: "allow" as const,
-    })),
+    ...workspacePermissions(root),
+  ]
+}
+
+function workspacePermissions(root: string): V2AgentDefinition["permissions"] {
+  return [
+    ...["read", "edit", "external_directory"].flatMap((action) => [root, path.join(root, "*")].map((resource) => ({
+      action, resource, effect: "allow" as const,
+    }))),
+    // These actions check the search pattern, not a path. search-sandbox.ts
+    // wraps the built-in executors to enforce this helper's single root.
+    ...["glob", "grep"].map((action) => ({ action, resource: "*", effect: "allow" as const })),
   ]
 }
 
@@ -102,6 +107,8 @@ export function toV1AgentDefinition(def: V2AgentDefinition, agentId?: string): R
       continue
     }
     if (rule.action === "external_directory") {
+      // V1 health expects only root/*; its V1 sandbox already includes root.
+      if (allMemoryRoots().includes(rule.resource)) continue
       const cur = (permission.external_directory ?? {}) as Record<string, unknown>
       cur[rule.resource] = rule.effect
       permission.external_directory = cur
@@ -206,7 +213,9 @@ function isShippedIncomplete(id: string, existing: Record<string, unknown>, ship
   if (id !== MEMORIZE_AGENT_ID) return false
   const perms = existing.permissions
   if (!Array.isArray(perms)) return true
-  return !perms.some((rule) => rule && typeof rule === "object" && (rule as { action?: unknown }).action === "external_directory")
+  return shipped.permissions.some((expected) => !perms.some((rule) =>
+    rule?.action === expected.action && rule?.resource === expected.resource && rule?.effect === expected.effect,
+  ))
 }
 
 function v2PermissionsToV1Map(permissions: unknown): Record<string, unknown> {
@@ -219,6 +228,7 @@ function v2PermissionsToV1Map(permissions: unknown): Record<string, unknown> {
       continue
     }
     if (rule.action === "external_directory" && typeof rule.resource === "string") {
+      if (allMemoryRoots().includes(rule.resource)) continue
       const cur = (out.external_directory ?? {}) as Record<string, unknown>
       cur[rule.resource] = rule.effect
       out.external_directory = cur

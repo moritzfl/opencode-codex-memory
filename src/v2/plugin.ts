@@ -46,6 +46,7 @@ import {
 } from "./shim.js"
 import { ensureV2Agents } from "./agents.js"
 import { buildV2Tools } from "./tools.js"
+import { guardMemorySearchTools } from "./search-sandbox.js"
 import { MemoryStatusRpc } from "./status-rpc.js"
 import { readMemoryStatus } from "./status.js"
 import { recordInjection, resetInjectionStats } from "./injection.js"
@@ -287,6 +288,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
   }
 
   await ctx.tool.transform((editor: any) => {
+    guardMemorySearchTools(editor, (sessionID) => ctx.session.get({ sessionID } as any))
     for (const t of buildV2Tools()) editor.add(t)
   })
 

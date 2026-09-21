@@ -65,9 +65,8 @@ describe("v2 agent definitions", () => {
     for (const rule of rules) {
       if (rule.effect === "allow") {
         expect(ALLOWED_V2_ACTIONS.has(rule.action), `unexpected allowed action ${rule.action}`).toBe(true)
-        if (rule.action !== "external_directory") {
-          expect(rule.resource).toBe(path.join(memoryRoot(), "*"))
-        }
+        if (rule.action === "glob" || rule.action === "grep") expect(rule.resource).toBe("*")
+        else expect([memoryRoot(), path.join(memoryRoot(), "*")]).toContain(rule.resource)
       }
     }
     const allows = new Set(rules.filter((r) => r.effect === "allow").map((r) => r.action))
@@ -83,7 +82,7 @@ describe("v2 agent definitions", () => {
   it("built memorize agent adds the memory-root external_directory grant", () => {
     const def = buildMemorizeAgent()
     expect(def.system).toBe(SHIPPED_V2.memorize.system)
-    const grant = def.permissions.find((r) => r.action === "external_directory")
+    const grant = def.permissions.find((r) => r.action === "external_directory" && r.resource.endsWith("*"))
     expect(grant).toEqual({ action: "external_directory", resource: path.join(memoryRoot(), "*"), effect: "allow" })
   })
 

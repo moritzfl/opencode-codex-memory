@@ -209,7 +209,10 @@ describe("V1 client shim", () => {
     for (const version of ["v1", "v2"] as const) {
       const permissions = rules.find((row) => row.metadata.version === version).permissions
       expect(permissions[0]).toEqual({ action: "*", resource: "*", effect: "deny" })
-      expect(permissions.slice(1).every((rule: any) => rule.resource === path.join(memoryRoot(version), "*"))).toBe(true)
+      expect(permissions.filter((rule: any) => rule.action === "read").map((rule: any) => rule.resource)).toEqual([
+        memoryRoot(version), path.join(memoryRoot(version), "*"),
+      ])
+      expect(permissions.find((rule: any) => rule.action === "grep")).toMatchObject({ resource: "*", effect: "allow" })
     }
   })
 

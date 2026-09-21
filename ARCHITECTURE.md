@@ -200,8 +200,10 @@ differs by host:
   the agent's grants for both roots when dual-write is configured.
 - **OpenCode2:** V2 agents are location-scoped, so helpers spawn in the
   active plugin location (`setSubSessionDirectory`). Session boundary is the
-  project; memory-root scoping is permission-only (`read`/`edit`/`glob`/`grep`
-  + `external_directory` under the memory workspace, everything else denied).
+  project; path permissions scope `read`/`edit` + `external_directory` to the
+  memory workspace. `glob`/`grep` permissions match search patterns, so V2
+  wraps their built-in executors to validate paths against the helper's one
+  session-granted memory root, defaulting relative searches to that root.
   Helper creation supplies session-scoped deny-first rules that narrow access
   to that job's one root before any agentic prompt.
 

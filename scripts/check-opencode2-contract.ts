@@ -122,6 +122,9 @@ async function main(): Promise<void> {
       if (!id) throw new Error(`sandbox session create HTTP ${created.status}`)
       for (const [action, resource, expected] of [
         ["edit", path.join(own, "memory_summary.md"), "allow"],
+        ["read", own, "allow"],
+        ["glob", "**/*.md", "allow"],
+        ["grep", "deployment", "allow"],
         ["edit", path.join(other, "memory_summary.md"), "deny"],
         ["read", path.join(other, "memory_summary.md"), "deny"],
         ["edit", path.join(sandbox.project, "source.ts"), "deny"],
@@ -197,7 +200,11 @@ async function main(): Promise<void> {
 
     const memoryRoot = path.join(testRoot, "memories")
     for (const rule of rules.filter((r) => r.effect === "allow" && r.action !== "external_directory")) {
-      note(rule.resource === path.join(memoryRoot, "*"), `${rule.action} is scoped to the memory workspace`)
+      if (rule.action === "glob" || rule.action === "grep") {
+        note(rule.resource === "*", `${rule.action} permits search patterns (executor enforces paths)`)
+      } else {
+        note([memoryRoot, path.join(memoryRoot, "*")].includes(rule.resource), `${rule.action} is scoped to the memory workspace`)
+      }
     }
 
     // Exercise the package as consumers receive it. The V1 install omits all

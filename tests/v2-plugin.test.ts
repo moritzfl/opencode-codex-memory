@@ -40,7 +40,7 @@ function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
     },
     tool: {
       transform: async (cb: (e: any) => void) => {
-        cb({ add: (t: any) => added.push(t) })
+        cb({ add: (t: any) => added.push(t), update: () => {} })
       },
       hook: async (name: string, cb: (e: any) => unknown) => {
         ;(hooks[name] ??= []).push(cb)
