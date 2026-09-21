@@ -27,7 +27,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { memoryRoot } from "../paths.js"
 import { consolidationPermissions } from "./agents.js"
-import { invalidateOwnService, lastServiceFailure, ownServiceClient, type V2ServiceClient } from "./service.js"
+import { invalidateOwnService, lastServiceFailure, ownServiceClient, serviceRequest, type V2ServiceClient } from "./service.js"
 
 export type V2Context = Plugin.Context
 
@@ -62,7 +62,7 @@ function isNotFoundError(e: unknown): boolean {
 async function sessionGoneOnService(client: V2ServiceClient, sessionID: string): Promise<boolean> {
   if (typeof client.session.get !== "function") return false
   try {
-    const info = await client.session.get({ sessionID })
+    const info = await serviceRequest(client, () => client.session.get({ sessionID }))
     if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
       return true
     }
@@ -296,10 +296,10 @@ async function loadV2Messages(sessionID: string, context?: V2Context, signal?: A
     const seenCursors = new Set<string>()
     let cursor: string | undefined
     while (true) {
-      const response = await client.message.list(
+      const response = await serviceRequest(client, () => client.message!.list(
         cursor ? { sessionID, cursor } : { sessionID, order: "asc" },
         signal ? { signal } : undefined,
-      )
+      ))
       const rows = responseRows(response)
       if (!rows) throw new Error("registered service returned an invalid message list")
       messages.push(...rows)
@@ -384,7 +384,7 @@ async function v2promptWithWait(
     if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
     const publicClient = await ownServiceClient()
     if (typeof publicClient?.generate?.text === "function") {
-      const gen = await publicClient.generate.text(payload, signal ? { signal } : undefined)
+      const gen = await serviceRequest(publicClient, () => publicClient.generate!.text(payload, signal ? { signal } : undefined))
       const outText = typeof (gen as { text?: unknown })?.text === "string" ? (gen as { text: string }).text : JSON.stringify(gen)
       return { data: { parts: [{ type: "text", text: outText }] } }
     }
@@ -503,7 +503,7 @@ export function buildV1ClientShim(): unknown {
     }
     const client = await ownServiceClient()
     if (client && typeof client.session.list === "function") {
-      return paginateSessionList((input) => client.session.list(input), limit, cursor, search)
+      return paginateSessionList((input) => serviceRequest(client, () => client.session.list(input)), limit, cursor, search)
     }
     if (client) throw new Error("registered service does not support session.list")
     return { data: listObservedSessions(limit, cursor, search) }
@@ -561,10 +561,10 @@ export function buildV1ClientShim(): unknown {
       try {
         const client = await serviceOrThrow()
         if (typeof client.session.remove !== "function") throw new Error("registered service does not support session.remove")
-        const result = await client.session.remove(
+        const result = await serviceRequest(client, () => client.session.remove(
           { sessionID: opts.path.id },
           opts.signal ? { signal: opts.signal } : undefined,
-        )
+        ))
         if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
         if (await sessionGoneOnService(client, opts.path.id)) {
           markReleased(opts.path.id)
@@ -585,7 +585,7 @@ export function buildV1ClientShim(): unknown {
       try {
         const client = await ownServiceClient()
         if (client?.session?.get) {
-          const info = await client.session.get({ sessionID: opts.path.id })
+          const info = await serviceRequest(client, () => client.session.get({ sessionID: opts.path.id }))
           if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
             markReleased(opts.path.id)
             return {}
@@ -617,7 +617,7 @@ export function buildV1ClientShim(): unknown {
         const client = await ownServiceClient()
         if (client?.session?.get) {
           try {
-            const info = und(await client.session.get({ sessionID: opts.path.id }))
+            const info = und(await serviceRequest(client, () => client.session.get({ sessionID: opts.path.id })))
             return { data: info }
           } catch (e) {
             if (isNotFoundError(e)) return { response: { status: 404 }, error: e }
@@ -636,7 +636,7 @@ export function buildV1ClientShim(): unknown {
       try {
         const client = await serviceOrThrow()
         if (typeof client.session.interrupt !== "function") throw new Error("registered service does not support session.interrupt")
-        const result = await client.session.interrupt({ sessionID: opts.path.id })
+        const result = await serviceRequest(client, () => client.session.interrupt({ sessionID: opts.path.id }))
         if (!(result as { error?: unknown } | null | undefined)?.error) return {}
       } catch {
         // Fall through to the context-local interrupt below.
@@ -653,7 +653,7 @@ export function buildV1ClientShim(): unknown {
     get: async () => {
       try {
         const client = await serviceOrThrow()
-        const response = await client.config?.get({ location: { directory: ctx().location.directory } })
+        const response = await serviceRequest(client, async () => client.config?.get({ location: { directory: ctx().location.directory } }))
         const documents = und(response)
         const candidates = Array.isArray(documents) ? documents : documents?.type === "document" ? [documents] : []
         let info: Record<string, unknown> = {}

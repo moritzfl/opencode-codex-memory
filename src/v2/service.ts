@@ -47,24 +47,59 @@ export interface V2ServiceDependencies {
 
 let testDependencies: V2ServiceDependencies | null = null
 let clientPromise: Promise<V2ServiceClient | null> | null = null
+let cachedClient: V2ServiceClient | null = null
 let lastFailure: string | null = null
 const SERVICE_REQUEST_TIMEOUT_MS = 3_000
 
 /** Test seam: replace discovery without changing the production connection path. */
 export function setV2ServiceDependenciesForTest(dependencies: V2ServiceDependencies | null): void {
   testDependencies = dependencies
-  clientPromise = null
+  invalidateOwnService()
 }
 
 /** Forget a cached endpoint after a service restart or failed request. */
 export function invalidateOwnService(): void {
   clientPromise = null
+  cachedClient = null
   lastFailure = null
 }
 
 /** Last discoverOwnService failure, if ownServiceClient returned null. */
 export function lastServiceFailure(): string | null {
   return lastFailure
+}
+
+function connectionFailed(error: unknown): boolean {
+  let failed = false
+  const seen = new Set<unknown>()
+  for (let current = error as any; current && !seen.has(current); current = current.cause ?? current.error) {
+    seen.add(current)
+    if (current.name === "AbortError") return false
+    const status = current.status ?? current.statusCode ?? current.response?.status
+    if (status === 401 || status === 403 || current.reason === "Transport") failed = true
+    if (/ECONNREFUSED|ECONNRESET|EPIPE|ENOTFOUND|ETIMEDOUT|fetch failed|unauthori[sz]ed/i.test(
+      [current.code, current.type, current._tag, current.name, current.message].join(" "),
+    )) failed = true
+  }
+  return failed
+}
+
+/** Invalidate broken endpoints for the next call. Never replay mutations or generation. */
+export async function serviceRequest<T>(client: V2ServiceClient, request: () => Promise<T>): Promise<T> {
+  const invalidate = (error: unknown) => {
+    if (client === cachedClient && connectionFailed(error)) {
+      invalidateOwnService()
+      lastFailure = error instanceof Error ? error.message : "registered OpenCode service connection failed"
+    }
+  }
+  try {
+    const result = await request()
+    invalidate((result as { error?: unknown } | null | undefined)?.error)
+    return result
+  } catch (error) {
+    invalidate(error)
+    throw error
+  }
 }
 
 /** Auth headers for the registered local service. */
@@ -241,17 +276,20 @@ export async function ownServiceClient(): Promise<V2ServiceClient | null> {
   if (!clientPromise) {
     const request = discoverOwnService()
       .then((found) => {
-        lastFailure = found ? null : "no registered OpenCode 2 service.json"
+        if (clientPromise === request) {
+          cachedClient = found?.client ?? null
+          lastFailure = found ? null : "no registered OpenCode 2 service.json"
+        }
         return found?.client ?? null
       })
       .catch((err) => {
-        lastFailure = err instanceof Error ? err.message : String(err)
+        if (clientPromise === request) lastFailure = err instanceof Error ? err.message : String(err)
         console.warn("[opencode-codex-memory] registered OpenCode service unavailable:", err)
         return null
       })
     clientPromise = request
     const result = await request
-    if (!result) clientPromise = null
+    if (!result && clientPromise === request) clientPromise = null
     return result
   }
   return clientPromise

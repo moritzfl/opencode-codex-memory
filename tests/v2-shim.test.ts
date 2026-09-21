@@ -18,6 +18,7 @@ import {
   readRegisteredEndpoint,
   serviceHeaders,
   setV2ServiceDependenciesForTest,
+  serviceRequest,
 } from "../src/v2/service.js"
 import fs from "fs"
 import os from "os"
@@ -423,6 +424,60 @@ describe("V1 client shim", () => {
     expect(res.data).toHaveLength(2)
     expect(res.data[0].time.updated).toBeGreaterThanOrEqual(res.data[1].time.updated)
     expect(res.data[0].id).toBe("ses_b")
+  })
+
+  it.each([
+    Object.assign(new Error("Transport"), { reason: "Transport", cause: Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }) }),
+    { error: { type: "UnauthorizedError", message: "unauthorized", status: 401 } },
+  ])("rediscovers the service after a connection or auth failure", async (failure) => {
+    let port = 4096
+    let discoveries = 0
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => { discoveries++; return { url: `http://127.0.0.1:${port}` } }, headers: () => undefined },
+      probe: async () => ({ version: "2.0.12", pid: process.pid }),
+      make: ({ baseUrl }) => ({ session: { list: async () => {
+        if (!baseUrl.endsWith(String(port))) throw failure
+        return { data: [{ id: "ses_live" }] }
+      } } }),
+    })
+    const client = buildV1ClientShim() as any
+    const list = () => client._client.get({ url: "/experimental/session" })
+    expect((await list()).data).toHaveLength(1)
+    port = 4097
+    await expect(list()).rejects.toEqual(failure)
+    expect((await list()).data).toHaveLength(1)
+    expect(discoveries).toBe(2)
+  })
+
+  it("does not invalidate on a missing session or deliberate cancellation", async () => {
+    const client = (await ownServiceClient())!
+    for (const error of [
+      { _tag: "SessionNotFoundError", status: 404 },
+      Object.assign(new Error("Transport"), { reason: "Transport", cause: new DOMException("cancelled", "AbortError") }),
+    ]) {
+      await expect(serviceRequest(client, async () => { throw error })).rejects.toEqual(error)
+      expect(await ownServiceClient()).toBe(client)
+    }
+  })
+
+  it("does not replay mutations or let stale failures invalidate a replacement client", async () => {
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+      probe: async () => ({ version: "2.0.12", pid: process.pid }),
+      make: () => ({ session: {} }),
+    })
+    const first = (await ownServiceClient())!
+    let mutations = 0
+    const fail = () => serviceRequest(first, async () => {
+      mutations++
+      throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" })
+    })
+    await expect(fail()).rejects.toThrow("connection reset")
+    expect(mutations).toBe(1)
+    const next = (await ownServiceClient())!
+    expect(next).not.toBe(first)
+    await expect(fail()).rejects.toThrow()
+    expect(await ownServiceClient()).toBe(next)
   })
 
   it("follows the public session cursor until the requested global page is complete", async () => {
