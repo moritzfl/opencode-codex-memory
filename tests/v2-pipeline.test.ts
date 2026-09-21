@@ -12,6 +12,7 @@ import { setPluginInput } from "../src/llm.js"
 import { MemoryStore } from "../src/store.js"
 import { setV2Context, buildV1ClientShim, resetV2ShimStateForTest } from "../src/v2/shim.js"
 import { setV2ServiceDependenciesForTest } from "../src/v2/service.js"
+import { captureWorkspaceDiff } from "../src/git-baseline.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2pipeline-${process.pid}-${Date.now()}`)
 const SESSION_ID = "ses_v2pipeline"
@@ -38,7 +39,7 @@ afterEach(() => {
 })
 
 describe("v2 fake-context write pipeline", () => {
-  it("extracts via generate.text, consolidates via helper session, and injects", async () => {
+  it.each([true, false])("extracts, validates the completed helper, and injects (public messages: %s)", async (publicMessages) => {
     const updatedAt = Date.now() - 7 * 60 * 60 * 1000
     const created: string[] = []
     const switched: { agent?: string; model?: unknown }[] = []
@@ -79,6 +80,11 @@ describe("v2 fake-context write pipeline", () => {
           return { id: input.sessionID, parentID: null }
         },
         context: async (input: { sessionID: string }) => {
+          if (input.sessionID === "sub-consolidate") return [
+            { id: "msg_1", type: "user", text: "consolidate", time: { created: 1 } },
+            { id: "msg_done", type: "assistant", time: { created: 2, completed: 3 }, finish: "stop", content: [{ type: "text", text: "done" }] },
+            { id: "msg_idle", type: "idle", outcome: "succeeded", time: { created: 4 } },
+          ]
           if (input.sessionID !== SESSION_ID) return []
           return [
             { id: "u1", time: { created: 1 }, text: "Use the durable CSV parser convention.", type: "user" },
@@ -126,9 +132,9 @@ describe("v2 fake-context write pipeline", () => {
           },
           interrupt: async () => {},
         },
-        message: {
-          list: async () => ({ data: await ctx.session.context({ sessionID: SESSION_ID }) }),
-        },
+        ...(publicMessages ? { message: {
+          list: async (input?: unknown) => ({ data: await ctx.session.context(input) }),
+        } } : {}),
       }),
     })
 
@@ -165,6 +171,7 @@ describe("v2 fake-context write pipeline", () => {
     // The public service owns helper shutdown and deletion.
     expect(removed).toContain("sub-consolidate")
     expect(interrupted).toEqual([])
+    expect((await captureWorkspaceDiff()).changes).toEqual([])
 
     const prompt = buildMemorySystemPrompt(true)
     expect(prompt).toContain("CSV parser uses strict typed rows.")
