@@ -354,7 +354,7 @@ describe("V1 client shim", () => {
     })
   })
 
-  it("surfaces GET /api/status HTTP failures instead of a generic unhealthy", async () => {
+  it("surfaces readiness HTTP failures instead of a generic unhealthy", async () => {
     const orig = globalThis.fetch
     globalThis.fetch = (async () => new Response("denied", { status: 401 })) as unknown as typeof fetch
     try {

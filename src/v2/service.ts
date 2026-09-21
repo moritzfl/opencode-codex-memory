@@ -5,8 +5,9 @@
  * documented plugin API; global session list is missing there, so we talk
  * HTTP via `@opencode/client` (a runtime dependency so the plugin cache
  * actually installs it). Discovery reads XDG `service.json` (never
- * Service.ensure() / Service.discover() — those still probe /api/health,
- * which 2.0.5 404s). GET /api/status pid must match this process.
+ * Service.ensure() / Service.discover() — the bundled client probes the
+ * removed /api/health route). Probe /api/info, with legacy route fallbacks.
+ * A different local service PID is accepted only on loopback.
  */
 
 import { readFile } from "node:fs/promises"
@@ -32,7 +33,7 @@ export interface V2ServiceClient {
   generate?: {
     text: (input: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>
   }
-  /** Test/legacy only. Production probes /api/status, not this. */
+  /** Test/legacy only. Production probes readiness over HTTP, not this. */
   health?: { get: (options?: { signal?: AbortSignal }) => Promise<unknown> }
 }
 
@@ -196,14 +197,18 @@ export async function fetchServiceStatus(
   headers: Record<string, string> | undefined,
   signal?: AbortSignal,
 ): Promise<V2ServiceStatus> {
-  const statusRes = await fetchJson(new URL("/api/status", endpoint.url), headers, signal)
-  const fromStatus = parseReadyStatus(statusRes.body)
-  if (fromStatus) return fromStatus
-  if (!statusRes.ok) throw new Error(`GET /api/status ${String(statusRes.status)}`)
-  const healthRes = await fetchJson(new URL("/api/health", endpoint.url), headers, signal)
-  const fromHealth = parseReadyStatus(healthRes.body)
-  if (fromHealth) return fromHealth
-  throw new Error("registered OpenCode service is not healthy")
+  // Current hosts expose /api/info; older 2.x hosts used /api/status or
+  // /api/health. Only a missing route permits fallback: auth/server failures
+  // and an explicitly unready response must not look like a healthy service.
+  for (const route of ["/api/info", "/api/status", "/api/health"]) {
+    const response = await fetchJson(new URL(route, endpoint.url), headers, signal)
+    if (response.status === 404) continue
+    if (!response.ok) throw new Error(`GET ${route} ${response.status}`)
+    const ready = parseReadyStatus(response.body)
+    if (ready) return ready
+    throw new Error(`registered OpenCode service is not healthy (GET ${route})`)
+  }
+  throw new Error("registered OpenCode service has no readiness endpoint (/api/info, /api/status, /api/health returned 404)")
 }
 
 function productionDependencies(): V2ServiceDependencies {

@@ -10,8 +10,10 @@ it("recovers real public-client discovery after local service restart and creden
   const handler = (req: Request) => {
     const expected = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
     if (req.headers.get("authorization") !== expected) return Response.json({ type: "UnauthorizedError", message: "Unauthorized" }, { status: 401 })
-    if (new URL(req.url).pathname === "/api/status") return Response.json({ version: "2.0.12", pid: process.pid })
-    return Response.json({ data: [{ id: "ses_live", parentID: null, time: { updated: 1 } }] })
+    const pathname = new URL(req.url).pathname
+    if (pathname === "/api/info") return Response.json({ version: "2.0.12", pid: process.pid })
+    if (pathname === "/api/session") return Response.json({ data: [{ id: "ses_live", parentID: null, time: { updated: 1 } }] })
+    return new Response(null, { status: 404 })
   }
   const first = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: handler })
   let active = first
@@ -38,5 +40,37 @@ it("recovers real public-client discovery after local service restart and creden
   } finally {
     await first.stop(true)
     await active.stop(true)
+  }
+})
+
+it.each(["/api/info", "/api/status", "/api/health"])("discovers hosts exposing readiness at %s", async (route) => {
+  const requested: string[] = []
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {
+    const pathname = new URL(req.url).pathname
+    requested.push(pathname)
+    return pathname === route
+      ? Response.json({ version: "2.0.12", pid: process.pid })
+      : new Response(null, { status: 404 })
+  } })
+  try {
+    expect(await fetchServiceStatus({ url: server.url.href }, undefined)).toEqual({ version: "2.0.12", pid: process.pid })
+    const routes = ["/api/info", "/api/status", "/api/health"]
+    expect(requested).toEqual(routes.slice(0, routes.indexOf(route) + 1))
+  } finally {
+    await server.stop(true)
+  }
+})
+
+it.each([401, 503])("rejects HTTP %i even when the response body looks ready", async (status) => {
+  const requested: string[] = []
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {
+    requested.push(new URL(req.url).pathname)
+    return Response.json({ version: "2.0.12", pid: process.pid }, { status })
+  } })
+  try {
+    await expect(fetchServiceStatus({ url: server.url.href }, undefined)).rejects.toThrow(`GET /api/info ${status}`)
+    expect(requested).toEqual(["/api/info"])
+  } finally {
+    await server.stop(true)
   }
 })

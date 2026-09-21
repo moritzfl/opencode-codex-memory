@@ -18,7 +18,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { $ } from "bun"
-import { api, createSandbox, startServe, type ServeHandle } from "./lib/harness.js"
+import { api, basicAuth, createSandbox, startServe, type ServeHandle } from "./lib/harness.js"
 
 const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.3"
 
@@ -107,6 +107,11 @@ async function main(): Promise<void> {
     const response = await api(serve, sandbox, "GET", "/openapi.json")
     if (response.status !== 200) throw new Error(`OpenAPI HTTP ${response.status}`)
     doc = response.json as typeof doc
+    const { fetchServiceStatus } = (await import(
+      path.resolve(import.meta.dirname, "../dist/src/v2/service.js")
+    )) as typeof import("../src/v2/service.js")
+    const status = await fetchServiceStatus({ url: serve.baseUrl }, basicAuth(sandbox), AbortSignal.timeout(3_000))
+    note(status.version === version, `built service discovery recognizes OpenCode ${status.version}`)
     // Verify the create-time sandbox on the real host. Some hosts expose no
     // permission.rules method despite older SDK/docs advertising it.
     // Load the built artifact at runtime; typecheck must also work before build.

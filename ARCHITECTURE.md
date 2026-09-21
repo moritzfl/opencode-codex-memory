@@ -276,6 +276,8 @@ is its own `memory.db` (D5) — plugin-owned state with no API equivalent.
 #### OpenCode 2 discovery and citation handling
 
 The OpenCode 2 adapter lists sessions through a registered local service.
+Readiness uses `/api/info`, falling back to legacy `/api/status` and
+`/api/health` only when a route returns 404.
 A separate IDE `serve --port 0` process can use a healthy loopback service
 even when its PID differs from the service registration. A non-loopback PID
 mismatch is refused. Without a registered service, extraction is limited to
