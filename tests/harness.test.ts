@@ -1,8 +1,8 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { completedV2Reply, createSandbox, promptSession, type ServeHandle } from "../scripts/lib/harness.js"
+import { completedV2Reply, createSandbox, promptSession, repoRoot, type Sandbox, type ServeHandle } from "../scripts/lib/harness.js"
 
 const user = { type: "user", id: "msg_new" }
 const assistant = { type: "assistant", id: "msg_answer", time: { completed: 123 }, finish: "stop", content: [{ type: "text", text: "new answer" }] }
@@ -18,9 +18,16 @@ describe("live harness", () => {
     expect(() => completedV2Reply({ data: [{ ...assistant, error: { message: "quota exceeded" } }, user] }, user.id)).toThrow("quota exceeded")
   })
 
-  it("uses an explicit package directory on both hosts and retains failed sandboxes", () => {
-    const sandbox = createSandbox()
+  it("uses an explicit package directory on both hosts without building and retains failed sandboxes", () => {
+    // CI runs tests before build. Simulate a clean checkout even when local
+    // dist/ exists, and fail immediately if sandbox setup launches a build.
+    const existsSync = fs.existsSync
+    const entry = path.join(repoRoot(), "dist/src/index.js")
+    const exists = spyOn(fs, "existsSync").mockImplementation((file) => file === entry ? false : existsSync(file))
+    const spawn = spyOn(Bun, "spawnSync").mockImplementation(() => { throw new Error("sandbox setup must not spawn a build") })
+    let sandbox: Sandbox | undefined
     try {
+      sandbox = createSandbox()
       const config = JSON.parse(fs.readFileSync(path.join(sandbox.configHome, "opencode/opencode.json"), "utf8"))
       const pluginDir = fileURLToPath(config.plugin[0][0])
       expect(config.plugins[0].package).toBe(pluginDir)
@@ -33,11 +40,18 @@ describe("live harness", () => {
       sandbox.keep = true
       sandbox.cleanup()
       expect(fs.existsSync(sandbox.root)).toBe(true)
-    } finally {
       sandbox.keep = false
       sandbox.cleanup()
+      expect(fs.existsSync(sandbox.root)).toBe(false)
+      expect(spawn).not.toHaveBeenCalled()
+    } finally {
+      spawn.mockRestore()
+      exists.mockRestore()
+      if (sandbox) {
+        sandbox.keep = false
+        sandbox.cleanup()
+      }
     }
-    expect(fs.existsSync(sandbox.root)).toBe(false)
   })
 
   it("waits for V2 turn completion and aborts a stuck wait within the prompt deadline", async () => {

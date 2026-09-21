@@ -189,7 +189,8 @@ export type CreateSandboxOpts = {
 }
 
 export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
-  ensureBuilt()
+  // Preparing config is filesystem-only. Build at host launch so unit tests
+  // and bare sandbox users do not implicitly compile the plugin.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-live-"))
   const dataHome = path.join(root, "data")
   const configHome = path.join(root, "config")
@@ -453,6 +454,7 @@ export async function startServe(
   sandbox: Sandbox,
   opts: { port?: number; bin?: string; extraArgs?: string[] } = {},
 ): Promise<ServeHandle> {
+  ensureBuilt()
   const bin = opts.bin ?? whichOpencode()
   const v2 = semverGte(opencodeVersion(bin), "2.0.0")
   const port = opts.port ?? (await freePort())
@@ -680,6 +682,7 @@ export function runOpencode(
   args: string[],
   opts: { timeoutMs?: number; cwd?: string } = {},
 ): { stdout: string; stderr: string; code: number } {
+  ensureBuilt()
   const bin = whichOpencode()
   const result = spawnSync(bin, args, {
     cwd: opts.cwd ?? sandbox.project,
