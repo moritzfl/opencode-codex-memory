@@ -1,4 +1,6 @@
 import { Plugin } from "@opencode/plugin/tui"
+import type { MouseEvent, ScrollBoxRenderable } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, onCleanup, For } from "solid-js"
 import { MemoryStatusRpc, isMemoryStatus, type MemoryStatus } from "./status-rpc.js"
 
@@ -48,9 +50,8 @@ function registerSlot(context: TuiContext, name: string, render: (input: any) =>
 }
 
 /**
- * Defensive theme lookup. Current previews expose a nested theme
- * (`text.feedback.error.default`); earlier ones used flat keys. Resolve to a
- * leaf color, tolerating either shape.
+ * V2 renamed default/subdued tokens to base/muted. Only return color leaves:
+ * passing a token group to OpenTUI silently loses colors and contrast.
  */
 function themeColor(theme: unknown, ...paths: readonly (readonly string[])[]): any {
   for (const path of paths) {
@@ -62,12 +63,25 @@ function themeColor(theme: unknown, ...paths: readonly (readonly string[])[]): a
       }
       cursor = (cursor as Record<string, unknown>)[key]
     }
-    if (cursor !== null && typeof cursor === "object" && "default" in (cursor as Record<string, unknown>)) {
-      cursor = (cursor as Record<string, unknown>).default
+    if (cursor !== null && typeof cursor === "object") {
+      const token = cursor as Record<string, unknown>
+      cursor = token.base ?? token.default ?? cursor
     }
-    if (cursor !== undefined && cursor !== null) return cursor
+    if (typeof cursor === "string" || (cursor !== null && typeof cursor === "object" && "r" in cursor)) return cursor
   }
   return undefined
+}
+
+function colors(context: TuiContext) {
+  return {
+    get text() { return themeColor(context.theme, ["text", "base"], ["text", "default"], ["text"]) },
+    get muted() { return themeColor(context.theme, ["text", "muted"], ["text", "subdued"], ["textMuted"]) },
+    get ok() { return themeColor(context.theme, ["text", "feedback", "success"], ["success"]) },
+    get warn() { return themeColor(context.theme, ["text", "feedback", "warning"], ["warning"]) },
+    get error() { return themeColor(context.theme, ["text", "feedback", "error"], ["error"]) },
+    get selectedText() { return themeColor(context.theme, ["text", "action", "primary", "focused"], ["text", "action", "primary", "$focused"], ["text", "action", "primary"]) },
+    get selectedBg() { return themeColor(context.theme, ["background", "action", "primary", "focused"], ["background", "action", "primary", "$focused"]) },
+  }
 }
 
 function formatTokens(n: number): string {
@@ -76,17 +90,51 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-async function fetchStatus(rpc: RpcClient, context: TuiContext, sessionID?: string): Promise<MemoryStatus> {
+async function fetchStatus(rpc: RpcClient, context: TuiContext, sessionID?: string, signal?: AbortSignal): Promise<MemoryStatus> {
   const result = await rpc.status(
     sessionID ? { sessionID } : {},
     {
       location: context.location ?? context.data.location.default(),
-      signal: AbortSignal.timeout(5_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000),
     },
   )
   // The RPC client is untyped for plain JSON-schema definitions.
   if (!isMemoryStatus(result)) throw new Error("invalid memory status payload")
   return result
+}
+
+/** Keep the last good snapshot on disconnect; ignore late replies and abort on close. */
+function watchStatus(rpc: RpcClient, context: TuiContext, sessionID?: string) {
+  const [status, setStatus] = createSignal<MemoryStatus | null>(null)
+  const [unavailable, setUnavailable] = createSignal(false)
+  const [refreshing, setRefreshing] = createSignal(false)
+  const [updatedAt, setUpdatedAt] = createSignal(Date.now())
+  const lifetime = new AbortController()
+  let revision = 0
+  const refresh = async () => {
+    const request = ++revision
+    setRefreshing(true)
+    try {
+      const next = await fetchStatus(rpc, context, sessionID, lifetime.signal)
+      if (lifetime.signal.aborted || request !== revision) return
+      setStatus(next)
+      setUpdatedAt(Date.now())
+      setUnavailable(false)
+    } catch {
+      if (!lifetime.signal.aborted && request === revision) setUnavailable(true)
+    } finally {
+      if (!lifetime.signal.aborted && request === revision) setRefreshing(false)
+    }
+  }
+  const unsubscribe = rpc.events.on("changed", () => void refresh())
+  const timer = setInterval(() => void refresh(), 30_000)
+  onCleanup(() => {
+    lifetime.abort()
+    clearInterval(timer)
+    unsubscribe()
+  })
+  void refresh()
+  return { status, unavailable, refreshing, updatedAt, refresh, signal: lifetime.signal }
 }
 
 type Row = { label: string; value: string; tone?: "ok" | "warn" | "muted" }
@@ -102,14 +150,14 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
       value: `${pipeline.stage1Count} recaps · ${pipeline.extracting ? "extracting" : pipeline.phase2Status ?? "idle"}`,
       tone: (pipeline.lastError ? "warn" : "muted") as Row["tone"],
     })),
-    { label: "Read memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
-    { label: "Write memories", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },
+    { label: "Use memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
+    { label: "Learn from sessions", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },
     ...(s.sessionMode
       ? [
           {
             label: "This session",
-            value: s.sessionMode === "enabled" ? "Learning" : s.sessionMode === "disabled" ? "Not learning" : "Excluded (external context)",
-            tone: (s.sessionMode === "enabled" ? "ok" : "muted") as Row["tone"],
+            value: s.sessionMode === "enabled" ? (s.generateMemories ? "Eligible for learning" : "Eligible (learning paused)") : s.sessionMode === "disabled" ? "Not learning" : "Excluded (external context)",
+            tone: (s.sessionMode === "enabled" && s.generateMemories ? "ok" : "muted") as Row["tone"],
           },
         ]
       : []),
@@ -118,7 +166,7 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
   ]
 }
 
-function usageRows(s: MemoryStatus): Row[] {
+function usageRows(s: MemoryStatus, sessionID?: string): Row[] {
   const inj = s.injected
   const per = inj.sessionRequests > 0
     ? Math.round(inj.sessionTokens / inj.sessionRequests)
@@ -127,7 +175,7 @@ function usageRows(s: MemoryStatus): Row[] {
       : 0
   return [
     { label: "Block size", value: per ? `~${formatTokens(per)} tokens / request` : "—" },
-    { label: "This session", value: `~${formatTokens(inj.sessionTokens)} tokens · ${inj.sessionRequests} req` },
+    ...(sessionID ? [{ label: "This session", value: `~${formatTokens(inj.sessionTokens)} tokens · ${inj.sessionRequests} req` }] : []),
     { label: "Since start", value: `~${formatTokens(inj.totalTokens)} tokens · ${inj.totalRequests} req` },
   ]
 }
@@ -154,47 +202,41 @@ type Control = {
   run: () => void
 }
 
-/**
- * /memory dialog. Tabs switch by mouse click or left/right. Controls: ↑/↓ move, Enter or
- * click toggles/runs. Esc closes (host-owned).
- */
-function MemoryDialog(context: TuiContext, sessionID: string | undefined, initial: MemoryStatus | null) {
+/** /memory is a modal: navigation stays here until the host closes it. */
+function MemoryDialog(context: TuiContext, sessionID?: string) {
   const rpc = context.client.rpc(MemoryStatusRpc)
-  const [status, setStatus] = createSignal<MemoryStatus | null>(initial)
+  const { status, unavailable, refreshing, updatedAt, refresh, signal } = watchStatus(rpc, context, sessionID)
+  const dimensions = useTerminalDimensions()
+  const color = colors(context)
   const [tab, setTab] = createSignal<Tab>("Overview")
   const [cursor, setCursor] = createSignal(0)
-  const [notice, setNotice] = createSignal("")
-  const [busy, setBusy] = createSignal(false)
-  const now = () => Date.now()
+  const [notice, setNotice] = createSignal<{ message: string; tone: "ok" | "warn" | "error" } | null>(null)
+  const [busy, setBusy] = createSignal<string | null>(null)
+  let scroll: ScrollBoxRenderable | undefined
 
-  const refresh = async () => {
+  const call = async (id: string, method: "setOption" | "setSessionMode" | "consolidateNow", input: Record<string, unknown>, done: string) => {
+    if (busy() || unavailable()) return
+    setBusy(id)
+    setNotice(null)
     try {
-      setStatus(await fetchStatus(rpc, context, sessionID))
-    } catch {
-      setStatus(null)
-    }
-  }
-  const unsubscribe = rpc.events.on("changed", () => void refresh())
-  const timer = setInterval(() => void refresh(), 30_000)
-  onCleanup(() => {
-    clearInterval(timer)
-    unsubscribe()
-  })
-
-  const call = async (method: string, input: Record<string, unknown>, done: string) => {
-    if (busy()) return
-    setBusy(true)
-    try {
-      await (rpc as any)[method](input, {
+      const result = await rpc[method](input, {
         location: context.location ?? context.data.location.default(),
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
       })
-      setNotice(done)
+      if (signal.aborted) return
+      const reply = result as { ok?: boolean; status?: string } | null
+      if (method === "consolidateNow" ? reply?.status !== "started" : reply?.ok !== true) {
+        throw new Error("The server did not apply the request. Refresh and try again.")
+      }
+      setNotice({ message: done, tone: "ok" })
       await refresh()
-    } catch (err) {
-      setNotice(`Failed: ${(err as Error).message}`)
+    } catch (error) {
+      if (signal.aborted) return
+      setNotice({ message: `Failed: ${error instanceof Error ? error.message : String(error)}`, tone: "error" })
+      // A timeout can happen after the server applied a change. Reconcile it.
+      await refresh()
     } finally {
-      setBusy(false)
+      if (!signal.aborted) setBusy(null)
     }
   }
 
@@ -205,18 +247,18 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
       {
         id: "read",
         title: "Use memories",
-        hint: "Inject the memory summary into every model request",
+        hint: "Use the summary and memory lookup tools in conversations.",
         on: s.useMemories,
         enabled: true,
-        run: () => void call("setOption", { key: "use_memories", value: !s.useMemories }, s.useMemories ? "Memories are no longer injected." : "Memories are injected again."),
+        run: () => void call("read", "setOption", { key: "use_memories", value: !s.useMemories }, s.useMemories ? "Memory recall turned off." : "Memory recall turned on."),
       },
       {
         id: "learn",
         title: "Learn from sessions",
-        hint: "Background extraction and consolidation of finished conversations",
+        hint: "Learn from eligible idle conversations in the background.",
         on: s.generateMemories,
         enabled: true,
-        run: () => void call("setOption", { key: "generate_memories", value: !s.generateMemories }, s.generateMemories ? "Learning paused." : "Learning resumed."),
+        run: () => void call("learn", "setOption", { key: "generate_memories", value: !s.generateMemories }, s.generateMemories ? "Learning paused." : "Learning resumed."),
       },
     ]
     if (sessionID) {
@@ -225,100 +267,148 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
         id: "session",
         title: "Learn from this session",
         hint: s.sessionMode === "polluted"
-          ? "Auto-excluded: this session pulled in external context"
-          : "Whether this conversation may be extracted into memory",
+          ? "Auto-excluded after external context. Toggle to allow learning again."
+          : !s.generateMemories
+            ? "Global learning is paused; this session preference is saved."
+            : "Allow future learning from this conversation. Saved across restarts.",
         on: learning,
         enabled: true,
-        run: () => void call("setSessionMode", { sessionID, mode: learning ? "disabled" : "enabled" }, learning ? "This session will not be learned from." : "This session will be learned from."),
+        run: () => void call("session", "setSessionMode", { sessionID, mode: learning ? "disabled" : "enabled" }, learning ? "This session is excluded from future learning." : "This session is eligible when global learning is on."),
       })
     }
     const running = s.activity === "consolidating" || s.activity === "extracting"
+      || s.pipelines.some((pipeline) => pipeline.extracting > 0 || pipeline.phase2Status === "running")
     list.push({
       id: "now",
       title: "Consolidate now",
-      hint: running ? "Already running" : s.generateMemories ? "Extract idle sessions and rebuild the summary, skipping the 6h cooldown" : "Turn on learning first",
-      enabled: s.generateMemories && !running,
-      run: () => void call("consolidateNow", {}, "Consolidation started in the background."),
+      hint: running ? "Already running. Progress appears in Overview."
+        : s.activity === "stopping" ? "The memory service is stopping."
+          : s.generateMemories ? "Process eligible sessions now, bypassing the consolidation cooldown."
+            : "Turn on Learn from sessions first.",
+      enabled: s.generateMemories && !running && s.activity !== "stopping",
+      run: () => void call("now", "consolidateNow", {}, "Background run requested. See Overview for progress."),
     })
     return list
   }
 
   const activate = (i: number) => {
+    if (busy() || unavailable()) return
     const c = controls()[i]
-    if (c && c.enabled) c.run()
+    if (!c) return
+    const row = scroll?.content.findDescendantById(`memory-control-${c.id}`)
+    if (row && scroll && (row.y < scroll.viewport.y || row.y >= scroll.viewport.y + scroll.viewport.height)) {
+      // After paging or wheel scrolling, reveal the selection before acting.
+      select(i)
+      return
+    }
+    if (c.enabled) c.run()
+    else setNotice({ message: c.hint, tone: "warn" })
+  }
+  const select = (i: number) => {
+    setCursor(i)
+    const control = controls()[i]
+    if (!control || !scroll) return
+    const id = `memory-control-${control.id}`
+    const row = scroll.content.findDescendantById(id)
+    // OpenTUI's nearest-edge helper does not move an equal-height child, and
+    // an oversized row must expose its title rather than only its description.
+    if (row && row.height >= scroll.viewport.height) scroll.scrollBy(row.y - scroll.viewport.y)
+    else scroll.scrollChildIntoView(id)
   }
   const move = (d: number) => {
+    if (tab() === "Overview") {
+      scroll?.scrollBy(d)
+      return
+    }
     const n = controls().length
     if (n === 0) return
-    setCursor((cursor() + d + n) % n)
+    select((cursor() + d + n) % n)
+  }
+  const switchTab = (next: Tab) => {
+    setTab(next)
+    setCursor(0)
+    scroll?.scrollTo(0)
+  }
+  const changeTab = (d: number) => switchTab(TABS[(TABS.indexOf(tab()) + d + TABS.length) % TABS.length]!)
+  const edge = (last: boolean) => {
+    if (tab() === "Controls" && controls().length) select(last ? controls().length - 1 : 0)
+    else scroll?.scrollTo(last ? scroll.scrollHeight : 0)
+  }
+  const click = (action: () => void) => (event: MouseEvent) => {
+    if (event.button !== 0 || context.renderer.getSelection()?.getSelectedText()) return
+    event.stopPropagation()
+    action()
   }
 
+  // The SDK defaults to "base"; the host pushes "modal" while a dialog is open.
+  // Component ownership removes this layer on close, so keys never leak into the prompt.
   context.keymap.layer(() => ({
-    enabled: () => true,
+    mode: "modal",
     commands: [
-      { title: "Previous tab", bind: "left", run: () => { setTab(TABS[(TABS.indexOf(tab()) + TABS.length - 1) % TABS.length]!) } },
-      { title: "Next tab", bind: "right", run: () => { setTab(TABS[(TABS.indexOf(tab()) + 1) % TABS.length]!) } },
+      ...["left", "shift+tab"].map((bind) => ({ title: "Previous memory tab", bind, run: () => changeTab(-1) })),
+      ...["right", "tab"].map((bind) => ({ title: "Next memory tab", bind, run: () => changeTab(1) })),
+      { title: "Move up", bind: "up", run: () => move(-1) },
+      { title: "Move down", bind: "down", run: () => move(1) },
+      { title: "First item", bind: "home", run: () => edge(false) },
+      { title: "Last item", bind: "end", run: () => edge(true) },
+      { title: "Scroll up", bind: "pageup", run: () => { scroll?.scrollBy(-1, "viewport") } },
+      { title: "Scroll down", bind: "pagedown", run: () => { scroll?.scrollBy(1, "viewport") } },
+      { title: "Refresh memory status", bind: "r", run: () => { void refresh() } },
+      ...["return", "space"].map((bind) => ({
+        title: "Change selected control", bind,
+        run: () => { if (tab() === "Controls") activate(cursor()) },
+      })),
     ],
   }))
 
-  // Keyboard control navigation is only claimed on the Controls tab.
-  context.keymap.layer(() => ({
-    enabled: () => tab() === "Controls",
-    commands: [
-      { title: "Previous control", bind: "up", run: () => move(-1) },
-      { title: "Next control", bind: "down", run: () => move(1) },
-      { title: "Toggle control", bind: "return", run: () => activate(cursor()) },
-      { title: "Toggle control", bind: "space", run: () => activate(cursor()) },
-    ],
-  }))
+  const toneColor = (t: Row["tone"]) => (t === "ok" ? color.ok : t === "warn" ? color.warn : t === "muted" ? color.muted : color.text)
 
-  const th = context.theme as any
-  const text = themeColor(th, ["text", "default"], ["text"])
-  const muted = themeColor(th, ["text", "subdued"], ["textMuted"], ["text"])
-  const ok = themeColor(th, ["text", "feedback", "success"], ["text"])
-  const warn = themeColor(th, ["text", "feedback", "warning"], ["text"])
-  const err = themeColor(th, ["text", "feedback", "error"], ["text"])
-  const accent = themeColor(th, ["text", "action", "primary"], ["text"])
-  const selectedBg = themeColor(th, ["background", "action", "primary", "$focused"], ["background", "action", "primary", "focused"])
-  const toneColor = (t: Row["tone"]) => (t === "ok" ? ok : t === "warn" ? warn : t === "muted" ? muted : text)
-
-  const LABEL_W = 18
   const Rows = (props: { rows: Row[] }) => (
     <For each={props.rows}>
       {(r) => (
-        <text fg={toneColor(r.tone)}>
-          <span style={{ fg: muted }}>{r.label.padEnd(LABEL_W)}</span>
-          {r.value}
-        </text>
+        <box flexDirection={dimensions().width < 60 ? "column" : "row"} flexShrink={0}>
+          <text width={dimensions().width < 60 ? undefined : 21} flexShrink={0} fg={color.muted}>{r.label}</text>
+          <text flexGrow={1} flexShrink={1} fg={toneColor(r.tone)} wrapMode="word">{r.value}</text>
+        </box>
       )}
     </For>
   )
   // Spacing lives on <box>: marginTop on <text> overdraws the neighbours.
   const Section = (props: { title: string }) => (
-    <box marginTop={1}>
-      <text fg={muted}>
+    <box marginTop={1} flexShrink={0}>
+      <text fg={color.muted}>
         <b>{props.title.toUpperCase()}</b>
       </text>
     </box>
   )
   const Note = (props: { fg: unknown; children: string }) => (
-    <box marginTop={1}>
-      <text fg={props.fg as any}>{props.children}</text>
+    <box marginTop={1} flexShrink={0}>
+      <text fg={props.fg as any} wrapMode="word">{props.children}</text>
     </box>
   )
 
   return (
-    <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <box flexDirection="row" gap={2}>
+    <box
+      flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}
+      height={Math.min(tab() === "Overview" ? 34 : sessionID ? 22 : 19, Math.max(8, dimensions().height - 2))}
+    >
+      <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
+        <text fg={color.text}><b>Memory</b></text>
+        <box flexDirection="row" gap={2}>
+          <text fg={color.muted} onMouseUp={click(() => { void refresh() })}>{refreshing() ? "Refreshing…" : "r refresh"}</text>
+          <text fg={color.muted} onMouseUp={click(() => context.ui.dialog.clear())}>Esc close</text>
+        </box>
+      </box>
+      <box flexDirection="row" gap={2} marginTop={1} flexShrink={0}>
         <For each={TABS}>
           {(t) => (
             <box
               paddingLeft={1}
               paddingRight={1}
-              backgroundColor={tab() === t ? selectedBg : undefined}
-              onMouseDown={() => setTab(t)}
+              backgroundColor={tab() === t ? color.selectedBg : undefined}
+              onMouseUp={click(() => switchTab(t))}
             >
-              <text fg={tab() === t ? text : muted}>
+              <text fg={tab() === t ? color.selectedText : color.muted}>
                 {tab() === t ? <b>{t}</b> : t}
               </text>
             </box>
@@ -326,117 +416,124 @@ function MemoryDialog(context: TuiContext, sessionID: string | undefined, initia
         </For>
       </box>
 
+      {unavailable() ? (
+        <box marginTop={1} flexShrink={0}>
+          <text fg={color.error} wrapMode="word">
+            {status() ? "Offline: last known status. Press r to retry." : "Memory status unavailable. Press r to retry."}
+          </text>
+        </box>
+      ) : <box />}
+
       {/* No <Show>: its empty placeholder is a bare text node under <box>. */}
-      <box flexDirection="column">
+      <scrollbox
+        ref={(value) => { scroll = value }} flexGrow={1} flexShrink={1} minHeight={0} scrollX={false}
+        onSizeChange={() => queueMicrotask(() => {
+          // Wait for resized row geometry before restoring keyboard focus.
+          if (!signal.aborted && tab() === "Controls") select(cursor())
+        })}
+      >
         {status() === null ? (
-          <Note fg={err}>Memory status unavailable — is the server plugin loaded?</Note>
+          <Note fg={color.muted}>{refreshing() ? "Loading memory status…" : "No status received."}</Note>
         ) : tab() === "Overview" ? (
           <box flexDirection="column">
+            {notice()?.tone === "error" ? <Note fg={color.error}>{notice()!.message}</Note> : <box />}
             <Section title="Status" />
-            <Rows rows={statusRows(status()!, now())} />
+            <Rows rows={statusRows(status()!, updatedAt())} />
+            {status()!.warnings.length > 0 ? (
+              <box flexDirection="column" flexShrink={0}>
+                <Section title="Attention" />
+                <For each={status()!.warnings}>{(w) => <text fg={color.warn} wrapMode="word">{`! ${w}`}</text>}</For>
+              </box>
+            ) : <box />}
             <Section title="Context usage" />
-            <Rows rows={usageRows(status()!)} />
+            <Rows rows={usageRows(status()!, sessionID)} />
             <Section title="Setup" />
             <Rows rows={configRows(status()!)} />
-            {status()!.warnings.length > 0 ? (
-              <box flexDirection="column">
-                <Section title="Attention" />
-                <For each={status()!.warnings}>{(w) => <text fg={warn}>{`! ${w}`}</text>}</For>
-              </box>
-            ) : (
-              <box />
-            )}
-            <Note fg={muted}>Token figures are chars/4 estimates; the block is re-sent each request and normally served from the prompt cache.</Note>
+            <Note fg={color.muted}>Memory is global across projects. Token figures are chars/4 estimates; prompt-cache savings depend on the provider.</Note>
           </box>
         ) : (
           <box flexDirection="column" marginTop={1}>
             <For each={controls()}>
               {(c, i) => {
                 const selected = () => cursor() === i()
-                const fgTitle = () => (!c.enabled ? muted : text)
-                const indicator = () =>
-                  c.on === undefined ? "▸" : c.on ? "●" : "○"
-                const indicatorFg = () => (!c.enabled ? muted : c.on === undefined ? accent : c.on ? ok : muted)
-                const state = () => (c.on === undefined ? "" : c.on ? "On" : "Off")
+                const disabled = () => !c.enabled || unavailable() || busy() !== null
+                const fg = () => selected() ? color.selectedText : disabled() ? color.muted : color.text
+                const state = () => busy() === c.id ? (c.id === "now" ? "Starting…" : "Saving…")
+                  : c.on === undefined ? (c.enabled ? "Run" : "Unavailable") : c.on ? "On" : "Off"
                 return (
                   <box
+                    id={`memory-control-${c.id}`}
                     flexDirection="column"
+                    flexShrink={0}
                     paddingLeft={1}
                     paddingRight={1}
-                    backgroundColor={selected() ? selectedBg : undefined}
-                    onMouseDown={() => {
-                      setCursor(i())
+                    backgroundColor={selected() ? color.selectedBg : undefined}
+                    onMouseUp={click(() => {
+                      select(i())
                       activate(i())
-                    }}
+                    })}
                   >
-                    <text fg={fgTitle()}>
-                      <span style={{ fg: indicatorFg() }}>{indicator()}</span>
-                      {selected() ? <b>{` ${c.title.padEnd(26)}`}</b> : ` ${c.title.padEnd(26)}`}
-                      <span style={{ fg: c.on ? ok : muted }}>{state()}</span>
-                    </text>
-                    <text fg={muted}>{`  ${c.hint}`}</text>
+                    <box flexDirection="row" gap={1}>
+                      <text fg={fg()} flexShrink={0}>{selected() ? "›" : " "}</text>
+                      <text fg={fg()} flexGrow={1} flexShrink={1} wrapMode="word">
+                        {selected() ? <b>{c.title}</b> : c.title}
+                      </text>
+                      <text fg={selected() ? color.selectedText : c.on && !disabled() ? color.ok : color.muted} flexShrink={0}>{state()}</text>
+                    </box>
+                    <box paddingLeft={2}>
+                      <text fg={selected() ? color.selectedText : color.muted} wrapMode="word">{c.hint}</text>
+                    </box>
                   </box>
                 )
               }}
             </For>
-            <Note fg={muted}>Global settings last until the server restarts; edit opencode.json to make them permanent.</Note>
+            <Note fg={color.muted}>The first two toggles affect all projects until the server restarts. Set plugin options in opencode.json(c) to keep them.</Note>
           </box>
         )}
-      </box>
+      </scrollbox>
 
-      <Note fg={ok}>{notice()}</Note>
-      <Note fg={muted}>
-        {tab() === "Controls" ? "↑↓ move · enter toggle · click a tab or control · esc close" : "click a tab · esc close · ask the assistant for memory_inspect for raw diagnostics"}
-      </Note>
+      {!unavailable() && (busy() || notice()) ? (
+        <box marginTop={1} flexShrink={0}>
+          <text fg={busy() ? color.muted : notice()?.tone === "error" ? color.error : notice()?.tone === "warn" ? color.warn : color.ok} wrapMode="word">
+            {busy() ? "Applying change…" : notice()?.tone === "error"
+              ? tab() === "Overview" ? "Change failed. Details above." : "Change failed. See Overview for details."
+              : notice()!.message}
+          </text>
+        </box>
+      ) : <box />}
+      <box flexDirection="column" marginTop={1} flexShrink={0}>
+        <text fg={color.muted}>←→/Tab tabs · ↑↓ {tab() === "Controls" ? "select" : "scroll"}</text>
+        <text fg={color.muted}>{tab() === "Controls" ? "Enter/Space change" : "PgUp/PgDn page · Home/End ends"}</text>
+      </box>
     </box>
   )
 }
 
 function StatusPanel(context: TuiContext, sessionID?: string) {
   const rpc = context.client.rpc(MemoryStatusRpc)
-  const [status, setStatus] = createSignal<MemoryStatus>()
-  const [unavailable, setUnavailable] = createSignal(false)
+  const { status, unavailable } = watchStatus(rpc, context, sessionID)
+  const palette = colors(context)
 
-  const refresh = async () => {
-    try {
-      setStatus(await fetchStatus(rpc, context, sessionID))
-      setUnavailable(false)
-    } catch {
-      setUnavailable(true)
-    }
-  }
-
-  const unsubscribe = rpc.events.on("changed", () => void refresh())
-  // Reconcile missed events (e.g. options changed by memory_mode / reload).
-  const timer = setInterval(() => void refresh(), 30_000)
-  onCleanup(() => {
-    clearInterval(timer)
-    unsubscribe()
-  })
-  void refresh()
-
-  // Enabled/disabled only; activity and diagnostics live in /memory.
+  // Distinguish recall and learning: either can be enabled without the other.
   const title = () => {
     if (unavailable()) return "Unavailable"
     const s = status()
     if (!s) return "Loading…"
-    return s.useMemories ? "Enabled" : "Disabled"
+    return `Recall ${s.useMemories ? "on" : "off"} · learn ${s.generateMemories ? "on" : "off"}`
   }
   const color = () => {
-    if (unavailable()) return themeColor(context.theme, ["text", "feedback", "error"], ["text"])
-    if (status()?.useMemories) return themeColor(context.theme, ["text", "feedback", "success"], ["text"])
-    return themeColor(context.theme, ["text", "subdued"], ["textMuted"], ["text"])
+    if (unavailable()) return palette.error
+    if (status()?.useMemories || status()?.generateMemories) return palette.ok
+    return palette.muted
   }
-  const muted = () => themeColor(context.theme, ["text", "subdued"], ["textMuted"], ["text"])
-  const heading = () => themeColor(context.theme, ["text", "default"], ["text"])
 
-  // Status only; details live in /memory-status. No <Show>: its empty
+  // Status only; details live in /memory. No <Show>: its empty
   // placeholder is a bare text node under <box>, which the renderer rejects.
   return (
     <box flexDirection="column">
-      <text fg={heading()}>Memory</text>
+      <text fg={palette.text}>Memory</text>
       <text fg={color()}>● {title()}</text>
-      <text fg={muted()}>{"  /memory"}</text>
+      <text fg={palette.muted}>{"  /memory"}</text>
     </box>
   )
 }
@@ -454,18 +551,11 @@ function KeymapLayer(context: TuiContext) {
         group: "Memory",
         palette: true,
         slash: { name: "memory", aliases: ["memory-status"] },
-        run: async () => {
-          const rpc = context.client.rpc(MemoryStatusRpc)
+        run: () => {
           const route = context.ui.router.current()
           const sessionID = route.type === "session" ? route.sessionID : undefined
-          let initial: MemoryStatus | null = null
-          try {
-            initial = await fetchStatus(rpc, context, sessionID)
-          } catch {
-            initial = null
-          }
-          context.ui.dialog.show(() => MemoryDialog(context, sessionID, initial))
-          context.ui.dialog.set({ size: "medium" })
+          context.ui.dialog.show(() => MemoryDialog(context, sessionID))
+          context.ui.dialog.set({ size: "large", centered: true })
         },
       },
     ],
