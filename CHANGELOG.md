@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-21
+
+### Fixed
+
+- OpenCode 2 consolidation verifies the submitted turn's terminal outcome
+  before accepting artifacts or clearing the workspace diff. Failed turns
+  preserve pending notes and provider errors for retry handling.
+- Claude import aborts pruning on discovery I/O errors and preserves scoped
+  resources when the original project directory is unavailable.
+- OpenCode 2 consolidation agents can read the memory root and use glob/grep.
+  Search paths remain confined to each helper's assigned memory workspace.
+- Reasoning variants resolve through the current OpenCode 2 model API, with
+  compatibility for older catalogs and selectable model aliases.
+- Failed OpenCode 2 service connections are rediscovered on subsequent calls,
+  including after service restarts and credential rotation.
+- Citation cleanup handles model-bound OpenCode 2 message shapes without
+  double-counting durable citation usage.
+- Toggling memory reading in OpenCode 2 refreshes the tool registry immediately
+  and restores the previous setting if the refresh fails.
+- Creating a test sandbox no longer triggers an implicit plugin build,
+  preventing clean-checkout unit-test timeouts.
+
+### Changed
+
+- Documentation starts with installation and working defaults, with separate
+  configuration, usage, troubleshooting, and memory-version guides. The version
+  guide explains the corresponding Codex origins of both memory implementations.
+- Type checking now covers tests and scripts as well as shipped source files.
+
 ## [0.8.0] - 2026-09-20
 
 ### Added
