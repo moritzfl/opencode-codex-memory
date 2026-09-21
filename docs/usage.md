@@ -70,6 +70,23 @@ or choose **Inspect memory** from the command palette. A compact
 memory implementations and refreshes while open. Because memory is global,
 work from another window can appear here too.
 
+The panel is fully keyboard-accessible:
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift+Tab`, or `←` / `→` | Switch Overview and Controls |
+| `↑` / `↓` | Scroll Overview or select a control |
+| `Enter` / `Space` | Toggle the selected setting or run the selected action |
+| `Home` / `End` | Jump to the first or last control, or the top or bottom of Overview |
+| `PgUp` / `PgDn` | Scroll a page |
+| `r` | Refresh status or retry a failed connection |
+| `Esc` | Close the panel and return to the prompt |
+
+Tabs and controls also respond to left-clicks. Long content scrolls; the tabs
+and keyboard hints stay visible in smaller terminals. While a change is being
+applied, its control shows **Saving…** or **Starting…**. A lost connection keeps
+the last known status visible and pauses controls until a refresh succeeds.
+
 The panel offers the [learning and recall controls](#pause-learning-or-recall)
 below, plus **Consolidate now**. This processes eligible sessions and updates
 memory without waiting for the usual consolidation cooldown. Learning must be

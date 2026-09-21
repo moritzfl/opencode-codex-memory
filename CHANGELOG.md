@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The OpenCode 2 memory panel opens with `/memory-inspect` or **Inspect memory**
+  in the command palette, replacing `/memory` and `/memory-status`.
+- The sidebar distinguishes memory recall from background learning. Panel
+  controls explain their scope, persistence, and availability.
+
+### Fixed
+
+- Memory panel keyboard navigation works inside the modal, including tab
+  switching, control selection, activation, scrolling, and refresh.
+- The panel adapts to smaller terminals with scrollable content and pinned
+  navigation. Selection colors follow current and older OpenCode themes.
+- Loading, pending changes, and rejected actions show explicit feedback.
+  Connection failures retain the last known status and pause controls until
+  recovery; late responses cannot overwrite newer status or reopen a closed panel.
+
 ## [0.8.1] - 2026-09-21
 
 ### Fixed
