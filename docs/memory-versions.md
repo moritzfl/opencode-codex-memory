@@ -74,7 +74,7 @@ Continue working normally while both pipelines learn.
 
 ### 2. Check readiness and the new summary
 
-Ask the agent to run `memory_inspect`, or open `/memory` in OpenCode 2's
+Ask the agent to run `memory_inspect`, or open `/memory-inspect` in OpenCode 2's
 terminal UI. **`v2_ready: true`** means:
 
 - Memory V2 currently has a valid summary; and

@@ -106,8 +106,8 @@ async function fixture(options: { session?: boolean; width?: number; height?: nu
     return rendered.captureCharFrame()
   }
   const open = async () => {
-    const command = [...layers].flatMap((layer) => layer().commands ?? []).find((c) => c.slash?.name === "memory")!
-    assert.deepEqual(command.slash, { name: "memory", aliases: ["memory-status"] })
+    const command = [...layers].flatMap((layer) => layer().commands ?? []).find((c) => c.slash?.name === "memory-inspect")!
+    assert.deepEqual(command.slash, { name: "memory-inspect" })
     command.run()
     await frame()
   }
@@ -283,7 +283,7 @@ await check("sidebar reports recall and learning independently and refreshes", a
   const f = await fixture({ sidebar: true })
   try {
     assert.match(await f.frame(), /Recall on · learn on/)
-    assert.match(await f.frame(), /\/memory/)
+    assert.match(await f.frame(), /\/memory-inspect/)
     f.setStatus({ useMemories: false })
     await f.changed()
     assert.match(await f.frame(), /Recall off · learn on/)

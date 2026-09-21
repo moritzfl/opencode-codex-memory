@@ -3,7 +3,7 @@
 [Documentation home](../README.md#start-here)
 
 Start by asking the agent to run **`memory_inspect`**. In OpenCode 2's
-terminal UI, **`/memory`** (`/memory-status`) shows the same underlying status.
+terminal UI, **`/memory-inspect`** shows the same underlying status.
 These checks are read-only; opening status does not start learning.
 
 ## Memory has not appeared yet

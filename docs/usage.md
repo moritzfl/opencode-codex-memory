@@ -64,8 +64,8 @@ warnings. Checking status does not start learning.
 
 ### Memory panel
 
-In **OpenCode 2's terminal UI**, open **`/memory`** (alias **`/memory-status`**)
-or choose **Show memory status** from the command palette. A compact
+In **OpenCode 2's terminal UI**, open **`/memory-inspect`**
+or choose **Inspect memory** from the command palette. A compact
 **Memory** indicator also appears in the sidebar. The panel works with both
 memory implementations and refreshes while open. Because memory is global,
 work from another window can appear here too.

@@ -217,7 +217,7 @@ async function triggerPhase2(): Promise<string> {
   }
 }
 
-/** /memory "Consolidate now": one phase-1 pass over idle sessions, then phase 2 without cooldown. */
+/** Panel "Consolidate now": one phase-1 pass over idle sessions, then phase 2 without cooldown. */
 async function consolidateNow(): Promise<string> {
   notifyStatusChanged()
   try {

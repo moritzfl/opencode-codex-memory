@@ -66,7 +66,7 @@ OpenCode server, restart that server too.
 
 Start a conversation and ask **“Check my memory status.”** The agent can run
 `memory_inspect` to show progress and any warnings. In OpenCode 2's terminal
-UI, you can also open the [**`/memory` panel**](./docs/usage.md#memory-panel).
+UI, you can also open the [**`/memory-inspect` panel**](./docs/usage.md#memory-panel).
 
 ## Try it
 

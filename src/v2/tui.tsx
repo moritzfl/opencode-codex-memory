@@ -202,7 +202,7 @@ type Control = {
   run: () => void
 }
 
-/** /memory is a modal: navigation stays here until the host closes it. */
+/** /memory-inspect is a modal: navigation stays here until the host closes it. */
 function MemoryDialog(context: TuiContext, sessionID?: string) {
   const rpc = context.client.rpc(MemoryStatusRpc)
   const { status, unavailable, refreshing, updatedAt, refresh, signal } = watchStatus(rpc, context, sessionID)
@@ -527,13 +527,13 @@ function StatusPanel(context: TuiContext, sessionID?: string) {
     return palette.muted
   }
 
-  // Status only; details live in /memory. No <Show>: its empty
+  // Status only; details live in /memory-inspect. No <Show>: its empty
   // placeholder is a bare text node under <box>, which the renderer rejects.
   return (
     <box flexDirection="column">
       <text fg={palette.text}>Memory</text>
       <text fg={color()}>● {title()}</text>
-      <text fg={palette.muted}>{"  /memory"}</text>
+      <text fg={palette.muted}>{"  /memory-inspect"}</text>
     </box>
   )
 }
@@ -546,11 +546,11 @@ function KeymapLayer(context: TuiContext) {
     commands: [
       {
         id: "opencode-codex-memory.status",
-        title: "Memory",
+        title: "Inspect memory",
         description: "Memory status and controls",
         group: "Memory",
         palette: true,
-        slash: { name: "memory", aliases: ["memory-status"] },
+        slash: { name: "memory-inspect" },
         run: () => {
           const route = context.ui.router.current()
           const sessionID = route.type === "session" ? route.sessionID : undefined
