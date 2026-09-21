@@ -1,15 +1,15 @@
 ---
-description: Check pinned plugin versions in global opencode.json against npm and bump them after confirmation
+description: Check pinned npm plugins in the global OpenCode config and update them after confirmation
 ---
 
 Check my global opencode config for outdated pinned plugins and update them after I confirm.
 
 Follow these steps exactly:
 
-1. Read `~/.config/opencode/opencode.json` and extract the `plugin` array.
-2. Identify entries with a pinned version: strings of the form `<name>@<version>`, where the version is everything after the LAST `@` (this handles scoped packages like `@scope/pkg@1.2.3`, whose name starts with `@`). For tuple entries `[name, options]`, apply the same check to the first element. Skip entries without a version pin, and skip local plugins (paths starting with `./`, `../`, `/`, or `file://`).
-3. For each pinned plugin, look up the latest published version on npm with `npm view <name> version`. Run lookups in parallel where possible.
-4. Compare pinned vs latest using semver. If every pin is already at the latest version, report that and stop.
-5. Otherwise, present a table with columns: plugin, pinned, latest. Then ask me which updates to apply (all, none, or a subset). Do NOT edit anything before I confirm.
-6. After confirmation, update only the confirmed version pins in `~/.config/opencode/opencode.json`. Preserve formatting, entry order, and every other field exactly as-is.
-7. Finish by reminding me to restart opencode so the updated plugins are loaded.
+1. Locate the global OpenCode config under `$XDG_CONFIG_HOME/opencode` when set, otherwise `~/.config/opencode`. Read `opencode.jsonc`, falling back to `opencode.json`. Read `plugins` (OpenCode 2), falling back to `plugin` (OpenCode 1.x). If both files or fields contain plugin definitions, resolve which entries are active before proposing edits.
+2. Identify exact version pins of the form `<name>@<version>`, splitting at the LAST `@` to handle scoped packages. Entries can be strings, OpenCode 2 objects (`package` plus `options`), or OpenCode 1.x tuples (`[package, options]`). Skip unpinned entries, version ranges, local paths, `file://` URLs, and Git sources such as `github:`, `git+`, `git://`, or HTTPS repository URLs.
+3. For each pinned npm plugin, look up `npm view <name> dist-tags --json`. Run lookups in parallel where possible. Compare stable pins with `latest`; for prerelease pins use `next` when available. Report missing packages or tags rather than guessing a version.
+4. Compare using semver and present a table with plugin, pinned version, published target, and status. A pin ahead of the published target is not an update and must not be downgraded. If nothing is outdated, report that and stop.
+5. Ask which updates to apply (all, none, or a subset). Do NOT edit anything before confirmation.
+6. Update only confirmed pins in the file that defined them. Preserve formatting, entry order, plugin options, and unrelated settings. Do not convert the OpenCode config format as part of a version update.
+7. Remind me to restart the OpenCode server: `opencode service restart` for OpenCode 2's shared service, or restart OpenCode 1.x / an IDE-managed server as appropriate.
