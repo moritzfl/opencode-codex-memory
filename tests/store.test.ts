@@ -209,7 +209,7 @@ describe("MemoryStore stage1", () => {
   })
 
   it("durably dedupes citation usage by assistant message and cited session", () => {
-    const { MemoryStore } = require("../src/store.js")
+    const { MemoryStore } = require("../src/store.js") as typeof import("../src/store.js")
     const store = new MemoryStore()
     store.upsertStage1Output({ session_id: "s1", source_updated_at: 1, raw_memory: "m1", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
     store.upsertStage1Output({ session_id: "s2", source_updated_at: 1, raw_memory: "m2", rollout_summary: "s", rollout_slug: null, generated_at: 1 })

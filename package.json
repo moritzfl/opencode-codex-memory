@@ -49,7 +49,7 @@
     "live:e2e": "bun scripts/live-e2e.ts",
     "prepack": "npm run build && npm run smoke",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "keywords": [
     "opencode",

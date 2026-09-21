@@ -63,7 +63,7 @@ describe("V2 host consolidation outcome", () => {
       const store = new MemoryStore()
       expect(await runPhase2(store)).toEqual({ status: "failed" })
       expect(store.phase2JobSnapshot()).toMatchObject({ status: "failed", last_success_watermark: null })
-      expect(store.phase2JobSnapshot().last_error).toContain("HTTP 429")
+      expect(store.phase2JobSnapshot()?.last_error).toContain("HTTP 429")
       expect(isProviderCapacityBlocked("phase2")).toBe(true)
       expect((await captureWorkspaceDiff()).changes.some((change) => change.path === note)).toBe(true)
       expect(fs.readFileSync(path.join(memoryRoot(), "memory_summary.md"), "utf8")).toBe(summary)
