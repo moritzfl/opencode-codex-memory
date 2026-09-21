@@ -109,7 +109,10 @@ async function main(): Promise<void> {
     doc = response.json as typeof doc
     // Verify the create-time sandbox on the real host. Some hosts expose no
     // permission.rules method despite older SDK/docs advertising it.
-    const { consolidationPermissions } = await import("../dist/src/v2/agents.js")
+    // Load the built artifact at runtime; typecheck must also work before build.
+    const { consolidationPermissions } = (await import(
+      path.resolve(import.meta.dirname, "../dist/src/v2/agents.js")
+    )) as typeof import("../src/v2/agents.js")
     for (const version of ["v1", "v2"] as const) {
       const own = path.join(sandbox.opencodeData, version === "v1" ? "memories" : "memories_v2")
       const other = path.join(sandbox.opencodeData, version === "v1" ? "memories_v2" : "memories")
