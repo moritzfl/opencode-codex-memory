@@ -139,17 +139,42 @@ function watchStatus(rpc: RpcClient, context: TuiContext, sessionID?: string) {
 
 type Row = { label: string; value: string; tone?: "ok" | "warn" | "muted" }
 
+function pipelineRows(s: MemoryStatus, now: number): Row[] {
+  return s.pipelines.flatMap((pipeline): Row[] => {
+    const version = pipeline.version.toUpperCase()
+    const paused = !s.generateMemories || (!s.dualWrite && pipeline.version !== s.version)
+    const extractionRetry = pipeline.phase1RetryAt != null && pipeline.phase1RetryAt > now
+    const consolidationRetry = pipeline.phase2RetryAt != null && pipeline.phase2RetryAt > now
+    const cooldown = pipeline.phase2CooldownUntil != null && pipeline.phase2CooldownUntil > now
+    const consolidation = pipeline.phase2Status === "pending" ? "Queued"
+      : pipeline.phase2Status === "failed" ? "Retry due" : "Idle"
+    return [
+      { label: `${version} recaps`, value: `${pipeline.stage1Count} stored`, tone: "muted" },
+      {
+        label: `${version} extraction`,
+        value: pipeline.extracting ? `Running (${pipeline.extracting})` : paused ? "Paused"
+          : extractionRetry ? `Retry ${remaining(pipeline.phase1RetryAt, now)}` : "Idle",
+        tone: extractionRetry && !paused ? "warn" : "muted",
+      },
+      {
+        label: `${version} consolidation`,
+        value: pipeline.phase2Status === "running" ? "Running" : paused ? "Paused"
+          : consolidationRetry ? `Retry ${remaining(pipeline.phase2RetryAt, now)}`
+          : cooldown ? `${consolidation} · cooldown ends ${remaining(pipeline.phase2CooldownUntil, now)}`
+          : pipeline.phase2Status === "pending" ? "Queued · next activity" : consolidation,
+        tone: pipeline.lastError ? "warn" : "muted",
+      },
+    ]
+  })
+}
+
 function statusRows(s: MemoryStatus, now: number): Row[] {
   return [
     { label: "Activity", value: labels[s.activity] },
     { label: "Memory version", value: `${s.sessionVersion} (default ${s.version})` },
     { label: "Learning pipelines", value: s.dualWrite ? "v1 + v2" : s.version },
     { label: "V2 readiness", value: `${s.v2Ready ? "Ready" : "Warming"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`, tone: s.v2Ready ? "ok" : "muted" },
-    ...s.pipelines.map((pipeline) => ({
-      label: `${pipeline.version.toUpperCase()} pipeline`,
-      value: `${pipeline.stage1Count} recaps · ${pipeline.extracting ? "extracting" : pipeline.phase2Status ?? "idle"}`,
-      tone: (pipeline.lastError ? "warn" : "muted") as Row["tone"],
-    })),
+    ...pipelineRows(s, now),
     { label: "Use memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
     { label: "Learn from sessions", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },
     ...(s.sessionMode

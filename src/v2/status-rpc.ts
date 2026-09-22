@@ -27,7 +27,17 @@ export interface MemoryStatus {
   v2ConsolidatedThreads: number
   v2Ready: boolean
   minConsolidatedThreads: number
-  pipelines: { version: "v1" | "v2"; stage1Count: number; extracting: number; phase2Status: string | null; lastError: string | null }[]
+  pipelines: {
+    version: "v1" | "v2"
+    stage1Count: number
+    extracting: number
+    phase2Status: string | null
+    lastError: string | null
+    /** Unix milliseconds; optional for older servers. Cooldown is not a retry. */
+    phase2CooldownUntil?: number | null
+    phase1RetryAt?: number | null
+    phase2RetryAt?: number | null
+  }[]
   useMemories: boolean
   generateMemories: boolean
   extractModel: string | null
@@ -94,6 +104,9 @@ export const MemoryStatusRpc = {
                 extracting: { type: "integer", minimum: 0 },
                 phase2Status: { type: ["string", "null"] },
                 lastError: { type: ["string", "null"] },
+                phase2CooldownUntil: { type: ["number", "null"] },
+                phase1RetryAt: { type: ["number", "null"] },
+                phase2RetryAt: { type: ["number", "null"] },
               },
               required: ["version", "stage1Count", "extracting", "phase2Status", "lastError"],
               additionalProperties: false,
@@ -197,6 +210,9 @@ export function isMemoryStatus(value: unknown): value is MemoryStatus {
     && Number.isInteger(pipeline.extracting) && (pipeline.extracting as number) >= 0
     && (pipeline.phase2Status === null || typeof pipeline.phase2Status === "string")
     && (pipeline.lastError === null || typeof pipeline.lastError === "string")
+    && ["phase2CooldownUntil", "phase1RetryAt", "phase2RetryAt"].every((key) =>
+      pipeline[key] === undefined || pipeline[key] === null || (typeof pipeline[key] === "number" && Number.isFinite(pipeline[key])),
+    )
   )) return false
   for (const key of ["extractModel", "consolidationModel", "lastSuccessAt", "retryAt"] as const) {
     const v = value[key]

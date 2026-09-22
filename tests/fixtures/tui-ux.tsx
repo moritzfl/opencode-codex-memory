@@ -279,6 +279,30 @@ await check("home scope, paused learning and disabled actions", async () => {
   } finally { await f.close() }
 })
 
+await check("successful consolidation with late recaps and unrelated extraction retries", async () => {
+  const f = await fixture({ session: false })
+  try {
+    const now = Date.now()
+    f.setStatus({
+      activity: "retrying", dualWrite: false, lastSuccessAt: now - 7 * 60_000, retryAt: now + 32 * 60_000,
+      pipelines: [{
+        version: "v1", stage1Count: 140, extracting: 0, phase2Status: "pending", lastError: null,
+        phase2CooldownUntil: now + 353 * 60_000, phase1RetryAt: now + 32 * 60_000, phase2RetryAt: null,
+      }],
+      warnings: ["v1: Extraction retry (2 jobs): Model unavailable: xai/grok-4.7"],
+    })
+    await f.open()
+    const frame = await f.frame()
+    assert.match(frame, /V1 recaps\s+140 stored/)
+    assert.match(frame, /V1 extraction\s+Retry in 32m/)
+    assert.match(frame, /V1 consolidation\s+Queued · cooldown ends in 5h 53m/)
+    assert.match(frame, /Last consolidated\s+7m ago/)
+    assert.match(frame, /Extraction retry \(2 jobs\)/)
+    assert.match(frame, /Model unavailable: xai\/grok-4.7/)
+    assert.equal(f.calls.length, 0, "viewing status must not start another run")
+  } finally { await f.close() }
+})
+
 await check("sidebar reports recall and learning independently and refreshes", async () => {
   const f = await fixture({ sidebar: true })
   try {

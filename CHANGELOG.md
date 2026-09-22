@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The OpenCode 2 memory panel separates extraction retries from queued
+  consolidation and its normal cooldown, labels recap counts as total stored,
+  and shows extraction failure reasons. Retry status includes both active
+  learning pipelines during dual-write.
+
 ## [0.8.3] - 2026-09-22
 
 ### Fixed

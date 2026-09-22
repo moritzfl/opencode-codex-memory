@@ -6,10 +6,12 @@ import { setup, waitForV2BackgroundTasks, resetV2ModuleStateForTest } from "../s
 import { setV2Context, resetV2ShimStateForTest } from "../src/v2/shim.js"
 import { setV2ServiceDependenciesForTest } from "../src/v2/service.js"
 import { setPluginInput } from "../src/llm.js"
-import { resetPluginOptions } from "../src/options.js"
+import { pluginOptions, resetPluginOptions } from "../src/options.js"
 import { resetAgentHealth } from "../src/agent-health.js"
-import { MemoryStore } from "../src/store.js"
+import { MemoryStore, PHASE2_COOLDOWN_MS } from "../src/store.js"
 import { parseMemoryStatus } from "../src/v2/status-rpc.js"
+import { openDb } from "../src/db.js"
+import { withMemoryVersion } from "../src/memory-version.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2plugin-${process.pid}`)
 
@@ -217,6 +219,79 @@ describe("v2 setup", () => {
     await waitForV2BackgroundTasks()
     expect(new MemoryStore().phase2JobSnapshot()).toBeNull()
     await cleanup?.()
+  })
+
+  it("distinguishes late extraction after successful consolidation from extraction retries", async () => {
+    const f = fakeCtx()
+    const cleanup = await setup(f.ctx)
+    try {
+      const store = new MemoryStore()
+      const extract = (id: string) => {
+        const output = {
+          session_id: id, source_updated_at: Date.now(), raw_memory: "Remember the project convention.",
+          rollout_summary: "Project convention", rollout_slug: id, generated_at: Date.now(),
+        }
+        const [claim] = store.claimStage1Jobs([{ id, updated_at: output.source_updated_at }])
+        store.markStage1Succeeded(id, claim!.ownershipToken, output)
+        return output
+      }
+      const selected = extract("ses_selected")
+      const claim = store.claimGlobalPhase2Job()
+      if (claim.type !== "claimed") throw new Error(claim.type)
+      extract("ses_during_consolidation")
+      store.markPhase2Succeeded(claim.ownershipToken, [selected])
+      const finished = store.phase2JobSnapshot()!.success_finished_at! * 1000
+      extract("ses_after_consolidation")
+
+      const before = openDb().query("SELECT * FROM memory_jobs ORDER BY kind, job_key").all()
+      const queued = parseMemoryStatus(await f.rpcHandlers.status())
+      expect(queued).toMatchObject({ activity: "idle", lastSuccessAt: finished, retryAt: null, warnings: [] })
+      expect(queued.pipelines).toEqual([{
+        version: "v1", stage1Count: 3, extracting: 0, phase2Status: "pending", lastError: null,
+        phase2CooldownUntil: finished + PHASE2_COOLDOWN_MS, phase1RetryAt: null, phase2RetryAt: null,
+      }])
+      expect(openDb().query("SELECT * FROM memory_jobs ORDER BY kind, job_key").all()).toEqual(before)
+      expect(store.claimGlobalPhase2Job()).toEqual({ type: "skipped_cooldown" })
+
+      const [failed] = store.claimStage1Jobs([{ id: "ses_failed", updated_at: Date.now() }])
+      store.markStage1Failed(failed!.sessionId, failed!.ownershipToken, new Error("Model unavailable: xai/grok-4.7"))
+      const retrying = parseMemoryStatus(await f.rpcHandlers.status())
+      expect(retrying).toMatchObject({ activity: "retrying", lastSuccessAt: finished })
+      expect(retrying.retryAt).toBeGreaterThan(Date.now())
+      expect(retrying.pipelines[0]).toMatchObject({
+        phase2Status: "pending", lastError: null, phase2CooldownUntil: finished + PHASE2_COOLDOWN_MS,
+        phase1RetryAt: retrying.retryAt, phase2RetryAt: null,
+      })
+      expect(retrying.warnings).toEqual([
+        "v1: Extraction retry (1 job): Model unavailable: xai/grok-4.7",
+      ])
+      const invalid = structuredClone(retrying) as any
+      invalid.pipelines[0].phase2CooldownUntil = "tomorrow"
+      expect(() => parseMemoryStatus(invalid)).toThrow("invalid memory status payload")
+
+      openDb().prepare("UPDATE memory_jobs SET finished_at=? WHERE kind='memory_consolidate_global'")
+        .run(Math.floor((Date.now() - PHASE2_COOLDOWN_MS) / 1000) - 1)
+      expect(parseMemoryStatus(await f.rpcHandlers.status()).pipelines[0]!.phase2CooldownUntil).toBeNull()
+    } finally { await cleanup?.() }
+  })
+
+  it("reports retries from the active shadow writer, not an inactive memory version", async () => {
+    const f = fakeCtx({ dual_write: true })
+    const cleanup = await setup(f.ctx)
+    try {
+      const baseline = parseMemoryStatus(await f.rpcHandlers.status())
+      const v2 = withMemoryVersion("v2", () => new MemoryStore())
+      const [claim] = v2.claimStage1Jobs([{ id: "ses_shadow", updated_at: Date.now() }])
+      v2.markStage1Failed(claim!.sessionId, claim!.ownershipToken, new Error("Model unavailable"))
+      const active = parseMemoryStatus(await f.rpcHandlers.status())
+      expect(active.activity).toBe("retrying")
+      expect(active.pipelines.find((pipeline) => pipeline.version === "v2")!.phase1RetryAt).toBe(active.retryAt)
+      expect(active.warnings).toEqual([...baseline.warnings, "v2: Extraction retry (1 job): Model unavailable"])
+
+      pluginOptions.dual_write = false
+      const inactive = parseMemoryStatus(await f.rpcHandlers.status())
+      expect(inactive).toMatchObject({ activity: baseline.activity, retryAt: null, warnings: baseline.warnings })
+    } finally { await cleanup?.() }
   })
 
   it("provisions V2 agents before enabling generation at runtime", async () => {

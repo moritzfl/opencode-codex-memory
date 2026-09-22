@@ -70,6 +70,14 @@ or choose **Inspect memory** from the command palette. A compact
 memory implementations and refreshes while open. Because memory is global,
 work from another window can appear here too.
 
+The recap count is the **total stored**, not a count of unconsolidated sessions.
+Extraction and consolidation have separate status rows. **Queued** can appear
+right after a successful consolidation if another extraction finishes after
+the run's input snapshot. The panel shows when the six-hour consolidation
+cooldown ends; the next activity or idle event can then start another run.
+**Retry** indicates a failed attempt, with extraction errors shown under
+**Attention**, and is separate from that normal cooldown.
+
 The panel is fully keyboard-accessible:
 
 | Key | Action |
