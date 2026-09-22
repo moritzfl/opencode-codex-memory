@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-09-22
+
 ### Fixed
 
 - The OpenCode 2 memory panel separates extraction retries from queued
