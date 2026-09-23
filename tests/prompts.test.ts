@@ -65,6 +65,20 @@ describe("buildConsolidationPrompt", () => {
 })
 
 describe("buildMemorySystemPrompt (read_path.md)", () => {
+  it("re-reads a same-mtime rewrite of the summary", () => {
+    const { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memorySummaryPath } = require("../src/paths.js")
+    ensureMemoryLayout()
+    invalidateCache()
+    const stamp = new Date("2026-01-01T00:00:00Z")
+    fs.writeFileSync(memorySummaryPath(), "first summary\n")
+    fs.utimesSync(memorySummaryPath(), stamp, stamp)
+    expect(buildMemorySystemPrompt(true)).toContain("first summary")
+    fs.writeFileSync(memorySummaryPath(), "second, longer summary\n")
+    fs.utimesSync(memorySummaryPath(), stamp, stamp)
+    expect(buildMemorySystemPrompt(true)).toContain("second, longer summary")
+  })
+
   it("keeps the port's citation contract and memory tool guidance", () => {
     const { ensureMemoryLayout, buildMemorySystemPrompt } = require("../src/source.js")
     const { memorySummaryPath } = require("../src/paths.js")

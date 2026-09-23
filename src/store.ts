@@ -149,7 +149,7 @@ export class MemoryStore {
    */
   pruneStage1Outputs(maxUnusedDays: number): number {
     const cutoff = now() - maxUnusedDays * 24 * 60 * 60 * 1000
-    return this.db
+    const pruned = this.db
       .prepare(
         `DELETE FROM memory_stage1_outputs
          WHERE rowid IN (
@@ -162,6 +162,10 @@ export class MemoryStore {
          )`,
       )
       .run(cutoff, cutoff, PRUNE_BATCH_SIZE).changes
+    // db.ts opts into auto_vacuum=INCREMENTAL; free pages are only returned
+    // to the filesystem when asked.
+    if (pruned > 0) this.db.run("PRAGMA incremental_vacuum")
+    return pruned
   }
 
   upsertStage1Output(out: Omit<Stage1Output, "usage_count" | "last_usage">): boolean {

@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   codex; the V1 extraction schema allows a null `rollout_slug`; the Memory V2
   read-path prompt keeps codex's explicit remember/forget/correction trigger
   for notes.
+- The memory summary cache also notices rewrites that keep the same
+  modification time. Freed database pages are returned after pruning.
+  Helper sessions are no longer tracked forever on hosts that cannot confirm
+  deletion.
+- Builds start from a clean `dist/`, so stale compiled files no longer ship
+  in the npm package (0.8.4 included an unused `local-session-times.js`).
 - OpenCode 2: a text part that contained only a citation block is dropped
   instead of being sent to the model empty; title requests also have citation
   markup stripped. IPv6 loopback services (`[::1]`) are recognized as local.

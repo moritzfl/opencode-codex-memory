@@ -44,15 +44,22 @@ const UPDATE_INSTRUCTIONS_FILES = `- Write your update in {{ base_path }}/extens
 
 interface CachedSummary {
   content: string
-  mtime: number
+  /** mtime alone misses same-mtime rewrites on coarse-timestamp filesystems. */
+  identity: string
 }
 
 const cache = new Map<string, CachedSummary>()
+// Shipped templates never change while the plugin runs; read once per version.
+const templates = new Map<string, string>()
 
 function readTemplate(): string {
   const name = currentMemoryVersion() === "v2" ? READ_PATH_TEMPLATE_V2 : READ_PATH_TEMPLATE
-  const templatePath = path.join(import.meta.dirname, "templates", name)
-  return fs.readFileSync(templatePath, "utf8")
+  let template = templates.get(name)
+  if (template === undefined) {
+    template = fs.readFileSync(path.join(import.meta.dirname, "templates", name), "utf8")
+    templates.set(name, template)
+  }
+  return template
 }
 
 function readMemorySummary(): string | null {
@@ -61,8 +68,9 @@ function readMemorySummary(): string | null {
     // neither the root nor memory_summary.md may redirect outside the workspace.
     const summaryPath = safeResolveMemoryPath("memory_summary.md")
     return withRegularFileNoFollow(summaryPath, fs.constants.O_RDONLY, (fd, stat) => {
+      const identity = `${stat.mtimeMs}:${stat.size}:${stat.ino}`
       const cached = cache.get(summaryPath)
-      if (cached && cached.mtime === stat.mtimeMs) {
+      if (cached && cached.identity === identity) {
         return cached.content
       }
 
@@ -70,10 +78,7 @@ function readMemorySummary(): string | null {
       if (!raw) return null
 
       const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
-      cache.set(summaryPath, {
-        content: truncated,
-        mtime: stat.mtimeMs,
-      })
+      cache.set(summaryPath, { content: truncated, identity })
       return truncated
     })
   } catch {

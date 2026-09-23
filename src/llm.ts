@@ -693,8 +693,10 @@ async function deleteSession(
     // the HTTP route still returns success. Only a confirmed 404 proves the
     // session is gone; otherwise retain ownership so hooks keep skipping it.
     // codex runtime.rs drops the thread from its manager the same way: only
-    // after shutdown succeeded.
-    if (await hostSessionDeletionConfirmed(input.client, id, SUBSESSION_CONFIRM_TIMEOUT_MS)) {
+    // after shutdown succeeded. Hosts without session.get cannot confirm;
+    // the successful delete is all the evidence there is.
+    const canConfirm = typeof (input.client.session as { get?: unknown } | undefined)?.get === "function"
+    if (!canConfirm || await hostSessionDeletionConfirmed(input.client, id, SUBSESSION_CONFIRM_TIMEOUT_MS)) {
       activeSubSessions.delete(id)
     }
     return true

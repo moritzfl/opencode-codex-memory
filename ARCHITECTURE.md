@@ -57,7 +57,7 @@ READ PATH
   experimental.chat.system.transform hook
     → reads memories/memory_summary.md, truncates to 2500 tokens (chars/4)
     → appends a byte-identical string to system[] every turn (cache-stable)
-    → stats the file every turn; re-reads only when its mtime changes
+    → stats the file every turn; re-reads only when its mtime/size/inode changes
   tools: memory_read, memory_search, memory_list, memory_add_note
     (+ control tools: memory_reset [V1 only, user-approved], memory_inspect, memory_mode)
   experimental.text.complete hook: parse <memory-citation> at text end,
@@ -151,8 +151,8 @@ puts cache breakpoints on the first two system messages
 (`provider/transform.ts`, `.slice(0, 2)`). The stable memory block therefore
 gets its own cache segment: changing memory invalidates that segment without
 invalidating opencode's base prompt. The plugin caches the summary in process
-  memory keyed by summary path, stats its mtime each turn, and re-reads only after an external edit
-  changes that mtime or Phase 2 explicitly invalidates the cache. Sessionless
+  memory keyed by summary path, stats it each turn, and re-reads only after an external edit
+  changes its mtime, size, or inode, or Phase 2 explicitly invalidates the cache. Sessionless
   invocations of the same hook (used by opencode while generating agent
   definitions) are ignored, as is a symlinked memory root or summary file.
   OpenCode's hidden `title` agent reuses the real conversation `sessionID` and

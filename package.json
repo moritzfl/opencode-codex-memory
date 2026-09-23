@@ -41,7 +41,7 @@
   },
   "scripts": {
     "dev": "bun --watch src/index.ts",
-    "build": "tsc && bun scripts/build-tui.ts && rm -rf dist/src/templates && cp -R src/templates dist/src/templates && cp opencode.json dist/opencode.json",
+    "build": "rm -rf dist && tsc && bun scripts/build-tui.ts && cp -R src/templates dist/src/templates && cp opencode.json dist/opencode.json",
     "smoke": "bun scripts/smoke.ts",
     "contract": "bun scripts/check-opencode-contract.ts",
     "contract:v2": "bun scripts/check-opencode2-contract.ts",
