@@ -49,7 +49,9 @@ ses_def456
 Updating memories:
 
 You may update memories **only** when explicitly asked by the user. This must
-always come from a direct request from the user.
+always come from a direct request from the user. For an explicit remember,
+forget, or correction request, record the requested addition, deletion, or
+correction as a note:
 {{ update_instructions }}
 Do not edit generated memory files directly; consolidation applies these notes.
 

@@ -440,7 +440,8 @@ const EXTRACTION_SCHEMA = {
   properties: {
     raw_memory: { type: "string" },
     rollout_summary: { type: "string" },
-    rollout_slug: { type: "string" },
+    // codex phase1_output.rs V1: nullable slug (V2 keeps a plain string).
+    rollout_slug: { type: ["string", "null"] },
   },
   required: ["raw_memory", "rollout_summary", "rollout_slug"],
 } as const

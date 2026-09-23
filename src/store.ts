@@ -157,7 +157,7 @@ export class MemoryStore {
            WHERE selected_for_phase2 = 0
              AND ((last_usage IS NOT NULL AND last_usage < ?)
                   OR (last_usage IS NULL AND source_updated_at < ?))
-           ORDER BY COALESCE(last_usage, source_updated_at) ASC
+           ORDER BY COALESCE(last_usage, source_updated_at) ASC, source_updated_at ASC, session_id ASC
            LIMIT ?
          )`,
       )
@@ -826,6 +826,17 @@ export class MemoryStore {
          ON CONFLICT(session_id) DO UPDATE SET polluted=1, memory_mode='polluted', updated_at=excluded.updated_at`,
       )
       .run(sessionId, now())
+    // codex mark_thread_memory_mode_polluted: a consumed output must be
+    // forgotten on the next pass, not after a pending phase-2 retry backoff.
+    // Session meta is shared, so every writer that consumed it re-queues.
+    for (const store of existingMemoryStores()) store.enqueueIfSelected(sessionId)
+  }
+
+  private enqueueIfSelected(sessionId: string): void {
+    const row = this.db
+      .prepare("SELECT selected_for_phase2 FROM memory_stage1_outputs WHERE session_id = ?")
+      .get(sessionId) as { selected_for_phase2: number } | null
+    if (row && row.selected_for_phase2 !== 0) this.enqueueGlobalConsolidation(now())
   }
 
   isPolluted(sessionId: string): boolean {

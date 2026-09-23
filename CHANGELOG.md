@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot reclaim the job mid-run and discard the finished result.
 - Claude Code import streams session transcripts to find a project's
   directory instead of loading each whole file into memory.
+- Closer codex parity: marking a consumed session as polluted re-queues
+  consolidation right away instead of waiting out a retry backoff; compaction
+  summaries no longer duplicate conversation in extraction input; raw
+  memories sort by session id in byte order and pruning breaks ties like
+  codex; the V1 extraction schema allows a null `rollout_slug`; the Memory V2
+  read-path prompt keeps codex's explicit remember/forget/correction trigger
+  for notes.
 - OpenCode 2: a text part that contained only a citation block is dropped
   instead of being sent to the model empty; title requests also have citation
   markup stripped. IPv6 loopback services (`[::1]`) are recognized as local.

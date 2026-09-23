@@ -95,7 +95,10 @@ mappings:
     note: >
       Adapted, not byte-copied. Citation tags are plugin-shaped
       (<memory-citation>/<session_ids>/ses_*). search_step and
-       update_instructions placeholders match read_path.md.
+       update_instructions placeholders match read_path.md; the codex
+      "explicit remember, forget, or correction request" trigger is kept in
+      front of update_instructions. Citation guidance is restructured into a
+      bullet list (codex: one paragraph).
       No MEMORY.md hop. Recaps are per-session .md files. Opt-in; default v1.
   - ours: src/source.ts
     theirs: codex-rs/ext/memories/src/prompts.rs
@@ -203,7 +206,9 @@ mappings:
       divergence). Port requires a closing tag
       (codex's stream parser auto-closes at EOF); port drops codex's legacy
       <thread_ids> alias and instead accepts its own legacy comma-separated id
-      list.
+      list. OpenCode 2 renders citations as a fenced ```memory-citation block
+      (entries + `sessions:` line) instead of XML: src/v2/citation-overlay.ts
+      swaps the read-path section, and the parser accepts both forms.
 
   # --- Storage / DB ---
   - ours: src/db.ts
@@ -300,6 +305,9 @@ mappings:
       Codex now extracts from legacy and paginated threads alike; the port was
       already history-mode agnostic because these APIs expose the session
       transcript independently of Codex's rollout storage mode.
+      Compaction summaries (assistant rows with summary=true) are dropped like
+      codex drops Compacted items (rollout policy + phase1.rs); OpenCode 2
+      compaction rows carry no text and add nothing.
       See D4 in ARCHITECTURE.md.
   - ours: src/rollout-input.ts
     theirs: codex-rs/memories/write/src/rollout_input.rs
@@ -386,7 +394,11 @@ mappings:
       consolidator INITs them; outcome-equivalent, first diff shows M not A).
       Claude project memory import is no longer a divergence: see
       src/claude-import.ts. Codex-CLI consolidated-memory exchange remains in
-      src/codex-interop.ts.
+      src/codex-interop.ts. rollout_summaries/ file stems use a 4-hex sha1 of
+      the session id and a collapsed/trimmed slug (codex: base62 x31 hash,
+      every non-alnum char to "_"); only names differ, content is the same.
+      raw_memories.md and selection sort by session id in byte order, like
+      codex sort_by_key(thread_id).
   - ours: src/claude-import.ts
     theirs: codex-rs/external-agent-migration/src/memory_import.rs
     note: >
@@ -539,10 +551,14 @@ mappings:
       every live MCP server via client.mcp.status(); server names use
       opencode's own tool-prefix sanitization (codex marks all MCP servers
       pollutes_memory=true). The live status request is aborted after 1s so a
-      stalled local endpoint cannot block tool execution. codex has a third
-      channel with no port:
+      stalled local endpoint cannot block tool execution. codex has two more
+      channels with no port:
       registry.rs marks on output.contains_external_context() after a
-      successful builtin tool — opencode exposes no equivalent output flag. (3) the memorize / memorize-extract
+      successful builtin tool — opencode exposes no equivalent output flag;
+      hook_runtime.rs marks on MCP-tool hooks ("mcp_tool_hook") — opencode
+      has no MCP hook handlers. Pollution re-queues phase 2 when a consumed
+      output is affected (store.markPolluted, codex
+      mark_thread_memory_mode_polluted). (3) the memorize / memorize-extract
       sub-agents self-register through the plugin config hook (user-defined
       agents of the same name win) — pure opencode packaging; codex ships its
       memory agents inside the binary; injection appends an external_directory

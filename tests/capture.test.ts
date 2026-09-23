@@ -34,6 +34,18 @@ function messagesClient(rows: unknown) {
 }
 
 describe("loadTranscript", () => {
+  it("drops compaction summaries like codex drops Compacted items", async () => {
+    setClient(messagesClient([
+      ...API_ROWS,
+      { info: { role: "user" }, parts: [{ type: "compaction", auto: true }] },
+      { info: { role: "assistant", summary: true }, parts: [{ type: "text", text: "summary of the api question" }] },
+    ]))
+    const { loadTranscript } = require("../src/capture.js")
+    const texts = (await loadTranscript("ses_1")).map((m: { text?: string }) => m.text)
+    expect(texts).toContain("api answer")
+    expect(texts).not.toContain("summary of the api question")
+  })
+
   it("maps one entry per part with the message role", async () => {
     setClient(messagesClient(API_ROWS))
     const { loadTranscript } = require("../src/capture.js")

@@ -472,6 +472,26 @@ describe("MemoryStore phase2", () => {
     expect(b.type).toBe("skipped_running")
   })
 
+  it("re-queues consolidation past a retry backoff when a consumed session is polluted", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const output = { session_id: "ses_sel", source_updated_at: 1000, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1000 }
+    store.upsertStage1Output(output)
+    store.upsertStage1Output({ ...output, session_id: "ses_unsel" })
+    const first = store.claimGlobalPhase2Job({ bypassCooldown: true })
+    if (first.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Succeeded(first.ownershipToken, [output])
+    const retry = store.claimGlobalPhase2Job({ bypassCooldown: true })
+    if (retry.type !== "claimed") throw new Error("expected claimed")
+    store.markPhase2Failed(retry.ownershipToken, "boom")
+    const backoff = store.phase2JobSnapshot()?.retry_at
+    expect(backoff).not.toBeNull()
+    store.markPolluted("ses_unsel")
+    expect(store.phase2JobSnapshot()?.retry_at).toBe(backoff)
+    store.markPolluted("ses_sel")
+    expect(store.phase2JobSnapshot()).toMatchObject({ status: "pending", retry_at: null })
+  })
+
   it("keeps a running lease owned by a live pid", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()

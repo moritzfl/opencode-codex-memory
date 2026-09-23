@@ -180,7 +180,8 @@ export function rolloutSummaryFileStem(o: Pick<Stage1Output, "session_id" | "sou
 }
 
 export function rebuildRawMemories(outputs: Stage1Output[]): string {
-  const sorted = [...outputs].sort((a, b) => a.session_id.localeCompare(b.session_id))
+  // codex: selected.sort_by_key(thread_id) — byte order, not locale order.
+  const sorted = [...outputs].sort((a, b) => (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0))
   let content = "# Raw Memories\n\n"
   if (sorted.length === 0) {
     content += "No raw memories yet.\n"

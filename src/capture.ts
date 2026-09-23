@@ -135,6 +135,9 @@ export async function loadTranscript(sessionId: string): Promise<TranscriptMessa
   const out: TranscriptMessage[] = []
   for (const row of rows) {
     const role = row?.info?.role
+    // Compaction summaries restate messages opencode still keeps; codex drops
+    // Compacted items from memory transcripts (rollout policy / phase1.rs).
+    if ((row?.info as { summary?: unknown } | undefined)?.summary === true) continue
     for (const part of row?.parts ?? []) {
       const question = part as { tool?: string; ignored?: boolean; state?: { input?: unknown; output?: unknown } }
       const answer = question?.state?.output
