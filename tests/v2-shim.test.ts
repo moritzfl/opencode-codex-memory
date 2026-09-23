@@ -864,6 +864,25 @@ describe("V1 client shim", () => {
     expect(res.data).toEqual([{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }])
   })
 
+  it("keeps the compaction summary when only the compacted context is available", async () => {
+    const { ctx } = fakeCtx()
+    ctx.session.context = async () => [
+      { id: "c1", type: "compaction", summary: "User chose Postgres over SQLite.", recent: "", time: { created: 1 } },
+      { id: "m2", type: "user", text: "continue", time: { created: 2 } },
+    ]
+    setV2Context(ctx as any)
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => undefined, headers: () => undefined },
+      make: () => ({ session: {} }),
+    })
+    const client = buildV1ClientShim() as any
+    const res = await client.session.messages({ path: { id: "ses_compacted" } })
+    expect(res.data).toEqual([
+      { info: { role: "compaction" }, parts: [{ type: "text", text: "[Summary of earlier conversation]\nUser chose Postgres over SQLite." }] },
+      { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
+    ])
+  })
+
   it("falls back to observed sessions when no registered service is available", async () => {
     const { ctx } = fakeCtx()
     setV2Context(ctx as any)

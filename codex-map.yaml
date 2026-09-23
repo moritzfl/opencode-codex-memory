@@ -314,7 +314,10 @@ mappings:
       transcript independently of Codex's rollout storage mode.
       Compaction summaries (assistant rows with summary=true) are dropped like
       codex drops Compacted items (rollout policy + phase1.rs); OpenCode 2
-      compaction rows carry no text and add nothing.
+      compaction rows carry no text and add nothing. Exception: without a
+      registered service, OpenCode 2 transcripts come from session.context,
+      which starts at the latest compaction (the originals are not
+      available), so its summary is kept as the only record of them.
       See D4 in ARCHITECTURE.md.
   - ours: src/rollout-input.ts
     theirs: codex-rs/memories/write/src/rollout_input.rs

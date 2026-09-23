@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deletion.
 - Builds start from a clean `dist/`, so stale compiled files no longer ship
   in the npm package (0.8.4 included an unused `local-session-times.js`).
+- OpenCode 2 without a registered service reads transcripts from the
+  compacted session context; extraction now keeps the compaction summary
+  there instead of silently losing everything before it.
 - OpenCode 2: a text part that contained only a citation block is dropped
   instead of being sent to the model empty; title requests also have citation
   markup stripped. IPv6 loopback services (`[::1]`) are recognized as local.

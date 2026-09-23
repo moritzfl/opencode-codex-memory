@@ -317,10 +317,18 @@ async function loadV2Messages(sessionID: string, context?: V2Context, signal?: A
       cursor = next
     }
   }
+  // session.context is the model context from the latest completed compaction
+  // on, not the full transcript: the originals before it are gone here, so
+  // the compaction summary is the only record of them. (message.list above
+  // keeps the originals; there the summary would duplicate them.)
   const raw = await (context ?? ctx()).session.context({ sessionID } as any)
   const rows = responseRows(raw)
   if (!rows) throw new Error("session context returned an invalid message list")
-  return rows
+  return rows.map((m: any) =>
+    m?.type === "compaction" && typeof m.summary === "string" && typeof m.text !== "string"
+      ? { ...m, text: `[Summary of earlier conversation]\n${m.summary}` }
+      : m,
+  )
 }
 
 function completedPromptResponse(rows: any[], promptID: unknown): { data: unknown } {
