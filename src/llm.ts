@@ -17,8 +17,10 @@ import { catalogVariantKeys, nearestReasoningVariant } from "./reasoning-variant
 import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
 import type { MemoryVersion } from "./options.js"
 import { currentMemoryVersion } from "./memory-version.js"
-import { SCAN_LIMIT } from "./store.js"
+import { SCAN_LIMIT, STAGE1_LEASE_SECONDS } from "./store.js"
 import { isProviderCapacityError, ProviderCapacityError } from "./ratelimit.js"
+
+const EXTRACTION_TIMEOUT_MS = (STAGE1_LEASE_SECONDS - 600) * 1000
 
 export interface ExtractionResult {
   raw_memory: string
@@ -470,10 +472,11 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
     // extract_model option > opencode small_model > session default.
     const model = await resolveExtractionModel(opts.model)
     const data = await runPrompt(subId, prompt, agent, {
-      // Mirrors the stage-1 job lease (1h): codex has no per-request timeout,
-      // and a near-600k-char transcript on a slow model can easily exceed a
-      // short one — repeated timeouts would exhaust the job's retries.
-      timeoutMs: opts.timeoutMs ?? 3600_000,
+      // Bounded by the stage-1 job lease (1h), minus headroom for transcript
+      // load, session creation, and model lookups before the prompt starts.
+      // Codex has no per-request timeout; a timeout past the lease lets
+      // another process reclaim the job and silently drop this paid result.
+      timeoutMs: opts.timeoutMs ?? EXTRACTION_TIMEOUT_MS,
       system: readTemplate(version === "v2" ? "stage_one_system_v2.md" : "stage_one_system.md"),
       model,
       signal: opts.signal ?? pluginShutdownSignal(),

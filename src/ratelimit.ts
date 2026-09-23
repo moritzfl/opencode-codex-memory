@@ -47,7 +47,12 @@ const MIN_PHASE1_INTERVAL_MS = 30_000
 export const PROVIDER_CAPACITY_BACKOFF_MS = 3_600_000
 
 const PROVIDER_CAPACITY_RE =
-  /usage limit|free usage exceeded|provider capacity exhausted|rate[\s_-]?limit|quota(?:\s+(?:exceeded|exhausted|reached))?|too many requests|\b429\b|resource_exhausted|insufficient_quota|billing.?hard.?limit/i
+  /usage limit|free usage exceeded|provider capacity exhausted|rate[\s_-]?limit|quota\s+(?:exceeded|exhausted|reached)|exceeded (?:your|the) (?:current )?quota|too many requests|\b429\b|resource_exhausted|insufficient_quota|billing.?hard.?limit/i
+// A single request larger than the per-minute budget (OpenAI "Request too
+// large … tokens per min", sent as 429) never succeeds on retry; treating it
+// as capacity would keep that session pending forever and trip the breaker
+// for every other extraction on each attempt.
+const REQUEST_SIZE_RE = /request too large|context[\s_-]?length|maximum context|prompt is too long|too many tokens/i
 
 function errorRecord(error: unknown): Record<string, unknown> | null {
   return error && typeof error === "object" ? error as Record<string, unknown> : null
@@ -78,8 +83,10 @@ export function providerCapacityMessage(error: unknown): string {
 
 export function isProviderCapacityError(error: unknown): boolean {
   if (error instanceof ProviderCapacityError) return true
+  const message = providerCapacityMessage(error)
+  if (REQUEST_SIZE_RE.test(message)) return false
   if (providerCapacityStatusCode(error) === 429) return true
-  return PROVIDER_CAPACITY_RE.test(providerCapacityMessage(error))
+  return PROVIDER_CAPACITY_RE.test(message)
 }
 
 function providerCapacityScope(phase: MemoryPhase, model?: string): string {

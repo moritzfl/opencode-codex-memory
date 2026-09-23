@@ -577,7 +577,9 @@ mappings:
       responses are cached, so transient host failures cannot pin missing model
       config until reload. parseExtraction (brace-scrape, unknown-field tolerant)
       stays as a fallback for hosts/models that don't populate structured. Per-request
-      timeouts mirror the 1h job leases (codex relies on the lease alone);
+      timeouts stay inside the 1h job leases (codex relies on the lease alone):
+      consolidation mirrors it; extraction stops 10 min early because its
+      stage-1 lease has no heartbeat and pre-prompt work also runs on it;
       timed-out or ownership-cancelled prompts call the bound session.abort SDK
       method with a 1s bound before session deletion; deletion is bounded to
       codex's 10s shutdown timeout.       Cleanup is awaited for consolidation because the phase-2 lease
@@ -658,6 +660,9 @@ mappings:
       blocking independently configured opencode providers. Phase 2 still has
       no 30s timer — DB claim/cooldown only, like codex. Wire
       min_rate_limit_remaining_percent when the host exposes provider quota.
+      Classification: a 429 or quota/rate-limit wording counts as capacity,
+      except single-request size errors ("request too large", context length),
+      which can never succeed on retry and consume retries normally.
   # Platform-only modules (no codex theirs path — do not map with theirs: null,
   # the drift script existence-checks every theirs value):
   #   src/lifecycle.ts — dispose/reload abort for consolidator + sub-sessions

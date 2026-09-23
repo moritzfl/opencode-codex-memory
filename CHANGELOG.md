@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this host, its process is gone, and its heartbeat is stale, so sandboxed
   peers sharing the memory database keep their lease. The sweep also runs
   before each consolidation attempt, not only at startup.
+- OpenCode 2 keeps the HTTP status of failed extraction requests, so provider
+  429s trigger the quota backoff instead of burning retries.
+- A request too large for the model's per-minute or context limit is no
+  longer treated as a quota outage. It uses the normal retry budget instead of
+  retrying forever and pausing all other extraction each time. Errors that
+  merely mention "quota" are no longer classified as capacity failures.
+- Extraction stops 10 minutes before its job lease expires, so another process
+  cannot reclaim the job mid-run and discard the finished result.
 
 ### Changed
 

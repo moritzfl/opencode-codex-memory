@@ -563,7 +563,12 @@ export function buildV1ClientShim(): unknown {
       try {
         return await v2promptWithWait(opts.path.id, opts.body, opts.signal)
       } catch (e) {
-        return { error: e instanceof Error ? { message: e.message } : e }
+        // Keep the HTTP status: an undeclared 429 surfaces as ClientError
+        // "UnexpectedStatus" whose message alone misses the capacity breaker.
+        if (!(e instanceof Error)) return { error: e }
+        const status = (e as { status?: unknown; cause?: { status?: unknown } }).status
+          ?? (e as { cause?: { status?: unknown } }).cause?.status
+        return { error: { message: e.message, ...(typeof status === "number" ? { statusCode: status } : {}) } }
       }
     },
     messages: async (opts: { path: { id: string } }) => {

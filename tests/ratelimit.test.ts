@@ -66,7 +66,15 @@ describe("rate-limit stub semantics", () => {
     expect(isProviderCapacityError("rate_limit_exceeded")).toBe(true)
     expect(isProviderCapacityError("HTTP 429 too many requests")).toBe(true)
     expect(isProviderCapacityError("insufficient_quota")).toBe(true)
+    expect(isProviderCapacityError("You exceeded your current quota, please check your plan")).toBe(true)
     expect(isProviderCapacityError("boom")).toBe(false)
+    // "quota" alone is not a capacity signal (e.g. a transcript about quotas).
+    expect(isProviderCapacityError("invalid JSON: memory mentions disk quota settings")).toBe(false)
+    // An oversized single request never fits on retry, even as a 429.
+    expect(isProviderCapacityError({
+      data: { statusCode: 429, message: "Request too large for gpt-4o on tokens per min (TPM): Limit 30000, Requested 50000." },
+    })).toBe(false)
+    expect(isProviderCapacityError("This model's maximum context length is 128000 tokens")).toBe(false)
     expect(isProviderCapacityError("empty transcript for previously extracted session")).toBe(false)
     expect(isProviderCapacityError("failed_invalid_artifacts: missing MEMORY.md")).toBe(false)
   })

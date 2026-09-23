@@ -799,6 +799,20 @@ describe("V1 client shim", () => {
     expect(after.response?.status).toBe(404)
   })
 
+  it("keeps the HTTP status of failed prompts for the capacity breaker", async () => {
+    const { ctx } = fakeCtx()
+    ctx.generate.text = async () => { throw Object.assign(new Error("UnexpectedStatus"), { cause: { status: 429 } }) }
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    const res = await client.session.prompt({
+      path: { id: "ses_x" },
+      body: { agent: "memorize-extract", format: { type: "json_schema", schema: {} }, parts: [{ type: "text", text: "t" }] },
+    })
+    expect(res.error).toEqual({ message: "UnexpectedStatus", statusCode: 429 })
+    const { isProviderCapacityError } = require("../src/ratelimit.js")
+    expect(isProviderCapacityError(res.error)).toBe(true)
+  })
+
   it("interrupts the local helper before removing it through the service", async () => {
     const { ctx, calls } = fakeCtx()
     serviceRemove = async () => { calls.push({ name: "service.remove", args: null }) }
