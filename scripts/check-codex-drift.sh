@@ -90,6 +90,14 @@ info "codex checkout : $CODEX_REPO"
 info "pinned ref     : $CODEX_REF ($CODEX_REF_DATE)"
 CODEX_HEAD="$(git -C "$CODEX_REPO" rev-parse HEAD)"
 info "codex HEAD     : $CODEX_HEAD"
+# The diff below runs against the local HEAD; a stale checkout reports a
+# false "aligned". Compare with the last fetched upstream (no network here).
+if CODEX_UPSTREAM="$(git -C "$CODEX_REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+  behind="$(git -C "$CODEX_REPO" rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)"
+  if [[ "$behind" -gt 0 ]]; then
+    warn "checkout is $behind commit(s) behind $CODEX_UPSTREAM — pull before trusting this report."
+  fi
+fi
 echo
 
 drift=0

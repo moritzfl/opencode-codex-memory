@@ -16,8 +16,8 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 5ee2bdf1e0e04064bc427ae31a49a01e8f7064df
-codex_ref_date: 2026-09-19
+codex_ref: ce7df362375772367bbba3deb9fb41632e96be1a
+codex_ref_date: 2026-09-23
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -69,6 +69,13 @@ watch_paths:
   - codex-rs/state/src/runtime/memory_versions.rs
   - codex-rs/state/src/runtime/memory_readiness.rs
   - codex-rs/app-server/src/request_processors/memory_status.rs
+  # Added after the 2026-09-23 audit — inputs the port depends on that sat
+  # outside the list (MCP-hook pollution, truncation, interactive sources,
+  # preferred memory models):
+  - codex-rs/core/src/hook_runtime.rs
+  - codex-rs/utils/string/src/truncate.rs
+  - codex-rs/rollout/src/lib.rs
+  - codex-rs/model-provider/src/provider.rs
 
 # ours: path in this repo. theirs: path in the codex checkout.
 # Every `theirs` is existence-checked by the drift script (catches renames like
