@@ -68,9 +68,32 @@ const liveInstances: V2Context[] = []
 type RuntimeOptionKey = "use_memories" | "generate_memories"
 /** Panel toggles; survive later location setups until the last instance disposes. */
 const runtimeOverrides: Partial<Record<RuntimeOptionKey, boolean>> = {}
+const eventLoops = new Set<AbortController>()
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const timer = setTimeout(done, ms)
+    function done() {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", done)
+      resolve()
+    }
+    signal.addEventListener("abort", done, { once: true })
+  })
+}
+
+// Context hooks fire on every LLM step; each emit makes every open panel
+// re-read status. Coalesce bursts.
+let statusNotifyTimer: ReturnType<typeof setTimeout> | null = null
 
 function notifyStatusChanged(): void {
-  for (const notify of statusListeners) notify()
+  if (statusNotifyTimer) return
+  statusNotifyTimer = setTimeout(() => {
+    statusNotifyTimer = null
+    for (const notify of statusListeners) notify()
+  }, 250)
+  ;(statusNotifyTimer as { unref?: () => void }).unref?.()
 }
 
 function trackBackgroundTask(task: Promise<void>): void {
@@ -91,10 +114,14 @@ export async function waitForV2BackgroundTasks(): Promise<void> {
 /** Test seam: reset module state between tests. */
 export function resetV2ModuleStateForTest(): void {
   statusListeners.clear()
+  if (statusNotifyTimer) clearTimeout(statusNotifyTimer)
+  statusNotifyTimer = null
   backgroundTasks.clear()
   seenTurnSessions.clear()
   mcpStatusInFlight = null
   liveInstances.length = 0
+  for (const loop of eventLoops) loop.abort()
+  eventLoops.clear()
   for (const key of Object.keys(runtimeOverrides) as RuntimeOptionKey[]) delete runtimeOverrides[key]
 }
 
@@ -112,6 +139,7 @@ function stripAndReconcileCitations(sessionId: string, messages: any[] | undefin
   for (const msg of messages ?? []) {
     // Model-bound LLM.Message uses role; persisted/legacy rows use type.
     if ((msg?.role ?? msg?.type) !== "assistant" || !Array.isArray(msg.content)) continue
+    let emptied = false
     for (const part of msg.content) {
       if (part?.type !== "text" || typeof part.text !== "string") continue
       if (!hasCitationMarkup(part.text)) continue
@@ -123,6 +151,13 @@ function stripAndReconcileCitations(sessionId: string, messages: any[] | undefin
         console.error("[opencode-codex-memory] citation recording failed:", e)
       }
       part.text = stripCitations(part.text)
+      if (part.text === "") emptied = true
+    }
+    // The host drops empty text parts before this hook; some providers reject them.
+    if (emptied && msg.content.some((part: any) => part?.type !== "text" || part.text !== "")) {
+      for (let i = msg.content.length - 1; i >= 0; i--) {
+        if (msg.content[i]?.type === "text" && msg.content[i].text === "") msg.content.splice(i, 1)
+      }
     }
   }
 }
@@ -397,6 +432,15 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     }
   })
 
+  // Title requests replay history too; citation markup is noise there.
+  await ctx.session.hook("title", (ev: any) => {
+    try {
+      handleModelBoundSession(ev, false)
+    } catch (err) {
+      console.error("[opencode-codex-memory] v2 title hook error:", err)
+    }
+  })
+
   await ctx.tool.hook("execute.before", async (ev: any) => {
     try {
       if (!pluginOptions.disable_on_external_context || !ev?.sessionID) return
@@ -463,14 +507,18 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
             console.error("[opencode-codex-memory] v2 event handling error:", err)
           }
         }
-        break
+        // A stream that ends without dispose (host restart of the bus) must
+        // not silently stop phase-1 pumps and citation accounting.
+        if (eventAbort.signal.aborted || isPluginShuttingDown()) break
       } catch (err) {
         if (eventAbort.signal.aborted || isPluginShuttingDown()) break
         console.error("[opencode-codex-memory] v2 event subscription error:", err)
-        await new Promise((r) => setTimeout(r, 5000))
       }
+      await abortableSleep(5000, eventAbort.signal)
     }
   })().catch((err) => console.error("[opencode-codex-memory] v2 event loop error:", err))
+    .finally(() => eventLoops.delete(eventAbort))
+  eventLoops.add(eventAbort)
 
   liveInstances.push(ctx)
   return () => {

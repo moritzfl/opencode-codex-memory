@@ -364,6 +364,19 @@ function adaptV2SessionRow(row: unknown): unknown {
 // The façade: V1-shaped client over the V2 context
 // ---------------------------------------------------------------------------
 
+/** Race a promise against a (possibly long-lived) signal without leaking listeners. */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new Error("sub-agent prompt cancelled"))
+    if (signal.aborted) onAbort()
+    else signal.addEventListener("abort", onAbort, { once: true })
+  })
+  return Promise.race([promise, aborted]).finally(() => {
+    if (onAbort) signal.removeEventListener("abort", onAbort)
+  })
+}
+
 async function v2promptWithWait(
   sessionID: string,
   body: { agent: string; system?: string; model?: { providerID: string; modelID: string }; format?: unknown; variant?: string; parts: { type: string; text: string }[] },
@@ -406,14 +419,7 @@ async function v2promptWithWait(
     }
     // ctx.generate.text ignores request-option signals. Race AbortSignal.
     const genP = (c as any).generate.text(payload)
-    const gen = signal
-      ? await Promise.race([
-          genP,
-          new Promise<never>((_, reject) => {
-            signal.addEventListener("abort", () => reject(new Error("sub-agent prompt cancelled")), { once: true })
-          }),
-        ])
-      : await genP
+    const gen = signal ? await raceAbort(genP, signal) : await genP
     const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
     return { data: { parts: [{ type: "text", text: outText }] } }
   }
@@ -441,12 +447,7 @@ async function v2promptWithWait(
       await waitP.catch(() => {})
       throw new Error("sub-agent prompt cancelled")
     }
-    await Promise.race([
-      waitP,
-      new Promise<never>((_, reject) => {
-        signal.addEventListener("abort", () => reject(new Error("sub-agent prompt cancelled")), { once: true })
-      }),
-    ]).catch(async (e) => {
+    await raceAbort(waitP, signal).catch(async (e) => {
       await (c.session as any).interrupt({ sessionID }).catch(() => {})
       await waitP.catch(() => {})
       throw e

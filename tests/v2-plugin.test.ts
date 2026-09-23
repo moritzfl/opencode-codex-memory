@@ -396,8 +396,7 @@ describe("v2 setup", () => {
     expect(f.added.map((t) => t.name).sort()).toEqual(
       ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_search"].sort(),
     )
-    expect(Object.keys(f.hooks).sort()).toEqual(["compaction", "context", "execute.before", "generate", "prompt"])
-    expect(f.hooks.title).toBeUndefined()
+    expect(Object.keys(f.hooks).sort()).toEqual(["compaction", "context", "execute.before", "generate", "prompt", "title"])
     expect(f.agentUpdates).toEqual([])
     await (cleanup as () => unknown)?.()
     await waitForV2BackgroundTasks()
@@ -441,6 +440,24 @@ describe("v2 setup", () => {
     await f.hooks.context[0](ev)
     expect(ev.messages[0].content[0].text).toBe("x")
     expect(ev.messages[0].content[0].text).not.toContain("memory-citation")
+  })
+
+  it("drops text parts that were only a citation block", async () => {
+    const f = fakeCtx()
+    await setup(f.ctx)
+    const ev: any = {
+      sessionID: "ses_x",
+      system: [],
+      messages: [{
+        role: "assistant",
+        content: [
+          { type: "text", text: "answer" },
+          { type: "text", text: "```memory-citation\nsessions: ses_q\n```" },
+        ],
+      }],
+    }
+    await f.hooks.context[0](ev)
+    expect(ev.messages[0].content).toEqual([{ type: "text", text: "answer" }])
   })
 
   it("compaction hook strips citations without injecting memory", async () => {
@@ -500,7 +517,7 @@ describe("v2 setup", () => {
     expect(new MemoryStore().stage1Outputs().find((row) => row.session_id === "ses_cited")?.usage_count).toBe(1)
   })
 
-  it.each(["context", "compaction", "generate"])("strips id-less %s context without double-counting durable citations", async (hook) => {
+  it.each(["context", "compaction", "generate", "title"])("strips id-less %s context without double-counting durable citations", async (hook) => {
     const text = "answer\n```memory-citation\nsessions: ses_cited\n```"
     const store = new MemoryStore()
     store.upsertStage1Output({ session_id: "ses_cited", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })

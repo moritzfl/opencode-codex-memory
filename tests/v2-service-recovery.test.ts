@@ -74,3 +74,10 @@ it.each([401, 503])("rejects HTTP %i even when the response body looks ready", a
     await server.stop(true)
   }
 })
+
+it("treats IPv6 loopback endpoints as local", () => {
+  const { isLoopbackEndpointUrl } = require("../src/v2/service.js")
+  expect(isLoopbackEndpointUrl("http://[::1]:4096")).toBe(true)
+  expect(isLoopbackEndpointUrl("http://127.0.0.1:4096")).toBe(true)
+  expect(isLoopbackEndpointUrl("http://10.0.0.2:4096")).toBe(false)
+})

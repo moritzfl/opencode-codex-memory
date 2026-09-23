@@ -31,4 +31,18 @@ describe("overlayV2CitationInstructions", () => {
     expect(out).toContain("keep this")
     expect(out).not.toContain("<citation_entries>")
   })
+
+  it.each([["v1", "read_path.md"], ["v2", "read_path_v2.md"]] as const)(
+    "replaces the whole XML section of the shipped %s template", (version, file) => {
+      const fs = require("fs")
+      const path = require("path")
+      const template = fs.readFileSync(path.join(import.meta.dir, "..", "src", "templates", file), "utf8")
+      const out = overlayV2CitationInstructions(template, version)
+      expect(out).toContain("```memory-citation")
+      expect(out).not.toContain("<citation_entries>")
+      expect(out).not.toContain("<memory-citation>\n")
+      // Replaced in place, not appended after the XML contract.
+      expect(out.indexOf("```memory-citation")).toBeLessThan(out.indexOf("Updating memories:"))
+    },
+  )
 })
