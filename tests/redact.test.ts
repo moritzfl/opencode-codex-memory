@@ -84,6 +84,9 @@ describe("redact", () => {
       'password: "[REDACTED]" # keep this comment',
     )
     expect(redact("password:\nsafe: ok")).toBe("password:\nsafe: ok")
+    // Codex's `\s*` separator crosses the newline for 8+ char values.
+    expect(redact("password:\n  hunter2abcdef\nsafe: ok")).toBe("password:\n  [REDACTED]\nsafe: ok")
+    expect(redact('token =\r\n"abcdefgh12"')).toBe('token =\r\n"[REDACTED]"')
     expect(redact("{password: hunter2, safe: ok}")).toBe('{password: "[REDACTED]", safe: ok}')
     expect(redact("{\n  password: hunter2,\n  safe: ok\n}")).toBe(
       '{\n  password: "[REDACTED]",\n  safe: ok\n}',

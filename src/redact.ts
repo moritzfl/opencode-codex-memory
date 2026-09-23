@@ -73,7 +73,8 @@ function scanAssignmentValue(
     while (/\s/.test(text[valueStart] ?? "")) valueStart++
   }
   const first = text[valueStart]
-  if (!first || first === "\r" || first === "\n") return null
+  if (!first) return null
+  if (first === "\r" || first === "\n") return flowCollection ? null : scanNextLineValue(text, valueStart)
   if (first === '"' || first === "'") {
     const end = scanQuoted(text, valueStart, first) ?? plainValueEnd(text, valueStart, flowCollection)
     return end > valueStart ? { start: valueStart, end, replacement: `${first}[REDACTED]${first}` } : null
@@ -88,6 +89,15 @@ function scanAssignmentValue(
   }
   const end = plainValueEnd(text, valueStart, flowCollection)
   return end > valueStart ? { start: valueStart, end, replacement: '"[REDACTED]"' } : null
+}
+
+// Codex's separator is `\s*`, so a value on the following line still redacts
+// under its `(["']?)[^\s"']{8,}` value rule. Short YAML block keys stay intact.
+function scanNextLineValue(text: string, start: number): { start: number; end: number; replacement: string } | null {
+  const match = /^\s*["']?([^\s"']{8,})/.exec(text.slice(start))
+  if (!match) return null
+  const end = start + match[0].length
+  return { start: end - match[1].length, end, replacement: "[REDACTED]" }
 }
 
 function scanEnclosingQuote(text: string, start: number, quote: string): number {

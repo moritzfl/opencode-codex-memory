@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenCode 2 stops consolidation helpers in the process that runs them before
   deleting them through the registered service, so a helper cannot keep
   editing after its lease is released.
+- Secret redaction matches codex for values on the line after `password:` /
+  `token =` style keys.
 
 ## [0.8.4] - 2026-09-22
 
