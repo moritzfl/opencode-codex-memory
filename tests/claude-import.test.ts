@@ -285,3 +285,18 @@ describe("syncClaudeImport", () => {
     expect(added).toContain("extensions/external_agent_import/resources/project-a/scope.json")
   })
 })
+
+describe("projectCwdFromSessions", () => {
+  it("finds the cwd across chunk boundaries and CRLF lines without reading whole files", () => {
+    const projectRoot = path.join(TEST_ROOT, "project")
+    const cwd = path.join(TEST_ROOT, "cwd")
+    fs.mkdirSync(projectRoot, { recursive: true })
+    fs.mkdirSync(cwd, { recursive: true })
+    const filler = JSON.stringify({ type: "summary", text: "x".repeat(70 * 1024) })
+    fs.writeFileSync(
+      path.join(projectRoot, "s.jsonl"),
+      `${filler}\r\n${JSON.stringify({ cwd: "relative/dir" })}\r\n${JSON.stringify({ type: "user", cwd })}\r\n`,
+    )
+    expect(mod().projectCwdFromSessions(projectRoot)).toBe(fs.realpathSync.native(cwd))
+  })
+})

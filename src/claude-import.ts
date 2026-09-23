@@ -124,33 +124,57 @@ export function projectCwdFromSessions(projectRoot: string): string | null {
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
 
   for (const { full } of sessions) {
-    let content: string
     try {
-      content = fs.readFileSync(full, "utf8")
+      for (const line of readLines(full)) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        let record: unknown
+        try {
+          record = JSON.parse(trimmed)
+        } catch {
+          continue
+        }
+        if (!record || typeof record !== "object") continue
+        const cwd = (record as { cwd?: unknown }).cwd
+        if (typeof cwd !== "string" || !path.isAbsolute(cwd)) continue
+        try {
+          const canonical = fs.realpathSync.native(cwd)
+          if (fs.statSync(canonical).isDirectory()) return canonical
+        } catch {
+          continue
+        }
+      }
     } catch {
       continue
     }
-    for (const line of content.split(/\r?\n/)) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      let record: unknown
-      try {
-        record = JSON.parse(trimmed)
-      } catch {
-        continue
-      }
-      if (!record || typeof record !== "object") continue
-      const cwd = (record as { cwd?: unknown }).cwd
-      if (typeof cwd !== "string" || !path.isAbsolute(cwd)) continue
-      try {
-        const canonical = fs.realpathSync.native(cwd)
-        if (fs.statSync(canonical).isDirectory()) return canonical
-      } catch {
-        continue
-      }
-    }
   }
   return null
+}
+
+/**
+ * Stream a file's lines in fixed chunks (codex reads through a BufReader).
+ * Session transcripts can be hundreds of MB and the cwd sits near the top;
+ * stopping iteration closes the file without reading the rest.
+ */
+function* readLines(file: string): Generator<string> {
+  const fd = fs.openSync(file, "r")
+  try {
+    const decoder = new TextDecoder()
+    const chunk = Buffer.allocUnsafe(64 * 1024)
+    let pending = ""
+    for (;;) {
+      const read = fs.readSync(fd, chunk, 0, chunk.length, null)
+      if (read === 0) break
+      pending += decoder.decode(chunk.subarray(0, read), { stream: true })
+      const parts = pending.split(/\r?\n/)
+      pending = parts.pop() ?? ""
+      yield* parts
+    }
+    pending += decoder.decode()
+    if (pending) yield pending
+  } finally {
+    fs.closeSync(fd)
+  }
 }
 
 function collectMarkdownFiles(

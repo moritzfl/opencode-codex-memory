@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merely mention "quota" are no longer classified as capacity failures.
 - Extraction stops 10 minutes before its job lease expires, so another process
   cannot reclaim the job mid-run and discard the finished result.
+- Claude Code import streams session transcripts to find a project's
+  directory instead of loading each whole file into memory.
 - OpenCode 2: a text part that contained only a citation block is dropped
   instead of being sent to the model empty; title requests also have citation
   markup stripped. IPv6 loopback services (`[::1]`) are recognized as local.
