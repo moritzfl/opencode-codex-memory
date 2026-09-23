@@ -1,4 +1,5 @@
 import fs from "fs"
+import os from "os"
 import type { Database } from "bun:sqlite"
 import { openDb, openSessionMetaDb, openTransientDb } from "./db.js"
 import { allJobDbPaths, sessionMetaDbPath, memoryDbPath } from "./paths.js"
@@ -85,10 +86,11 @@ function newId(): string {
   return crypto.randomUUID()
 }
 /**
- * Phase-2 worker ids embed the owning pid so a later boot can tell a live
- * peer's lease from one orphaned by a hard kill (host auto-update/restart).
+ * Phase-2 worker ids embed the owning pid and host so a later boot can tell a
+ * live peer's lease from one orphaned by a hard kill (host auto-update/restart).
  */
-const PHASE2_WORKER_PREFIX = `pid:${process.pid}:`
+const PHASE2_WORKER_PREFIX = `pid:${process.pid}@${os.hostname()}:`
+export const PHASE2_HEARTBEAT_SECONDS = 90
 function phase2WorkerId(): string {
   return `${PHASE2_WORKER_PREFIX}${crypto.randomUUID()}`
 }
@@ -665,21 +667,26 @@ export class MemoryStore {
    * so the next process can reclaim immediately. Ownership-token guarded.
    */
   /**
-   * Boot-time sweep: a `running` global row whose owning pid is dead can never
+   * Orphan sweep: a `running` global row whose owning pid is dead can never
    * be finished by anyone; release it so the next pass can reclaim instead of
-   * waiting the full lease out. Rows from live pids (a peer instance) and rows
+   * waiting the full lease out. Rows from live pids (a peer instance), rows
+   * from another host, rows with a fresh heartbeat (the owner may sit in
+   * another pid namespace, e.g. a sandbox sharing memory.db), and rows
    * without a pid tag (older schema) are left alone.
    */
   releaseOrphanedPhase2Job(): boolean {
     const row = this.db
       .prepare(
-        `SELECT worker_id FROM memory_jobs
+        `SELECT worker_id, lease_until FROM memory_jobs
          WHERE kind='memory_consolidate_global' AND job_key='global' AND status='running'`,
       )
-      .get() as { worker_id: string | null } | null
-    const m = row?.worker_id?.match(/^pid:(\d+):/)
+      .get() as { worker_id: string | null; lease_until: number | null } | null
+    const m = row?.worker_id?.match(/^pid:(\d+)(?:@([^:]*))?:/)
     if (!m) return false
+    if (m[2] !== undefined && m[2] !== os.hostname()) return false
     if (pidAlive(Number(m[1]))) return false
+    const heartbeatFreshAfter = nowSec() + PHASE2_LEASE_SECONDS - 3 * PHASE2_HEARTBEAT_SECONDS
+    if (row!.lease_until !== null && row!.lease_until > heartbeatFreshAfter) return false
     const res = this.db
       .prepare(
         `UPDATE memory_jobs SET

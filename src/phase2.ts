@@ -1,4 +1,4 @@
-import { MemoryStore } from "./store.js"
+import { MemoryStore, PHASE2_HEARTBEAT_SECONDS } from "./store.js"
 import { checkRateLimit, isProviderCapacityError, noteProviderCapacityExhausted } from "./ratelimit.js"
 import {
   ensureLayout,
@@ -162,6 +162,15 @@ async function runVersionPhase2(
     const rl = await checkRateLimit("phase2", consolidationModel)
     if (!rl.ok) return { status: "skipped_rate_limit" }
 
+    // Boot sweeps alone would wait out a whole lease when the host restarts
+    // within the heartbeat-staleness window of a crash.
+    try {
+      if (store.releaseOrphanedPhase2Job()) {
+        console.warn(`[opencode-codex-memory] released orphaned ${store.version} consolidation lease`)
+      }
+    } catch (err) {
+      console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
+    }
     const claim = store.claimGlobalPhase2Job({ bypassCooldown: opts.bypassCooldown })
     if (claim.type !== "claimed") return { status: claim.type }
 
@@ -279,7 +288,7 @@ async function runVersionPhase2(
       if (releaseIfShuttingDown(store, claim.ownershipToken)) {
         return { status: "shutting_down" }
       }
-      const heartbeat = setInterval(heartbeatOnce, opts.heartbeatIntervalMs ?? 90_000)
+      const heartbeat = setInterval(heartbeatOnce, opts.heartbeatIntervalMs ?? PHASE2_HEARTBEAT_SECONDS * 1000)
 
       try {
         await consolidateViaSubagent(
@@ -336,7 +345,7 @@ async function runVersionPhase2(
         return { status: "failed_invalid_artifacts" }
       }
 
-      if (!await withHostTimeout(resetBaseline(), GIT_TIMEOUT_MS, "resetBaseline")) {
+      if (!await withHostTimeout(resetBaseline(diff.extensionSnapshot), GIT_TIMEOUT_MS, "resetBaseline")) {
         store.markPhase2Failed(claim.ownershipToken, "baseline reset failed")
         return { status: "baseline_reset_failed" }
       }

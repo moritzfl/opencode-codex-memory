@@ -259,6 +259,10 @@ mappings:
       a distinct-session high-water count; stale ownership cannot advance it.
       Pruning preserves progress; reset clears it and citation dedupe in both
       stores without closing live handles. Session deletion covers both stores.
+      Port-only orphan sweep (no codex equivalent; codex waits out the lease):
+      a running phase-2 row tagged `pid:<pid>@<host>:` is released when the
+      pid is dead on this host AND the heartbeat is stale (3 missed beats);
+      runs at boot and before each phase-2 claim.
 
   # --- Write path: phase 1 (extraction) ---
   - ours: src/phase1.ts
@@ -452,7 +456,11 @@ mappings:
       hidden paths (dot components, e.g. Finder `.DS_Store`) are omitted from
       staging and workspace diffs because path-guard reports them as not found
       — including them failed phase 2. Codex's walker includes them and reads
-      bytes directly.
+      bytes directly. resetBaseline keeps `extensions/` files added/edited
+      after the diff capture out of the new baseline (codex resets the whole
+      tree, so a note written during the consolidator turn is never
+      consolidated). Recovery on unusable metadata stays codex-shaped: any
+      open/HEAD failure re-inits, as ensure_git_baseline_repository does.
   - ours: src/templates/consolidation.md
     theirs: codex-rs/memories/write/templates/memories/consolidation.md
     note: >

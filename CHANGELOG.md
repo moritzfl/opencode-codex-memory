@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   editing after its lease is released.
 - Secret redaction matches codex for values on the line after `password:` /
   `token =` style keys.
+- Notes added while consolidation runs are consolidated on the next run
+  instead of being folded into the baseline unseen.
+- A consolidation lease is released as orphaned only when its owner is on
+  this host, its process is gone, and its heartbeat is stale, so sandboxed
+  peers sharing the memory database keep their lease. The sweep also runs
+  before each consolidation attempt, not only at startup.
 
 ## [0.8.4] - 2026-09-22
 

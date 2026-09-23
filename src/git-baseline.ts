@@ -1,3 +1,4 @@
+import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
@@ -30,6 +31,23 @@ export interface WorkspaceChange {
 export interface WorkspaceDiff {
   changes: WorkspaceChange[]
   unifiedDiff: string
+  /**
+   * Content hash of every `extensions/` file at capture time. Notes written
+   * while the consolidator runs are not in this diff; resetBaseline keeps
+   * them out of the new baseline so the next run still sees them.
+   */
+  extensionSnapshot?: ReadonlyMap<string, string>
+}
+
+const EXTENSIONS_PREFIX = "extensions/"
+
+function workdirHash(dir: string, filepath: string): string | null {
+  try {
+    const content = readRegularFileNoFollow(safeResolveUnderRoot(dir, filepath)).content
+    return createHash("sha1").update(content).digest("hex")
+  } catch {
+    return null
+  }
 }
 
 function removeDiffArtifact(dir: string): void {
@@ -65,12 +83,13 @@ function gitMetadataUnusable(gitDir: string): boolean {
 
 // statusMatrix rows are [filepath, head, workdir, stage]; head !== workdir
 // means the working tree differs from HEAD (added, modified, or deleted).
-async function stageAll(dir: string): Promise<number> {
+async function stageAll(dir: string, skip?: (filepath: string) => boolean): Promise<number> {
   const matrix = await isogit.statusMatrix({ fs, dir })
   let changes = 0
   for (const [filepath, head, workdir, stage] of matrix) {
     if (isHiddenBaselinePath(filepath)) continue
     if (head === 1 && workdir === 1 && stage === 1) continue
+    if (workdir !== 0 && skip?.(filepath)) continue
     if (workdir === 0) {
       // isogit.add throws on deleted files; they must be staged via remove
       await isogit.remove({ fs, dir, filepath })
@@ -91,8 +110,8 @@ async function hasHeadCommit(dir: string): Promise<boolean> {
   }
 }
 
-async function commitBaseline(dir: string): Promise<string> {
-  await stageAll(dir)
+async function commitBaseline(dir: string, skip?: (filepath: string) => boolean): Promise<string> {
+  await stageAll(dir, skip)
   return isogit.commit({ fs, dir, message: "memory baseline", author: AUTHOR })
 }
 
@@ -175,21 +194,38 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
     // on the global 4 MiB truncation in writeWorkspaceDiff.
     patches.push(createPatch(filepath, oldText, newText))
   }
-  return { changes, unifiedDiff: patches.join("\n") }
+  const extensionSnapshot = new Map<string, string>()
+  for (const [filepath, , workdir] of matrix) {
+    if (workdir === 0 || !filepath.startsWith(EXTENSIONS_PREFIX) || isHiddenBaselinePath(filepath)) continue
+    const hash = workdirHash(dir, filepath)
+    if (hash) extensionSnapshot.set(filepath, hash)
+  }
+  return { changes, unifiedDiff: patches.join("\n"), extensionSnapshot }
 }
 
 /**
  * Mirrors codex reset_git_repository: delete .git and re-create a fresh
  * single-commit baseline so deleted/redacted memory content is not retained
  * in unreachable git objects (history is intentionally dropped).
+ *
+ * Divergence: `extensions/` files added or edited after `captured` (e.g. a
+ * memory_add_note during the consolidator turn) stay out of the baseline, so
+ * they appear as added in the next diff instead of never being consolidated.
  */
-export async function resetBaseline(): Promise<boolean> {
+export async function resetBaseline(captured?: ReadonlyMap<string, string>): Promise<boolean> {
   try {
     const dir = memoryRoot()
     removeDiffArtifact(dir)
     fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true })
     await isogit.init({ fs, dir })
-    await commitBaseline(dir)
+    const skip = captured
+      ? (filepath: string) => {
+          if (!filepath.startsWith(EXTENSIONS_PREFIX)) return false
+          const hash = workdirHash(dir, filepath)
+          return hash !== null && captured.get(filepath) !== hash
+        }
+      : undefined
+    await commitBaseline(dir, skip)
     return true
   } catch (err) {
     console.error("[opencode-codex-memory] resetBaseline error:", err)

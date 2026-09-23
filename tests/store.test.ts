@@ -477,26 +477,47 @@ describe("MemoryStore phase2", () => {
     const store = new MemoryStore()
     const claim = store.claimGlobalPhase2Job()
     expect(claim.type).toBe("claimed")
-    expect(claim.workerId.startsWith(`pid:${process.pid}:`)).toBe(true)
+    expect(claim.workerId.startsWith(`pid:${process.pid}@${require("os").hostname()}:`)).toBe(true)
     expect(store.releaseOrphanedPhase2Job()).toBe(false)
     expect(store.claimGlobalPhase2Job().type).toBe("skipped_running")
   })
 
-  it("releases a running lease whose owning pid is dead", () => {
-    const { MemoryStore } = require("../src/store.js")
+  it("releases a running lease whose owning pid is dead once its heartbeat is stale", () => {
+    const { MemoryStore, PHASE2_LEASE_SECONDS, PHASE2_HEARTBEAT_SECONDS } = require("../src/store.js")
+    const os = require("os")
     const store = new MemoryStore()
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") throw new Error("expected claimed")
+    const setOwner = (workerId: string, leaseUntil: number) => (store as any).db
+      .prepare("UPDATE memory_jobs SET worker_id=?, lease_until=? WHERE kind='memory_consolidate_global' AND job_key='global'")
+      .run(workerId, leaseUntil)
+    const now = Math.floor(Date.now() / 1000)
     // Rewrite the owner to a pid that cannot exist (max pid on macOS/Linux is far lower).
-    ;(store as any).db
-      .prepare("UPDATE memory_jobs SET worker_id=? WHERE kind='memory_consolidate_global' AND job_key='global'")
-      .run("pid:2147483000:dead")
+    // A fresh heartbeat may belong to a live owner in another pid namespace.
+    setOwner(`pid:2147483000@${os.hostname()}:dead`, now + PHASE2_LEASE_SECONDS)
+    expect(store.releaseOrphanedPhase2Job()).toBe(false)
+    // Another host's pid says nothing about liveness.
+    const stale = now + PHASE2_LEASE_SECONDS - 4 * PHASE2_HEARTBEAT_SECONDS
+    setOwner("pid:2147483000@elsewhere.invalid:dead", stale)
+    expect(store.releaseOrphanedPhase2Job()).toBe(false)
+    setOwner(`pid:2147483000@${os.hostname()}:dead`, stale)
     expect(store.releaseOrphanedPhase2Job()).toBe(true)
     const snap = store.phase2JobSnapshot()
     expect(snap?.status).toBe("pending")
     expect(snap?.lease_until).toBeNull()
     expect(snap?.last_error).toContain("2147483000")
     expect(store.claimGlobalPhase2Job().type).toBe("claimed")
+  })
+
+  it("still releases stale legacy pid-only tags", () => {
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    const claim = store.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error("expected claimed")
+    ;(store as any).db
+      .prepare("UPDATE memory_jobs SET worker_id=?, lease_until=? WHERE kind='memory_consolidate_global' AND job_key='global'")
+      .run("pid:2147483000:dead", Math.floor(Date.now() / 1000))
+    expect(store.releaseOrphanedPhase2Job()).toBe(true)
   })
 
   it("leaves untagged legacy running rows alone", () => {

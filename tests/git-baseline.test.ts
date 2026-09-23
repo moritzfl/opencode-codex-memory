@@ -26,6 +26,27 @@ function statusLines(diff: { changes: { status: string; path: string }[] }): str
 }
 
 describe("git-baseline", () => {
+  it("keeps notes written during consolidation out of the reset baseline", async () => {
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
+    const notes = path.join("extensions", "ad_hoc", "notes")
+    fs.mkdirSync(memFile(notes), { recursive: true })
+    fs.writeFileSync(memFile("MEMORY.md"), "v1\n")
+    fs.writeFileSync(memFile(path.join(notes, "old.md")), "old\n")
+    fs.writeFileSync(memFile(path.join(notes, "edited.md")), "before\n")
+    expect(await ensureBaseline()).toBe(true)
+
+    fs.writeFileSync(memFile(path.join(notes, "seen.md")), "seen\n")
+    const diff = await captureWorkspaceDiff()
+    expect(statusLines(diff)).toEqual([`A ${notes}/seen.md`])
+    // Consolidator turn: memory edited, and a note arrives mid-run.
+    fs.writeFileSync(memFile("MEMORY.md"), "v2\n")
+    fs.writeFileSync(memFile(path.join(notes, "late.md")), "late\n")
+    fs.writeFileSync(memFile(path.join(notes, "edited.md")), "after\n")
+    expect(await resetBaseline(diff.extensionSnapshot)).toBe(true)
+
+    expect(statusLines(await captureWorkspaceDiff())).toEqual([`A ${notes}/edited.md`, `A ${notes}/late.md`])
+  })
+
   it("ignores hidden files such as .DS_Store instead of failing the diff", async () => {
     const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
     const isogit = require("isomorphic-git")
