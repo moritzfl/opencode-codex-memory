@@ -46,6 +46,7 @@ import {
 } from "./shim.js"
 import { ensureV2Agents } from "./agents.js"
 import { buildV2Tools } from "./tools.js"
+import { performMemoryReset } from "../../tools/control.js"
 import { guardMemorySearchTools } from "./search-sandbox.js"
 import { MemoryStatusRpc } from "./status-rpc.js"
 import { readMemoryStatus } from "./status.js"
@@ -321,6 +322,12 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       const run = consolidateNow()
       trackBackgroundTask(run.then(() => {}))
       return { status: "started" }
+    },
+    resetMemory: async (input: unknown) => {
+      if ((input as { confirm?: unknown } | undefined)?.confirm !== true) return { ok: false, message: "Reset not confirmed." }
+      const result = performMemoryReset()
+      notifyStatusChanged()
+      return result
     },
   })
   const publishStatus = () => {

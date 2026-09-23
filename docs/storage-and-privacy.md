@@ -119,8 +119,9 @@ has disappeared. These updates happen on a later consolidation pass, not
 instantly throughout every file. For everyday corrections,
 [ask the agent to save a correction note](usage.md#save-or-correct-a-note).
 
-Ask the agent to run **`memory_reset`** when you want to start over. It requires
-confirmation and clears learned state and **both Memory V1 and Memory V2
+Ask the agent to run **`memory_reset`** when you want to start over; OpenCode
+asks you to approve it. On OpenCode 2, use **Reset memory** in the
+[memory panel](usage.md#memory-panel) instead. Reset clears learned state and **both Memory V1 and Memory V2
 workspaces**, including their internal Git history. It preserves session
 learning modes and per-session memory-version selections. It does not delete
 OpenCode conversations or memories in Codex CLI or Claude Code.

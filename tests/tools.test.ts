@@ -5,7 +5,8 @@ import os from "os"
 import { resetRateLimitForTest } from "../src/ratelimit.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-tools-${process.pid}-${Date.now()}`)
-const CTX = { sessionID: "ses_test" } as any
+const asks: any[] = []
+const CTX = { sessionID: "ses_test", ask: async (req: unknown) => { asks.push(req) } } as any
 
 beforeEach(() => {
   resetRateLimitForTest()
@@ -448,6 +449,16 @@ describe("memory_reset", () => {
     const r = await memory_reset.execute({ confirm: true }, CTX)
     expect(r.output).toContain("Reset refused: memory root is a symlink")
   })
+
+  it("asks the user before wiping and keeps memory when approval is rejected", async () => {
+    const { memory_reset } = require("../tools/control.js")
+    const file = path.join(TEST_ROOT, "memories", "MEMORY.md")
+    const rejecting = { ...CTX, ask: async (req: unknown) => { asks.push(req); throw new Error("rejected") } }
+    asks.length = 0
+    await expect(memory_reset.execute({ confirm: true }, rejecting)).rejects.toThrow("rejected")
+    expect(asks).toEqual([expect.objectContaining({ permission: "memory_reset", always: [] })])
+    expect(fs.existsSync(file)).toBe(true)
+  })
 })
 
 describe("memory_read paging", () => {
@@ -837,5 +848,23 @@ describe("memory_mode", () => {
 
     expect(store.getMemoryMode(CTX.sessionID)).toBe("disabled")
     expect(store.getMemoryMode("ses_other")).toBe("enabled")
+  })
+
+  it("needs user approval to re-enable a polluted session", async () => {
+    const { memory_mode } = require("../tools/control.js")
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    store.markPolluted("ses_polluted")
+    const rejecting = { ...CTX, ask: async () => { throw new Error("rejected") } }
+    await expect(memory_mode.execute({ mode: "enabled", sessionId: "ses_polluted" }, rejecting)).rejects.toThrow("rejected")
+    expect(store.getMemoryMode("ses_polluted")).toBe("polluted")
+    // Tightening never asks.
+    await memory_mode.execute({ mode: "disabled", sessionId: "ses_polluted" }, rejecting)
+    expect(store.getMemoryMode("ses_polluted")).toBe("disabled")
+    asks.length = 0
+    store.markPolluted("ses_polluted2")
+    await memory_mode.execute({ mode: "enabled", sessionId: "ses_polluted2" }, CTX)
+    expect(asks).toEqual([expect.objectContaining({ permission: "memory_mode", patterns: ["ses_polluted2"] })])
+    expect(store.getMemoryMode("ses_polluted2")).toBe("enabled")
   })
 })

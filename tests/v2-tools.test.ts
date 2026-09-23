@@ -41,20 +41,20 @@ afterEach(() => {
 const TCTX = { sessionID: "ses_test", messageID: "msg_test", agent: "build" }
 
 describe("buildV2Tools gating", () => {
-  it("registers all 7 tools by default", () => {
+  it("registers all 6 tools by default (reset lives in the panel)", () => {
     expect(buildV2Tools().map((t) => t.name).sort()).toEqual(
-      ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_reset", "memory_search"].sort(),
+      ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_search"].sort(),
     )
   })
 
   it("registers only control tools when dedicated_tools is off", () => {
     applyPluginOptions({ dedicated_tools: false })
-    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(["memory_inspect", "memory_mode", "memory_reset"])
+    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(["memory_inspect", "memory_mode"])
   })
 
   it("registers only control tools when use_memories is off", () => {
     applyPluginOptions({ use_memories: false })
-    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(["memory_inspect", "memory_mode", "memory_reset"])
+    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(["memory_inspect", "memory_mode"])
   })
 })
 

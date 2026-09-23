@@ -40,7 +40,7 @@ async function fixture(options: { session?: boolean; width?: number; height?: nu
       else status.generateMemories = input.value
     }
     if (method === "setSessionMode") status.sessionMode = input.mode
-    return method === "consolidateNow" ? { status: "started" } : { ok: true }
+    return method === "consolidateNow" ? { status: "started" } : method === "resetMemory" ? { ok: true, message: "done" } : { ok: true }
   }
   const requests: AbortSignal[] = []
   const rpc = {
@@ -48,7 +48,7 @@ async function fixture(options: { session?: boolean; width?: number; height?: nu
       requests.push(request.signal)
       return getStatus()
     },
-    ...Object.fromEntries(["setOption", "setSessionMode", "consolidateNow"].map((method) => [method, async (input: any) => {
+    ...Object.fromEntries(["setOption", "setSessionMode", "consolidateNow", "resetMemory"].map((method) => [method, async (input: any) => {
       calls.push([method, input])
       return mutate(method, input)
     }])),
@@ -164,10 +164,12 @@ await check("keyboard-only tabs, controls, session mode, wrap and cleanup", asyn
     await f.press(" ")
     assert.deepEqual(f.calls[1], ["setSessionMode", { sessionID: "ses_x", mode: "disabled" }])
     await f.press("END")
+    await f.press("ARROW_UP")
     await f.press("RETURN")
     assert.deepEqual(f.calls[2], ["consolidateNow", {}])
+    assert.match(await f.press("ARROW_DOWN"), /› Reset memory/)
     assert.match(await f.press("ARROW_DOWN"), /› Use memories/)
-    assert.match(await f.press("ARROW_UP"), /› Consolidate now/)
+    assert.match(await f.press("ARROW_UP"), /› Reset memory/)
     assert.match(await f.press("HOME"), /› Use memories/)
     assert.match(await f.press("TAB", true), /STATUS/)
     assert.match(await f.press("ARROW_RIGHT"), /› Use memories/)
@@ -270,6 +272,7 @@ await check("home scope, paused learning and disabled actions", async () => {
     await f.press("TAB")
     assert.doesNotMatch(await f.frame(), /Learn from this session/)
     await f.press("END")
+    await f.press("ARROW_UP")
     assert.match(await f.press("RETURN"), /Turn on Learn from sessions first/)
     assert.equal(f.calls.length, 0)
     f.setStatus({ generateMemories: true, activity: "extracting" })
@@ -300,6 +303,28 @@ await check("successful consolidation with late recaps and unrelated extraction 
     assert.match(frame, /Extraction retry \(2 jobs\)/)
     assert.match(frame, /Model unavailable: xai\/grok-4.7/)
     assert.equal(f.calls.length, 0, "viewing status must not start another run")
+  } finally { await f.close() }
+})
+
+await check("reset needs a second confirmation and moving away disarms it", async () => {
+  const f = await fixture()
+  try {
+    await f.open()
+    await f.press("TAB")
+    await f.press("END")
+    assert.match(await f.press("RETURN"), /Press Enter again to erase all memory/)
+    assert.equal(f.calls.length, 0)
+    await f.press("ARROW_UP")
+    assert.doesNotMatch(await f.press("ARROW_DOWN"), /press again to confirm/)
+    await f.press("RETURN")
+    assert.equal(f.calls.length, 0)
+    await f.press("RETURN")
+    assert.deepEqual(f.calls[0], ["resetMemory", { confirm: true }])
+    assert.match(await f.frame(), /Memory reset complete/)
+    f.mutate(async () => ({ ok: false, message: "Reset refused: memory consolidation is currently running." }))
+    await f.press("RETURN")
+    await f.press("RETURN")
+    assert.match(await f.press("ARROW_LEFT"), /Reset refused: memory consolidation/)
   } finally { await f.close() }
 })
 
@@ -364,6 +389,7 @@ await check("selected control stays visible through feedback, refresh and resize
     await f.open()
     await f.press("TAB")
     await f.press("END")
+    await f.press("ARROW_UP")
     await f.press("RETURN")
     assert.match(await f.frame(), /› Consolidate now/)
     f.setStatus({ activity: "extracting" })
@@ -385,12 +411,12 @@ for (const [width, height] of [[80, 24], [60, 20], [40, 16]]) {
       assert.match(await f.press("END"), /prompt-cache savings/)
       assert.match(await f.press("HOME"), /Activity/)
       assert.match(await f.press("TAB"), /› Use memories/)
-      assert.match(await f.press("END"), /› Consolidate now/)
+      assert.match(await f.press("END"), /› Reset memory/)
       assert.match(await f.frame(), /r refresh\s+Esc close/)
       assert.match(await f.press("HOME"), /› Use memories/)
       await f.press("RETURN")
       assert.match(await f.frame(), /Memory recall turned off/)
-      assert.match(await f.press("END"), /› Consolidate now/)
+      assert.match(await f.press("END"), /› Reset memory/)
       assert.match(await f.frame(), /Enter\/Space change/)
       assert.match(await f.frame(), /r refresh\s+Esc close/)
       f.resize(100, 40)

@@ -59,7 +59,7 @@ READ PATH
     → appends a byte-identical string to system[] every turn (cache-stable)
     → stats the file every turn; re-reads only when its mtime changes
   tools: memory_read, memory_search, memory_list, memory_add_note
-    (+ control tools: memory_reset, memory_inspect, memory_mode)
+    (+ control tools: memory_reset [V1 only, user-approved], memory_inspect, memory_mode)
   experimental.text.complete hook: parse <memory-citation> at text end,
     BEFORE the part is persisted → record usage_count / last_usage → strip
     the block, so neither the UI nor stored history shows citation markup

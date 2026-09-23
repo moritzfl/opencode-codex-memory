@@ -11,7 +11,7 @@
  */
 import { z } from "zod"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../../tools/memory.js"
-import { memory_reset, memory_inspect, memory_mode } from "../../tools/control.js"
+import { memory_inspect, memory_mode } from "../../tools/control.js"
 import { pluginOptions } from "../options.js"
 import { getV2DiscoveryStatus } from "./shim.js"
 
@@ -42,7 +42,10 @@ function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
         worktree: "",
         abort: tctx.abort instanceof AbortSignal ? tctx.abort : new AbortController().signal,
         metadata: () => {},
-        ask: async () => {},
+        // OpenCode 2 gives plugin tools no approval request; fail closed.
+        ask: async () => {
+          throw new Error("User approval is unavailable to plugin tools on OpenCode 2. Use /memory-inspect → Controls instead.")
+        },
       }
       const res = await v1.execute(input, v1ctx)
       if (typeof res === "string") return { content: res }
@@ -68,17 +71,17 @@ const ALL_MEMORY_TOOLS: [string, V1Tool][] = [
   ["memory_search", memory_search as unknown as V1Tool],
   ["memory_list", memory_list as unknown as V1Tool],
   ["memory_add_note", memory_add_note as unknown as V1Tool],
-  ["memory_reset", memory_reset as unknown as V1Tool],
   ["memory_inspect", memory_inspect as unknown as V1Tool],
   ["memory_mode", memory_mode as unknown as V1Tool],
 ]
 
-const CONTROL_ONLY = new Set(["memory_reset", "memory_inspect", "memory_mode"])
+const CONTROL_ONLY = new Set(["memory_inspect", "memory_mode"])
 
 /**
  * Same gating as the V1 entry: the read/search/list/add-note tools require
  * BOTH use_memories and dedicated_tools (codex MemoriesExtension); the
- * control tools are always available.
+ * control tools are always available. memory_reset needs user approval,
+ * which V2 plugin tools cannot request: reset lives in the memory panel.
  */
 export function buildV2Tools(): V2ToolDefinition[] {
   const full = pluginOptions.use_memories && pluginOptions.dedicated_tools

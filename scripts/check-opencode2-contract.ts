@@ -202,9 +202,11 @@ async function main(): Promise<void> {
     // --- V2 tool sets ---
     const tools = (await import(path.join(root, "dist", "src", "v2", "tools.js") + `?t=${Date.now()}`)) as typeof import("../src/v2/tools.js")
     const names = tools.buildV2Tools().map((t) => t.name).sort()
-    for (const t of ["memory_read", "memory_search", "memory_list", "memory_add_note", "memory_reset", "memory_inspect", "memory_mode"]) {
+    for (const t of ["memory_read", "memory_search", "memory_list", "memory_add_note", "memory_inspect", "memory_mode"]) {
       note(names.includes(t), `v2 tool ${t} registered`)
     }
+    // Reset needs user approval, which V2 plugin tools cannot request.
+    note(!names.includes("memory_reset"), "v2 memory_reset stays out of model tools (panel only)")
 
     const memoryRoot = path.join(testRoot, "memories")
     for (const rule of rules.filter((r) => r.effect === "allow" && r.action !== "external_directory")) {

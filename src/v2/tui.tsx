@@ -237,9 +237,11 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
   const [cursor, setCursor] = createSignal(0)
   const [notice, setNotice] = createSignal<{ message: string; tone: "ok" | "warn" | "error" } | null>(null)
   const [busy, setBusy] = createSignal<string | null>(null)
+  // Reset is irreversible: the first activation arms it, the second runs it.
+  const [armed, setArmed] = createSignal(false)
   let scroll: ScrollBoxRenderable | undefined
 
-  const call = async (id: string, method: "setOption" | "setSessionMode" | "consolidateNow", input: Record<string, unknown>, done: string) => {
+  const call = async (id: string, method: "setOption" | "setSessionMode" | "consolidateNow" | "resetMemory", input: Record<string, unknown>, done: string) => {
     if (busy() || unavailable()) return
     setBusy(id)
     setNotice(null)
@@ -249,9 +251,9 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
         signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
       })
       if (signal.aborted) return
-      const reply = result as { ok?: boolean; status?: string } | null
+      const reply = result as { ok?: boolean; status?: string; message?: string } | null
       if (method === "consolidateNow" ? reply?.status !== "started" : reply?.ok !== true) {
-        throw new Error("The server did not apply the request. Refresh and try again.")
+        throw new Error(reply?.message ?? "The server did not apply the request. Refresh and try again.")
       }
       setNotice({ message: done, tone: "ok" })
       await refresh()
@@ -313,6 +315,24 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
       enabled: s.generateMemories && !running && s.activity !== "stopping",
       run: () => void call("now", "consolidateNow", {}, "Background run requested. See Overview for progress."),
     })
+    list.push({
+      id: "reset",
+      title: armed() ? "Reset memory — press again to confirm" : "Reset memory",
+      hint: armed()
+        ? "Erases all learned memories, notes, and history. This cannot be undone. Moving the selection cancels."
+        : running ? "Wait for the running extraction or consolidation to finish."
+          : "Erase all learned memories and notes for every project. Session preferences are kept.",
+      enabled: !running,
+      run: () => {
+        if (!armed()) {
+          setArmed(true)
+          setNotice({ message: "Press Enter again to erase all memory.", tone: "warn" })
+          return
+        }
+        setArmed(false)
+        void call("reset", "resetMemory", { confirm: true }, "Memory reset complete.")
+      },
+    })
     return list
   }
 
@@ -330,6 +350,7 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
     else setNotice({ message: c.hint, tone: "warn" })
   }
   const select = (i: number) => {
+    if (i !== cursor()) setArmed(false)
     setCursor(i)
     const control = controls()[i]
     if (!control || !scroll) return
@@ -350,6 +371,7 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
     select((cursor() + d + n) % n)
   }
   const switchTab = (next: Tab) => {
+    setArmed(false)
     setTab(next)
     setCursor(0)
     scroll?.scrollTo(0)
@@ -415,7 +437,7 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
   return (
     <box
       flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}
-      height={Math.min(tab() === "Overview" ? 34 : sessionID ? 22 : 19, Math.max(8, dimensions().height - 2))}
+      height={Math.min(tab() === "Overview" ? 34 : sessionID ? 25 : 22, Math.max(8, dimensions().height - 2))}
     >
       <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
         <text fg={color.text}><b>Memory</b></text>
@@ -483,7 +505,8 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
                 const selected = () => cursor() === i()
                 const disabled = () => !c.enabled || unavailable() || busy() !== null
                 const fg = () => selected() ? color.selectedText : disabled() ? color.muted : color.text
-                const state = () => busy() === c.id ? (c.id === "now" ? "Starting…" : "Saving…")
+                const state = () => busy() === c.id ? (c.id === "now" ? "Starting…" : c.id === "reset" ? "Resetting…" : "Saving…")
+                  : c.id === "reset" && armed() ? "Confirm"
                   : c.on === undefined ? (c.enabled ? "Run" : "Unavailable") : c.on ? "On" : "Off"
                 return (
                   <box

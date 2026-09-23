@@ -492,15 +492,21 @@ mappings:
     theirs: codex-rs/memories/write/src/control.rs
     note: >
       memory_reset/inspect/mode; clearMemoryRootsContents equivalent.
-      DELIBERATE DIVERGENCE: these are model-invocable tools, always registered
+      DELIBERATE DIVERGENCE: these are model-invocable tools
       (codex exposes reset/mode only as client-side RPCs / CLI, never to the
-      model) — a plugin has no client-UI surface, and "reset my memory" in
-      plain language is core plugin UX; opencode's generic tool permissions are
-      the guard rail. memory_mode additionally accepts "polluted" (codex
-      protocol: enabled|disabled, polluted is set only automatically);
-      memory_inspect is a port addition (read-only status).
+      model) — "reset my memory" in plain language is core plugin UX. Guard
+      rails: memory_reset and memory_mode polluted→enabled request user
+      approval via ctx.ask (the model-chosen `confirm` is not approval).
+      OpenCode 2 plugin tools cannot request approval, so V2 omits the
+      memory_reset tool and offers the wipe as a confirmed panel RPC
+      (resetMemory, closer to codex's client-side reset); V2 memory_mode
+      fails closed when lifting pollution. memory_mode additionally accepts
+      "polluted" (codex protocol: enabled|disabled, polluted is set only
+      automatically); memory_inspect is a port addition (read-only status).
       memory_reset wipes memories/ and memories_v2/ plus both job DBs,
-      preserving memory_session_meta (Codex clears both version roots).
+      preserving memory_session_meta (Codex clears both version roots). Reset
+      leaves a phase-2 "done" row as a cooldown marker (codex writes none) so
+      the next hook cannot first-run-claim phase 2 and re-seed the root.
   - ours: src/index.ts
     theirs: codex-rs/core/src/stream_events_utils.rs
     note: >

@@ -195,40 +195,55 @@ function renderAgentHealth(): string[] {
   return lines
 }
 
+function resetBlockedReason(): string | null {
+  if (isSymlinkedRoot()) return "Reset refused: memory root is a symlink. Remove it manually to be safe."
+  // A consolidation running in THIS process would recreate files right
+  // after the wipe (the sub-agent edits live artifacts and resets the git
+  // baseline). Refuse instead of racing it. clearMemoryData also leaves a
+  // phase-2 cooldown marker so the next idle/chat hook cannot first-run-claim
+  // phase 2 and re-seed the root via ensureLayout. Cross-process consolidators
+  // already in flight remain ownership-guarded (their final mark becomes a
+  // no-op once the row is replaced) but may leave stray files — same window
+  // codex has between CLI clear and a running daemon.
+  if (isPhase2InFlight()) return "Reset refused: memory consolidation is currently running. Try again in a few minutes."
+  return null
+}
+
+/**
+ * Shared by the memory_reset tool (after user approval) and the OpenCode 2
+ * memory panel (whose confirmation is the approval).
+ */
+export function performMemoryReset(): { ok: boolean; message: string } {
+  const blocked = resetBlockedReason()
+  if (blocked) return { ok: false, message: blocked }
+  try {
+    clearAllVersionMemoryData()
+    wipeMemoriesDir()
+    // codex keeps its state DB pool open across resets (clear_memory_roots_contents
+    // only wipes directories); closing here would strand cached handles elsewhere.
+    invalidateCache()
+    return { ok: true, message: "Memory reset complete. Extracted memories and jobs cleared, memories directory (incl. git history) wiped, cache invalidated. Per-session memory modes were preserved." }
+  } catch (err) {
+    return { ok: false, message: `memory_reset error: ${(err as Error).message}` }
+  }
+}
+
 export const memory_reset = tool({
   description:
     "Reset all persistent memory. Wipes the plugin's extracted memories and jobs tables and the entire " +
     "contents of the memories and memories_v2 directories (including git history). Per-session memory modes are preserved, " +
-    "so disabled/polluted sessions stay excluded. Refuses to run if a memory root is a symlink.",
+    "so disabled/polluted sessions stay excluded. Asks the user for approval first. Refuses to run if a memory root is a symlink.",
   args: {
     confirm: tool.schema.boolean().describe("Must be true to perform the reset."),
   },
-  async execute(args) {
+  async execute(args, ctx) {
     if (!args.confirm) return { output: "Reset aborted: confirm=false." }
-    if (isSymlinkedRoot()) {
-      return { output: "Reset refused: memory root is a symlink. Remove it manually to be safe." }
-    }
-    // A consolidation running in THIS process would recreate files right
-    // after the wipe (the sub-agent edits live artifacts and resets the git
-    // baseline). Refuse instead of racing it. clearMemoryData also leaves a
-    // phase-2 cooldown marker so the next idle/chat hook cannot first-run-claim
-    // phase 2 and re-seed the root via ensureLayout. Cross-process consolidators
-    // already in flight remain ownership-guarded (their final mark becomes a
-    // no-op once the row is replaced) but may leave stray files — same window
-    // codex has between CLI clear and a running daemon.
-    if (isPhase2InFlight()) {
-      return { output: "Reset refused: memory consolidation is currently running. Try again in a few minutes." }
-    }
-    try {
-      clearAllVersionMemoryData()
-      wipeMemoriesDir()
-      // codex keeps its state DB pool open across resets (clear_memory_roots_contents
-      // only wipes directories); closing here would strand cached handles elsewhere.
-      invalidateCache()
-      return { output: "Memory reset complete. Extracted memories and jobs cleared, memories directory (incl. git history) wiped, cache invalidated. Per-session memory modes were preserved." }
-    } catch (err) {
-      return { output: `memory_reset error: ${(err as Error).message}` }
-    }
+    const blocked = resetBlockedReason()
+    if (blocked) return { output: blocked }
+    // `confirm` is model-chosen; injected content could set it. Irreversible,
+    // so the user approves (a rejection propagates to the host as usual).
+    await ctx.ask({ permission: "memory_reset", patterns: ["*"], always: [], metadata: { roots: allMemoryRoots() } })
+    return { output: performMemoryReset().message }
   },
 })
 
@@ -453,9 +468,22 @@ export const memory_mode = tool({
     sessionId: tool.schema.string().optional().describe("Session ID. Defaults to the current session."),
   },
   async execute(args, ctx) {
+    const sid = args.sessionId ?? ctx.sessionID
+    let store: MemoryStore
+    let polluted: boolean
     try {
-      const store = new MemoryStore()
-      const sid = args.sessionId ?? ctx.sessionID
+      store = new MemoryStore()
+      polluted = store.getMemoryMode(sid) === "polluted"
+    } catch (err) {
+      return { output: `memory_mode error: ${(err as Error).message}` }
+    }
+    // Pollution guards against external content steering memory; the model
+    // that read that content must not lift it on its own. A rejection
+    // propagates to the host as usual.
+    if (args.mode === "enabled" && polluted) {
+      await ctx.ask({ permission: "memory_mode", patterns: [sid], always: [], metadata: { sessionId: sid, from: "polluted", to: "enabled" } })
+    }
+    try {
       store.setMemoryMode(sid, args.mode)
       return { output: `Memory mode for session ${sid} set to '${args.mode}'.`, metadata: { sessionId: sid, mode: args.mode } }
     } catch (err) {

@@ -294,6 +294,20 @@ describe("v2 setup", () => {
     } finally { await cleanup?.() }
   })
 
+  it("resets memory from the panel only with an explicit confirmation", async () => {
+    const f = fakeCtx({ generate_memories: false })
+    const cleanup = await setup(f.ctx)
+    const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
+    const file = path.join(TEST_ROOT, "memories", "MEMORY.md")
+    fs.writeFileSync(file, "keep until confirmed\n")
+    expect(await handlers.resetMemory({})).toEqual({ ok: false, message: "Reset not confirmed." })
+    expect(fs.existsSync(file)).toBe(true)
+    expect(await handlers.resetMemory({ confirm: true })).toMatchObject({ ok: true })
+    expect(fs.existsSync(file)).toBe(false)
+    expect(f.added.some((tool) => tool.name === "memory_reset")).toBe(false)
+    await cleanup?.()
+  })
+
   it("provisions V2 agents before enabling generation at runtime", async () => {
     const f = fakeCtx({ generate_memories: false })
     const cleanup = await setup(f.ctx)
@@ -310,12 +324,12 @@ describe("v2 setup", () => {
     const cleanup = await setup(f.ctx)
     const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
     const names = () => f.added.map((tool) => tool.name)
-    expect(names()).toEqual(["memory_reset", "memory_inspect", "memory_mode"])
+    expect(names()).toEqual(["memory_inspect", "memory_mode"])
     expect(await handlers.setOption({ key: "use_memories", value: true })).toEqual({ ok: true })
     expect(names().includes("memory_read")).toBe(dedicated)
     expect(names().includes("memory_add_note")).toBe(dedicated)
     expect(await handlers.setOption({ key: "use_memories", value: false })).toEqual({ ok: true })
-    expect(names()).toEqual(["memory_reset", "memory_inspect", "memory_mode"])
+    expect(names()).toEqual(["memory_inspect", "memory_mode"])
     expect(await handlers.setOption({ key: "use_memories", value: false })).toEqual({ ok: true })
     expect(f.toolReloads()).toBe(2)
     await cleanup?.()
@@ -380,7 +394,7 @@ describe("v2 setup", () => {
   it("registers tools, hooks and the memorize agent; applies options", async () => {    const f = fakeCtx({ generate_memories: false })
     const cleanup = await setup(f.ctx)
     expect(f.added.map((t) => t.name).sort()).toEqual(
-      ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_reset", "memory_search"].sort(),
+      ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_search"].sort(),
     )
     expect(Object.keys(f.hooks).sort()).toEqual(["compaction", "context", "execute.before", "generate", "prompt"])
     expect(f.hooks.title).toBeUndefined()

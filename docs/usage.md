@@ -100,6 +100,11 @@ below, plus **Consolidate now**. This processes eligible sessions and updates
 memory without waiting for the usual consolidation cooldown. Learning must be
 enabled, and sessions must still meet the [idle and age limits](configuration.md#frequency-and-retention).
 
+**Reset memory** erases all learned memory and notes, like `memory_reset`.
+Press Enter once to arm it and again to confirm; moving the selection cancels.
+OpenCode 2 cannot ask you to approve a plugin tool call, so the agent does not
+get a reset tool there.
+
 On OpenCode 1.x or an interface without the panel, use `memory_inspect`.
 If the panel shows **Unavailable**, see [Troubleshooting](troubleshooting.md).
 
@@ -110,7 +115,7 @@ Learning from a conversation and using existing memory are separate controls:
 | Goal | Control |
 |---|---|
 | Exclude this conversation from future extraction | Ask the agent to use `memory_mode` with `mode: "disabled"`. On OpenCode 2, turn off **Learn from this session**. |
-| Allow this conversation to be learned again | Use `memory_mode` with `mode: "enabled"`, or turn **Learn from this session** back on. |
+| Allow this conversation to be learned again | Use `memory_mode` with `mode: "enabled"`, or turn **Learn from this session** back on. Re-enabling a session excluded for external context needs your approval (OpenCode 1.x) or the panel toggle (OpenCode 2). |
 | Pause background learning globally | Set the plugin option `generate_memories: false`. OpenCode 2 also has a runtime **Learn from sessions** toggle. |
 | Stop injecting and looking up existing memory | Set `use_memories: false`. OpenCode 2 also has a runtime **Use memories** toggle. |
 | Stop both learning and recall | Set both `generate_memories` and `use_memories` to `false`. |
@@ -135,7 +140,7 @@ You normally describe what you want rather than calling tools yourself.
 | `memory_add_note` | Record something you explicitly asked to remember |
 | `memory_inspect` | Inspect status, configuration, and errors without changing memory |
 | `memory_mode` | Set a session's learning eligibility (`enabled`, `disabled`, or `polluted`) |
-| `memory_reset` | Clear learned memory in both versions after confirmation |
+| `memory_reset` | Clear learned memory in both versions after you approve it (OpenCode 1.x; on OpenCode 2 use **Reset memory** in the panel) |
 
 The first four depend on `use_memories` and `dedicated_tools`; the maintenance
 tools remain available. See [File-based access](configuration.md#file-based-access)

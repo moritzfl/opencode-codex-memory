@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peers sharing the memory database keep their lease. The sweep also runs
   before each consolidation attempt, not only at startup.
 
+### Changed
+
+- `memory_reset` asks you to approve the wipe; the model's `confirm` argument
+  alone no longer erases memory. Re-enabling a session that was excluded for
+  external context also needs approval.
+- On OpenCode 2, which cannot ask for approval from plugin tools, the agent no
+  longer gets `memory_reset`. The memory panel has a **Reset memory** control
+  with a second-press confirmation instead.
+
 ## [0.8.4] - 2026-09-22
 
 ### Fixed

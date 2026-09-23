@@ -22,7 +22,7 @@ import { overlayV2CitationInstructions } from "../src/v2/citation-overlay.js"
 
 let root: string
 const SUMMARY = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
-const ctx = (id: string) => ({ sessionID: id, messageID: "msg_test", agent: "build" }) as any
+const ctx = (id: string) => ({ sessionID: id, messageID: "msg_test", agent: "build", ask: async () => {} }) as any
 const text = (result: Awaited<ReturnType<typeof memory_read.execute>>) => typeof result === "string" ? result : result.output
 const store = (version: MemoryVersion) => withMemoryVersion(version, () => new MemoryStore())
 

@@ -177,6 +177,21 @@ export const MemoryStatusRpc = {
         additionalProperties: false,
       },
     },
+    /** Same wipe as the V1 memory_reset tool; the panel's confirm step is the approval. */
+    resetMemory: {
+      input: {
+        type: "object",
+        properties: { confirm: { type: "boolean" } },
+        required: ["confirm"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" }, message: { type: "string" } },
+        required: ["ok", "message"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     changed: { schema: { type: "object", properties: {}, additionalProperties: false } },

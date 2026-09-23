@@ -149,6 +149,6 @@ OpenCode `external_directory` permission. Agents that cannot obtain that
 permission cannot use this mode. Dedicated tools avoid that extra step, which
 is why this plugin enables them by default even though Codex defaults them off.
 
-`memory_inspect`, `memory_mode`, and `memory_reset` remain available with
+`memory_inspect`, `memory_mode`, and (on OpenCode 1.x) `memory_reset` remain available with
 dedicated tools disabled. Setting `use_memories: false` hides the retrieval
 and note tools regardless of `dedicated_tools`.
