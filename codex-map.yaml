@@ -566,7 +566,10 @@ mappings:
       registry.rs marks on output.contains_external_context() after a
       successful builtin tool — opencode exposes no equivalent output flag;
       hook_runtime.rs marks on MCP-tool hooks ("mcp_tool_hook") — opencode
-      has no MCP hook handlers. Pollution re-queues phase 2 when a consumed
+      has no MCP hook handlers. OpenCode2 codemode `fetch()` is a sandbox
+      extension, not a tool, so it never reaches tool.execute.before — an
+      accepted gap (no `fetch(` code heuristics; see ARCHITECTURE known gaps).
+      Pollution re-queues phase 2 when a consumed
       output is affected (store.markPolluted, codex
       mark_thread_memory_mode_polluted). (3) the memorize / memorize-extract
       sub-agents self-register through the plugin config hook (user-defined
