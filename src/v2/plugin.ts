@@ -57,6 +57,17 @@ let shimClient: unknown = null
 const backgroundTasks = new Set<Promise<void>>()
 const statusListeners = new Set<() => void>()
 
+/**
+ * The V2 host runs one plugin instance per location in the same process and
+ * evicts idle locations independently. Process-wide state (lifecycle, shim
+ * context, panel toggles) belongs to the set of live instances, not to
+ * whichever location booted or disposed last.
+ */
+const liveInstances: V2Context[] = []
+type RuntimeOptionKey = "use_memories" | "generate_memories"
+/** Panel toggles; survive later location setups until the last instance disposes. */
+const runtimeOverrides: Partial<Record<RuntimeOptionKey, boolean>> = {}
+
 function notifyStatusChanged(): void {
   for (const notify of statusListeners) notify()
 }
@@ -82,6 +93,8 @@ export function resetV2ModuleStateForTest(): void {
   backgroundTasks.clear()
   seenTurnSessions.clear()
   mcpStatusInFlight = null
+  liveInstances.length = 0
+  for (const key of Object.keys(runtimeOverrides) as RuntimeOptionKey[]) delete runtimeOverrides[key]
 }
 
 function getStore(): MemoryStore {
@@ -228,13 +241,18 @@ async function consolidateNow(): Promise<string> {
 }
 
 export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
-  resetPluginLifecycle()
-  resetInjectionStats()
+  // Later locations join a running process: resetting the lifecycle would
+  // abort the live consolidator, and resetting stats/health would erase state
+  // the other locations still report.
+  if (liveInstances.length === 0) {
+    resetPluginLifecycle()
+    resetInjectionStats()
+    resetAgentHealth()
+  }
   setV2Context(ctx)
   shimClient = buildV1ClientShim()
   setPluginInput({ client: shimClient } as any)
   setSubSessionDirectory(ctx.location.directory)
-  resetAgentHealth()
   mcpStatusInFlight = null
   clearConfigWarnings()
   const rawOptions = ctx.options as Record<string, unknown> | undefined
@@ -244,6 +262,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     resetPluginOptions()
     if (dataRoot() !== previousDb) closeDb()
   }
+  Object.assign(pluginOptions, runtimeOverrides)
   await ensureV2Agents(ctx as any)
 
   const statusRegistration = await ctx.rpc.register(MemoryStatusRpc, {
@@ -255,10 +274,11 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     setOption: async (input: unknown) => {
       const { key, value } = (input ?? {}) as { key?: unknown; value?: unknown }
       if ((key !== "use_memories" && key !== "generate_memories") || typeof value !== "boolean") return { ok: false }
+      const instances = liveInstances.includes(ctx) ? [...liveInstances] : [ctx]
       if (key === "generate_memories" && value && !pluginOptions.generate_memories) {
         pluginOptions.generate_memories = true
         try {
-          await ensureV2Agents(ctx as any)
+          for (const instance of instances) await ensureV2Agents(instance as any)
         } catch (error) {
           pluginOptions.generate_memories = false
           console.error("[opencode-codex-memory] failed to provision V2 agents while enabling memory:", error)
@@ -268,16 +288,23 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       const previous = pluginOptions[key]
       pluginOptions[key] = value
       if (key === "use_memories" && value !== previous) {
+        // Transforms capture options but the host only replays them after an
+        // explicit registry invalidation. Affect future tool snapshots now,
+        // in every location.
+        const reloaded: V2Context[] = []
         try {
-          // Transforms capture options but the host only replays them after an
-          // explicit registry invalidation. Affect future tool snapshots now.
-          await ctx.tool.reload()
+          for (const instance of instances) {
+            await instance.tool.reload()
+            reloaded.push(instance)
+          }
         } catch (error) {
           pluginOptions[key] = previous
+          for (const instance of reloaded) await instance.tool.reload().catch(() => {})
           console.error("[opencode-codex-memory] failed to reload V2 memory tools:", error)
           return { ok: false }
         }
       }
+      runtimeOverrides[key] = value
       invalidateCache()
       notifyStatusChanged()
       return { ok: true }
@@ -438,9 +465,22 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     }
   })().catch((err) => console.error("[opencode-codex-memory] v2 event loop error:", err))
 
+  liveInstances.push(ctx)
   return () => {
     statusListeners.delete(publishStatus)
     eventAbort.abort()
+    const index = liveInstances.indexOf(ctx)
+    if (index >= 0) liveInstances.splice(index, 1)
+    const survivor = liveInstances.at(-1)
+    if (survivor) {
+      // Only the newest location owns the shim; re-point when it leaves.
+      if (index === liveInstances.length) {
+        setV2Context(survivor)
+        setSubSessionDirectory(survivor.location.directory)
+      }
+      return
+    }
+    for (const key of Object.keys(runtimeOverrides) as RuntimeOptionKey[]) delete runtimeOverrides[key]
     beginPluginShutdown()
     setSubSessionDirectory()
     setV2Context(null)

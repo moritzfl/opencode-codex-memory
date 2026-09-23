@@ -331,6 +331,40 @@ describe("v2 setup", () => {
     await cleanup?.()
   })
 
+  it("keeps other locations alive when one location instance disposes", async () => {
+    const { isPluginShuttingDown, pluginShutdownSignal } = require("../src/lifecycle.js")
+    fs.writeFileSync(path.join(TEST_ROOT, "memories", "memory_summary.md"), "- shared memory [[ses_x]]\n")
+    const a = fakeCtx()
+    const cleanupA = await setup(a.ctx)
+    const handlersA = a.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
+    expect(await handlersA.setOption({ key: "generate_memories", value: false })).toEqual({ ok: true })
+
+    // A later location boots with its own (default) options: the panel toggle survives.
+    const b = fakeCtx()
+    b.ctx.location = { directory: path.join(TEST_ROOT, "other") }
+    const cleanupB = await setup(b.ctx)
+    expect(pluginOptions.generate_memories).toBe(false)
+    const signal = pluginShutdownSignal()
+
+    // A toggle from either location reloads tools everywhere.
+    expect(await handlersA.setOption({ key: "use_memories", value: false })).toEqual({ ok: true })
+    expect(a.toolReloads()).toBe(1)
+    expect(b.toolReloads()).toBe(1)
+    expect(await handlersA.setOption({ key: "use_memories", value: true })).toEqual({ ok: true })
+
+    await cleanupB?.()
+    expect(isPluginShuttingDown()).toBe(false)
+    expect(signal.aborted).toBe(false)
+    expect(pluginOptions.generate_memories).toBe(false)
+    const ev: any = { sessionID: "ses_x", system: [], messages: [] }
+    await a.hooks.context[0](ev)
+    expect(ev.system[0]?.text).toContain("shared memory")
+
+    await cleanupA?.()
+    expect(isPluginShuttingDown()).toBe(true)
+    expect(signal.aborted).toBe(true)
+  })
+
   it("reports extraction claims and distinguishes disabled memory from read-only", async () => {
     const f = fakeCtx({ generate_memories: false, use_memories: false })
     const cleanup = await setup(f.ctx)

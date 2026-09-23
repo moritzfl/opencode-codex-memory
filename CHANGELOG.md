@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode 2 no longer shuts memory down in every project when one idle
+  project is unloaded. Memory panel toggles survive other projects starting
+  and apply to all open projects.
+- OpenCode 2 stops consolidation helpers in the process that runs them before
+  deleting them through the registered service, so a helper cannot keep
+  editing after its lease is released.
+
 ## [0.8.4] - 2026-09-22
 
 ### Fixed

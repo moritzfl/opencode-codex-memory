@@ -799,6 +799,20 @@ describe("V1 client shim", () => {
     expect(after.response?.status).toBe(404)
   })
 
+  it("interrupts the local helper before removing it through the service", async () => {
+    const { ctx, calls } = fakeCtx()
+    serviceRemove = async () => { calls.push({ name: "service.remove", args: null }) }
+    setV2Context(ctx as any)
+    const client = buildV1ClientShim() as any
+    await expect(client.session.delete({ path: { id: "ses_gone" } })).resolves.toEqual({})
+    const order = calls.map((call) => call.name).filter((name) => ["interrupt", "wait", "service.remove"].includes(name))
+    expect(order).toEqual(["interrupt", "wait", "service.remove"])
+
+    calls.length = 0
+    await expect(client.session.abort({ path: { id: "ses_live" } })).resolves.toEqual({})
+    expect(calls.map((call) => call.name)).toEqual(["interrupt"])
+  })
+
   it("does not treat interrupt as delete success while the session still exists", async () => {
     const { ctx, calls } = fakeCtx()
     serviceRemove = async () => { throw new Error("service unavailable") }

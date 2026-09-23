@@ -581,57 +581,48 @@ export function buildV1ClientShim(): unknown {
         markReleased(opts.path.id)
         return {}
       }
-      let shutdownError: unknown
-      try {
-        const client = await serviceOrThrow()
-        if (typeof client.session.remove !== "function") throw new Error("registered service does not support session.remove")
-        const result = await serviceRequest(client, () => client.session.remove(
-          { sessionID: opts.path.id },
-          opts.signal ? { signal: opts.signal } : undefined,
-        ))
-        if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
-        if (await sessionGoneOnService(client, opts.path.id)) {
-          markReleased(opts.path.id)
-          return {}
-        }
-        throw new Error("session still exists after remove")
-      } catch (error) {
-        shutdownError = error
-      }
+      const id = opts.path.id
+      // Interrupt where the helper runs first. With a loopback PID mismatch the
+      // service is another process: removing the row there alone would leave
+      // this process's consolidator editing after the lease is released.
+      let interruptError: unknown
       try {
         const session = ctx().session as any
-        const interrupt = await session.interrupt({ sessionID: opts.path.id })
+        const interrupt = await session.interrupt({ sessionID: id })
         if (interrupt?.error) throw interrupt.error
-        if (typeof session.wait === "function") await session.wait({ sessionID: opts.path.id })
-      } catch (interruptError) {
-        return { error: shutdownError ?? interruptError }
+        if (typeof session.wait === "function") await session.wait({ sessionID: id })
+      } catch (error) {
+        interruptError = error ?? new Error("session interrupt failed")
       }
+      let client: V2ServiceClient | null = null
+      let removeError: unknown
       try {
-        const client = await ownServiceClient()
-        if (client?.session?.get) {
-          const info = await serviceRequest(client, () => client.session.get({ sessionID: opts.path.id }))
-          if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
-            markReleased(opts.path.id)
-            return {}
-          }
-          const data = und(info)
-          if (data && typeof data === "object") {
-            return { error: shutdownError ?? new Error("session still exists after interrupt") }
-          }
-          return { error: shutdownError ?? new Error("session still exists after interrupt") }
+        client = await ownServiceClient()
+        if (client) {
+          if (typeof client.session.remove !== "function") throw new Error("registered service does not support session.remove")
+          const service = client
+          const result = await serviceRequest(service, () => service.session.remove(
+            { sessionID: id },
+            opts.signal ? { signal: opts.signal } : undefined,
+          ))
+          if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
         }
-        // Isolated serve: no session.remove on plugin ctx. interrupt+wait already
-        // finished, so the helper is idle. Holding the phase-2 lease until it
-        // expires would block consolidation for an hour.
-        markReleased(opts.path.id)
-        return {}
-      } catch (e) {
-        if (isNotFoundError(e)) {
-          markReleased(opts.path.id)
+      } catch (error) {
+        removeError = error
+      }
+      if (client && typeof client.session.get === "function") {
+        if (await sessionGoneOnService(client, id)) {
+          markReleased(id)
           return {}
         }
-        return { error: shutdownError ?? e }
+        return { error: removeError ?? interruptError ?? new Error("session still exists after remove") }
       }
+      if (interruptError !== undefined) return { error: removeError ?? interruptError }
+      // Isolated serve: no session.remove on plugin ctx. interrupt+wait already
+      // finished, so the helper is idle. Holding the phase-2 lease until it
+      // expires would block consolidation for an hour.
+      markReleased(id)
+      return {}
     },
     get: async (opts: { path: { id: string } }) => {
       try {
@@ -657,16 +648,18 @@ export function buildV1ClientShim(): unknown {
     },
     abort: async (opts: { path: { id: string } }) => {
       if (opts.path.id === EXTRACT_STUB_SESSION_ID) return {}
+      // Local first: the helper runs in this process (see delete above).
       try {
-        const client = await serviceOrThrow()
-        if (typeof client.session.interrupt !== "function") throw new Error("registered service does not support session.interrupt")
-        const result = await serviceRequest(client, () => client.session.interrupt({ sessionID: opts.path.id }))
-        if (!(result as { error?: unknown } | null | undefined)?.error) return {}
+        const result = await (ctx().session as any).interrupt({ sessionID: opts.path.id })
+        if (!result?.error) return {}
       } catch {
-        // Fall through to the context-local interrupt below.
+        // Fall through to the registered service.
       }
       try {
-        await (ctx().session as any).interrupt({ sessionID: opts.path.id })
+        const client = await ownServiceClient()
+        if (client && typeof client.session.interrupt === "function") {
+          await serviceRequest(client, () => client.session.interrupt({ sessionID: opts.path.id }))
+        }
       } catch {
         // Best-effort, mirrors V1.
       }

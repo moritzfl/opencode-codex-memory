@@ -168,9 +168,10 @@ describe("v2 fake-context write pipeline", () => {
     expect(created).toEqual(["sub-consolidate"])
     expect(switched).toContainEqual({ agent: "memorize" })
     expect(switched).toContainEqual({ model: { providerID: "test", id: "consolidator", variant: "medium" } })
-    // The public service owns helper shutdown and deletion.
+    // Interrupt is process-local in V2 (idle is a no-op): stop the helper here,
+    // then let the public service delete the row.
+    expect(interrupted).toEqual(["sub-consolidate"])
     expect(removed).toContain("sub-consolidate")
-    expect(interrupted).toEqual([])
     expect((await captureWorkspaceDiff()).changes).toEqual([])
 
     const prompt = buildMemorySystemPrompt(true)
