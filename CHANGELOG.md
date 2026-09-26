@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-26
+
 ### Fixed
 
 - OpenCode 2 memory tools stay on the normal tool list. They were only inside
@@ -882,7 +884,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.8.2...v0.8.3
