@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAI no longer rejects the next turn when a native memory tool call has
+  not settled yet. The context hook supplies the missing tool output before
+  the request is sent.
+
 ## [0.9.1] - 2026-09-26
 
 ### Fixed

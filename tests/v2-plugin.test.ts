@@ -411,6 +411,52 @@ describe("v2 setup", () => {
     expect(new MemoryStore().getMemoryMode("ses_new1")).toBe("disabled")
   })
 
+  it("context hook supplies a result for an unsettled memory_search call", async () => {
+    fs.writeFileSync(path.join(TEST_ROOT, "memories", "MEMORY.md"), "Cachy paste clipboard\n")
+    const f = fakeCtx()
+    await setup(f.ctx)
+    const ev: any = {
+      sessionID: "ses_x",
+      system: [],
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              id: "call_missing",
+              name: "memory_search",
+              input: { queries: ["Cachy"], path: "MEMORY.md" },
+            },
+          ],
+        },
+      ],
+    }
+    await f.hooks.context[0](ev)
+    expect(ev.messages[1]?.role).toBe("tool")
+    expect(ev.messages[1].content[0].id).toBe("call_missing")
+    expect(ev.messages[1].content[0].result.value).toContain("Cachy")
+  })
+
+  it("context hook leaves a memory tool call alone when its result is already present", async () => {
+    const f = fakeCtx()
+    await setup(f.ctx)
+    const ev: any = {
+      sessionID: "ses_x",
+      system: [],
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", id: "call_done", name: "memory_search", input: { queries: ["x"] } }],
+        },
+        { role: "tool", content: [{ type: "tool-result", id: "call_done", name: "memory_search", result: { type: "text", value: "kept" } }] },
+      ],
+    }
+    await f.hooks.context[0](ev)
+    expect(ev.messages).toHaveLength(2)
+    expect(ev.messages[1].content[0].result.value).toBe("kept")
+  })
+
   it("context hook injects the summary as a text system part", async () => {
     fs.writeFileSync(path.join(TEST_ROOT, "memories", "memory_summary.md"), "- v2 memory [[ses_x]]\n")
     const f = fakeCtx()
