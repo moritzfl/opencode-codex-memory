@@ -22,7 +22,8 @@ const SEARCH_STEP_TOOLS = `2. Search {{ base_path }}/MEMORY.md for those keyword
 
 const SEARCH_STEP_FILES = `2. Search {{ base_path }}/MEMORY.md using those keywords.`
 
-const SEARCH_STEP_TOOLS_V2 = `Search {{ base_path }}/rollout_summaries/ with the \`memory_search\`
+const SEARCH_STEP_TOOLS_V2 = `Call \`memory_search\`, \`memory_read\`, \`memory_list\`, and \`memory_add_note\` directly. They are normal tools in this chat, not tools inside \`execute\`.
+Search {{ base_path }}/rollout_summaries/ with the \`memory_search\`
    tool, or read a recap with \`memory_read\`, when extra evidence, wording,
    chronology, or uncertainty could change your answer.
    - For time-scoped recall ("what was I working on last week / around date X"),

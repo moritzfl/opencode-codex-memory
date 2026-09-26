@@ -42,9 +42,12 @@ const TCTX = { sessionID: "ses_test", messageID: "msg_test", agent: "build" }
 
 describe("buildV2Tools gating", () => {
   it("registers all 6 tools by default (reset lives in the panel)", () => {
-    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(
+    const tools = buildV2Tools()
+    expect(tools.map((t) => t.name).sort()).toEqual(
       ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_search"].sort(),
     )
+    // Native tool list, not Code Mode. The read-path prompt calls these by name.
+    expect(tools.every((t) => t.options?.codemode === false)).toBe(true)
   })
 
   it("registers only control tools when dedicated_tools is off", () => {

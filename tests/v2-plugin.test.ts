@@ -396,6 +396,7 @@ describe("v2 setup", () => {
     expect(f.added.map((t) => t.name).sort()).toEqual(
       ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_search"].sort(),
     )
+    expect(f.added.every((t) => t.options?.codemode === false)).toBe(true)
     expect(Object.keys(f.hooks).sort()).toEqual(["compaction", "context", "execute.before", "generate", "prompt", "title"])
     expect(f.agentUpdates).toEqual([])
     await (cleanup as () => unknown)?.()

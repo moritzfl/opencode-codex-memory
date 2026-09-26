@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode 2 memory tools stay on the normal tool list. They were only inside
+  Code Mode `execute`, so the agent often reported that memory tools were not
+  in the runtime and skipped them.
+
 ## [0.9.0] - 2026-09-23
 
 ### Fixed

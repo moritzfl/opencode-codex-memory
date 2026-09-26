@@ -95,6 +95,7 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     expect(prompt).toContain("memory_search")
     expect(prompt).toContain("memory_read")
     expect(prompt).toContain("memory_add_note")
+    expect(prompt).not.toContain("not tools inside `execute`")
   })
 
   it("falls back to codex's file-based guidance when dedicated_tools is off", () => {
@@ -132,10 +133,12 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
       expect(prompt).toContain("memory_search")
       expect(prompt).toContain("memory_read")
       expect(prompt).toContain("memory_add_note")
+      expect(prompt).toContain("not tools inside `execute`")
       expect(prompt).not.toContain("MEMORY.md")
       expect(prompt).toContain("rollout_summaries/")
       const files = buildMemorySystemPrompt(false)!
       expect(files).not.toContain("memory_search")
+      expect(files).not.toContain("not tools inside `execute`")
       expect(files).toContain(`Search ${memoryRoot()}/rollout_summaries/`)
       expect(files).not.toContain("MEMORY.md")
     } finally {

@@ -25,6 +25,13 @@ interface V2ToolDefinition {
   name: string
   description: string
   input: z.ZodTypeAny
+  /**
+   * OpenCode 2 defaults plugin tools into Code Mode (`execute`). The read-path
+   * prompt tells the model to call these by name. Leaving the default hides
+   * them from the native tool list; models then search `execute` for a
+   * `memory` namespace, miss, and skip memory.
+   */
+  options: { codemode: false }
   execute: (input: any, ctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal }) => Promise<{ content: string | unknown[]; metadata?: unknown }>
 }
 
@@ -33,6 +40,7 @@ function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
     name,
     description: v1.description,
     input: z.object(v1.args),
+    options: { codemode: false },
     async execute(input: any, tctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal }) {
       const v1ctx = {
         sessionID: tctx.sessionID,

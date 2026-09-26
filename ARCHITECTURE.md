@@ -102,7 +102,9 @@ Source layout: `src/` holds the pipeline (`source`, `citation`, `db`, `store`,
 `lifecycle`, `options`, `diagnostics`, `agent-health`) plus external-agent exchange
 (`codex-interop`, `claude-import`) and `src/templates/`; `tools/` holds the
 model-facing tools (`memory.ts`, `control.ts`). The OpenCode 2 host adapter lives in
-`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. User-facing
+`src/v2/` (shim, plugin, agents, TUI) — not Codex-mapped. OpenCode 2 defaults
+plugin tools into Code Mode; memory tools set `codemode: false` so the names in
+the read-path prompt stay on the native tool list. User-facing
 [panel controls](docs/usage.md#memory-panel) are covered in the usage guide. Per-file upstream
 provenance lives in `codex-map.yaml`.
 

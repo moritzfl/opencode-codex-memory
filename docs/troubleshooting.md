@@ -45,7 +45,7 @@ the consolidation cooldown but still respects session eligibility.
 | Extraction errors mention rate limits or usage limits | Check `provider_capacity_backoff` and retry times. Capacity errors retry after about an hour when quota returns; `other_exhausted` indicates other exhausted failures. |
 | Consolidation never completes | Read `phase2_last_error` and agent health. Failed artifacts leave workspace changes for a later retry. |
 | Codex sharing stopped after switching memory versions | Codex exchange needs the Memory V1 writer. Memory V2-only learning disables it; see [Integrations](integrations.md). |
-| Retrieval tools are missing | Check `use_memories` and `dedicated_tools`. Maintenance tools remain available. |
+| Retrieval tools are missing, or the agent says they are not in this runtime | Check `use_memories` and `dedicated_tools`. On OpenCode 2 they are normal tools, not tools inside `execute`. Maintenance tools remain available. Restart the server after upgrading the plugin. |
 
 ## Check OpenCode's server
 

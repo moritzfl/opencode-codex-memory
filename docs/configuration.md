@@ -94,7 +94,7 @@ a second independent learning pipeline and therefore additional model calls.
 |---|---|---|
 | `generate_memories` | `true` | Run background extraction and consolidation. Set to `false` to pause learning while keeping existing memory available. |
 | `use_memories` | `true` | Inject the summary and make memory retrieval/note tools available. Setting this to `false` does not stop background learning. |
-| `dedicated_tools` | `true` | Expose `memory_read`, `memory_search`, `memory_list`, and `memory_add_note`. See [File-based access](#file-based-access). |
+| `dedicated_tools` | `true` | Expose `memory_read`, `memory_search`, `memory_list`, and `memory_add_note` as normal tools. On OpenCode 2 they stay off the Code Mode `execute` list. See [File-based access](#file-based-access). |
 | `disable_on_external_context` | `false` | Exclude sessions that used web search, fetch, or MCP tools from learning. |
 
 To stop both learning and recall, set both `generate_memories` and
