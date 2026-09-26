@@ -57,19 +57,25 @@ function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
       }
       const res = await v1.execute(input, v1ctx)
       if (typeof res === "string") return { content: res }
+      let content = res.output ?? ""
+      let metadata = res.metadata
       if (name === "memory_inspect") {
         const discovery = getV2DiscoveryStatus()
-        return {
-          content: [
-            `v2_discovery_source: ${discovery?.source ?? "not_checked"}`,
-            ...(discovery?.warning ? [`v2_discovery_warning: ${discovery.warning}`] : []),
-            "",
-            res.output ?? "",
-          ].join("\n"),
-          metadata: { ...(res.metadata && typeof res.metadata === "object" ? res.metadata : {}), v2_discovery: discovery },
-        }
+        content = [
+          `v2_discovery_source: ${discovery?.source ?? "not_checked"}`,
+          ...(discovery?.warning ? [`v2_discovery_warning: ${discovery.warning}`] : []),
+          "",
+          content,
+        ].join("\n")
+        metadata = { ...(metadata && typeof metadata === "object" ? metadata : {}), v2_discovery: discovery }
       }
-      return { content: res.output ?? "", ...(res.metadata !== undefined ? { metadata: res.metadata } : {}) }
+      // V2 validates metadata as JSON before persisting Tool.Success. V1 tool
+      // metadata can contain undefined optional fields (search path/since/until).
+      // Use JSON serialization semantics here so successful calls can settle.
+      return {
+        content,
+        ...(metadata === undefined ? {} : { metadata: JSON.parse(JSON.stringify(metadata)) }),
+      }
     },
   }
 }
