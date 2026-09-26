@@ -558,25 +558,36 @@ async function main() {
         log("reset", `warning: phase2 still ${phase2Job(sandbox)?.status ?? "missing"} before reset attempt`)
       })
 
-      const sid = await createSession(serve, sandbox, "e2e-reset")
-      const resetReply = await promptSession(
-        serve,
-        sandbox,
-        sid,
-        "Call the memory_reset tool now with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
-        { timeoutMs: 180_000 },
-      )
-      // One retry if the model hit the in-flight refusal (or never called the tool).
-      if (/consolidation is currently running|Reset refused|Reset aborted/i.test(resetReply)) {
-        log("reset", "tool refused or aborted — waiting and retrying once")
-        await sleep(15_000)
-        await promptSession(
+      let resetReply: string
+      if (serve.v2) {
+        // V2 exposes reset through the panel RPC, never as a model tool.
+        const reset = await api(serve, sandbox, "POST", "/api/rpc/opencode-codex-memory/resetMemory", {
+          input: { confirm: true },
+        }, { "location[directory]": sandbox.project })
+        const result = (reset.json as { output?: { ok?: boolean; message?: string } })?.output
+        resetReply = result?.message ?? reset.text
+        check(reset.status === 200 && result?.ok === true, "reset", `panel reset: ${resetReply}`)
+      } else {
+        const sid = await createSession(serve, sandbox, "e2e-reset")
+        resetReply = await promptSession(
           serve,
           sandbox,
           sid,
-          "Call the memory_reset tool again with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
+          "Call the memory_reset tool now with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
           { timeoutMs: 180_000 },
         )
+        // One retry if the model hit the in-flight refusal (or never called the tool).
+        if (/consolidation is currently running|Reset refused|Reset aborted/i.test(resetReply)) {
+          log("reset", "tool refused or aborted — waiting and retrying once")
+          await sleep(15_000)
+          await promptSession(
+            serve,
+            sandbox,
+            sid,
+            "Call the memory_reset tool again with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
+            { timeoutMs: 180_000 },
+          )
+        }
       }
       await sleep(1000)
       const left = fs.existsSync(sandbox.memories)
@@ -603,6 +614,7 @@ async function main() {
       console.error(`\ne2e: FAIL — ${failures} check(s) failed`)
       console.error(`sandbox: ${sandbox.root}`)
       console.error(`serve log: ${serve.logPath}`)
+      sandbox.keep = true
       process.exitCode = 1
       return
     }
