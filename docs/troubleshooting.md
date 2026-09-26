@@ -72,7 +72,7 @@ launch it as a standalone Node application.
 1. Check the [npm release](https://www.npmjs.com/package/opencode-codex-memory)
    and [changelog](../CHANGELOG.md).
 2. Change only the package pin in your existing plugin entry, for example
-   `opencode-codex-memory@0.9.1`. Keep your options.
+   `opencode-codex-memory@0.9.2`. Keep your options.
 3. Restart the OpenCode server and check memory status.
 
 OpenCode caches installed package specs. A bare `opencode-codex-memory`
