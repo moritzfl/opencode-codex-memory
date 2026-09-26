@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- OpenAI no longer rejects the next turn when a native memory tool call has
-  not settled yet. The context hook supplies the missing tool output before
-  the request is sent.
+- OpenCode 2 memory tool metadata is normalized to JSON before returning it
+  to the host. Optional search fields no longer prevent success events from
+  being persisted, leaving tool calls running with no output for the next turn.
+- Removed context-hook re-execution of unanswered memory calls. Request
+  preparation no longer reads disabled memory, replaces historical results,
+  or advises retrying a write whose outcome is unknown.
 
 ## [0.9.1] - 2026-09-26
 

@@ -52,7 +52,6 @@ import { MemoryStatusRpc } from "./status-rpc.js"
 import { readMemoryStatus } from "./status.js"
 import { recordInjection, resetInjectionStats } from "./injection.js"
 import { overlayV2CitationInstructions } from "./citation-overlay.js"
-import { repairUnsettledMemoryTools } from "./unsettled-tools.js"
 import { estimateTokens } from "../token.js"
 
 let shimClient: unknown = null
@@ -409,10 +408,8 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     notifyStatusChanged()
   }
 
-  await ctx.session.hook("context", async (ev: any) => {
+  await ctx.session.hook("context", (ev: any) => {
     try {
-      // Before citation stripping, so a repaired result cannot be dropped as empty text.
-      await repairUnsettledMemoryTools(ev?.messages, ev?.sessionID)
       handleModelBoundSession(ev, true)
     } catch (err) {
       console.error("[opencode-codex-memory] v2 context hook error:", err)

@@ -411,9 +411,13 @@ describe("v2 setup", () => {
     expect(new MemoryStore().getMemoryMode("ses_new1")).toBe("disabled")
   })
 
-  it("context hook supplies a result for an unsettled memory_search call", async () => {
+  it.each([
+    ["enabled", {}],
+    ["reads disabled", { use_memories: false }],
+    ["dedicated tools disabled", { dedicated_tools: false }],
+  ])("context hook preserves unsettled tool calls with memory %s", async (_label, options) => {
     fs.writeFileSync(path.join(TEST_ROOT, "memories", "MEMORY.md"), "Cachy paste clipboard\n")
-    const f = fakeCtx()
+    const f = fakeCtx(options)
     await setup(f.ctx)
     const ev: any = {
       sessionID: "ses_x",
@@ -428,14 +432,23 @@ describe("v2 setup", () => {
               name: "memory_search",
               input: { queries: ["Cachy"], path: "MEMORY.md" },
             },
+            { type: "tool-call", id: "call_read", name: "memory_read", input: { path: "MEMORY.md" } },
+            { type: "tool-call", id: "call_list", name: "memory_list", input: {} },
+            { type: "tool-call", id: "call_inspect", name: "memory_inspect", input: {} },
+            { type: "tool-call", id: "call_note", name: "memory_add_note", input: { note: "remember me" } },
+            { type: "tool-call", id: "call_mode", name: "memory_mode", input: { mode: "disabled" } },
           ],
         },
       ],
     }
+    const original = structuredClone(ev.messages)
     await f.hooks.context[0](ev)
-    expect(ev.messages[1]?.role).toBe("tool")
-    expect(ev.messages[1].content[0].id).toBe("call_missing")
-    expect(ev.messages[1].content[0].result.value).toContain("Cachy")
+    expect(ev.messages).toEqual(original)
+    // A later request must not replace historical results with fresh file
+    // contents or manufacture retry advice for a possibly committed mutation.
+    fs.writeFileSync(path.join(TEST_ROOT, "memories", "MEMORY.md"), "changed after the tool call\n")
+    await f.hooks.context[0](ev)
+    expect(ev.messages).toEqual(original)
   })
 
   it("context hook leaves a memory tool call alone when its result is already present", async () => {
