@@ -436,21 +436,26 @@ mappings:
       memory-import pattern (extensions/<name>/instructions.md + resources/,
       byte-equality change detection, instructions refreshed on constant
       change, source-gone removes resources) but with per-file in-place
-      replace instead of codex's whole-dir delete+rewrite (fixed 2-artifact
-      set; non-regular files at target paths are replaced, never written
-      through), and the source is Codex's own GLOBAL consolidated memory
-      (MEMORY.md + memory_summary.md), not per-project Claude memories — so
-      no scope.json, no project selection surface, no state-DB gating.
+      replace instead of codex's whole-dir delete+rewrite (v1 copies MEMORY.md
+      + memory_summary.md; v2 import copies memory_summary.md only;
+      non-regular files at target paths are replaced, never written
+      through), and the source is Codex's own GLOBAL consolidated memory,
+      not per-project Claude memories — so no scope.json, no project
+      selection surface, no state-DB gating. The root is
+      $CODEX_HOME/config.toml [memories] version (unset → memories/). A
+      leftover memories/ handbook is not consulted when version is v2.
+      Profile, project, and session layers are not merged.
       Claude per-project import lives in src/claude-import.ts (same extension
-      name/layout as upstream). An unreachable codex home is NOT a deletion
-      signal (only an existing memories root with missing artifacts is),
+      name/layout as upstream). An unreachable selected root is NOT a deletion
+      signal (only an existing selected root with missing artifacts is),
       diverging from codex's fatal-on-missing-home because the plugin must
       degrade quietly. Codex syncs out-of-band and enqueues consolidation; the
       port syncs inside the claimed phase-2 job (after baseline, before diff
       capture) because its claim is time-gated and pre-claim workspace writes
       could race a running consolidator's lease. Also adds an export direction
       with no codex equivalent: our consolidated artifacts are written into
-      $CODEX_HOME/memories/extensions/opencode_import/ for codex's consolidator
+      the selected store's extensions/opencode_import/ (memories/ or
+      memories_v2/) for codex's consolidator
       to merge via its generic extensions contract (additive only; codex's
       workspace is never bootstrapped and its state DB never touched).
       Instructions constants adapt codex's EXTENSION_INSTRUCTIONS with
@@ -460,8 +465,9 @@ mappings:
       instruction-level, matching codex's own all-instruction content rules
       (see ARCHITECTURE.md D6). Default-off via the opencode-specific
       codex_interop plugin option.
-      Handbook exchange remains V1-only; the V1 writer can still exchange while
-      dual_write is on and the read default is V2. No automatic V1-to-V2 import.
+      Handbook exchange remains V1-writer-only; the V1 writer can still exchange
+      while dual_write is on and the read default is V2. The Codex side may be
+      v1 or v2. No automatic V1-to-V2 import of this plugin's own store.
   - ours: src/git-baseline.ts
     theirs: codex-rs/git-utils/src/baseline.rs
     note: >

@@ -325,17 +325,24 @@ import below works with either memory writer.
 
 - **Import** (`codex_interop.import`): inside each claimed phase-2 job —
   after the baseline, before the diff capture — Codex's consolidated
-  `MEMORY.md`/`memory_summary.md` are byte-compared and copied into
+  artifacts are byte-compared and copied into
   `extensions/codex_import/resources/codex/`, so imported changes are
   consolidated in the same run (codex `memory_import.rs` orders
-  prepare-workspace-then-copy the same way). Source-gone deletes the copies
-  so the workspace diff carries the forgetting signal.
+  prepare-workspace-then-copy the same way). The source root comes from
+  `$CODEX_HOME/config.toml` `[memories] version` (unset → `memories/`). v1
+  copies `MEMORY.md` and `memory_summary.md`. v2 copies `memory_summary.md`
+  only; a leftover `memories/` handbook is not the live store. Profile,
+  project, and session config layers are not merged. Source-gone on that
+  selected root deletes the copies so the workspace diff carries the
+  forgetting signal. A missing selected root is not a deletion signal.
 - **Export** (`codex_interop.export`): after a successful phase 2, our
   validated artifacts are copied into
-  `$CODEX_HOME/memories/extensions/opencode_import/resources/opencode/` with
-  an instructions.md written for Codex's consolidator. Strictly additive:
-  never bootstraps Codex's workspace, never touches Codex's state DB — Codex
-  discovers the files through its own workspace diff.
+  `<selected-root>/extensions/opencode_import/resources/opencode/` with an
+  instructions.md written for that store's consolidator. v2 instructions tell
+  Codex to fold the handbook into `memory_summary.md` and not to create
+  `MEMORY.md`. Strictly additive: never bootstraps Codex's workspace, never
+  touches Codex's state DB — Codex discovers the files through its own
+  workspace diff.
 - **Echo guard**: both instructions files require a provenance tag
   (`[from codex]` / `[from opencode]`) and forbid re-importing content
   carrying the other side's tag; foreign metadata (thread UUIDs vs `ses_*`

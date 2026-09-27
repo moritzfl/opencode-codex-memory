@@ -38,10 +38,24 @@ Enable either direction or both:
 - **Export:** after successful Memory V1 consolidation, validated memory is
   placed where Codex can merge it on its next consolidation pass.
 
-No changes to Codex's config are required. Codex must already have created
-its own memory workspace (`$CODEX_HOME/memories`); the plugin does not
-bootstrap it. Codex's primary memory files are not rewritten in place.
-Export writes an extension that Codex's consolidator can read.
+No changes to Codex's config are required. The plugin reads
+`$CODEX_HOME/config.toml` `[memories] version` and uses that store:
+`memories/` for Memory V1 (the default when the key is unset), or
+`memories_v2/` for Memory V2. It does not guess from which directory exists,
+and it does not merge profile, project, or session overrides. A leftover
+`memories/` handbook is ignored while Codex is on Memory V2. `dual_write`
+does not change the store: exchange follows the version Codex injects.
+
+Codex must already have created that workspace; the plugin does not bootstrap
+it. Codex's primary memory files are not rewritten in place. Export writes an
+extension under the selected store that Codex's consolidator can read.
+
+Memory V1 import copies `MEMORY.md` and `memory_summary.md`. Memory V2 import
+copies `memory_summary.md` only — that file is the memory, and there is no
+handbook. Routes inside it that point at Codex rollout files are not copied
+and will not resolve here. Export still offers this plugin's Memory V1
+handbook. On a Memory V2 Codex store the instructions tell Codex to fold that
+into `memory_summary.md` and not to create `MEMORY.md`.
 
 ### Codex options
 
@@ -49,8 +63,8 @@ All fields are inside `codex_interop`:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `import` | `false` | Bring Codex's consolidated memory into this plugin's Memory V1 workspace. |
-| `export` | `false` | Offer this plugin's Memory V1 memory to Codex. |
+| `import` | `false` | Bring Codex's selected memory store into this plugin's Memory V1 workspace. |
+| `export` | `false` | Offer this plugin's Memory V1 memory to that same Codex store. |
 | `codex_home` | `$CODEX_HOME`, otherwise `~/.codex` | Codex CLI's data location. |
 
 The exchange instructions use `[from codex]` / `[from opencode]` tags and tell

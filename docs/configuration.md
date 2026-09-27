@@ -134,7 +134,7 @@ cooldown; sessions must still meet extraction eligibility rules.
 | Option | Default | Details |
 |---|---|---|
 | `home` | OpenCode data directory | Absolute directory for all plugin databases and memory workspaces. See [Relocating memory](storage-and-privacy.md#relocating-memory). |
-| `codex_interop` | `{ "import": false, "export": false }` | Exchange consolidated memory with Codex CLI. Requires the Memory V1 writer. See [Codex CLI sharing](integrations.md#sharing-memory-with-the-codex-cli). |
+| `codex_interop` | `{ "import": false, "export": false }` | Exchange consolidated memory with Codex CLI. Requires the Memory V1 writer. Follows Codex `memories.version` (`memories/` or `memories_v2/`). See [Codex CLI sharing](integrations.md#sharing-memory-with-the-codex-cli). |
 | `claude_import` | `{ "enabled": false }` | Import Claude Code project memories. See [Claude Code import](integrations.md#importing-memory-from-claude-code). |
 
 ## File-based access

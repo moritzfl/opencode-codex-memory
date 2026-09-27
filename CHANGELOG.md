@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex memory exchange follows `$CODEX_HOME/config.toml` `memories.version`.
+  Memory V2 imports `memory_summary.md` only and does not treat a leftover
+  `memories/` handbook as the live store. Export lands in that same store.
+
 ### Added
 
 - Consolidation regression coverage for failed and interrupted host turns,
