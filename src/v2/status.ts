@@ -4,7 +4,7 @@ import { getAgentHealth } from "../agent-health.js"
 import { isPhase2InFlight } from "../phase2.js"
 import { isPluginShuttingDown } from "../lifecycle.js"
 import { activeProviderCapacityBackoffs } from "../ratelimit.js"
-import { codexInteropBlockReason, resolveCodexInterop } from "../codex-interop.js"
+import { codexInteropBlockReason } from "../codex-interop.js"
 import type { MemoryStatus } from "./status-rpc.js"
 import { injectionTotals, sessionInjection } from "./injection.js"
 import { memoryRoot } from "../paths.js"
@@ -81,11 +81,13 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
     }
     if (phase1.by_failure_class.provider_capacity > 0) warnings.push(`${prefix}Some extraction jobs hit provider capacity limits.`)
   }
-  const importsV1 = options.codex_interop.import && writeMemoryVersions().includes("v1")
-  const codexImport = importsV1 && withMemoryVersion("v1", () => resolveCodexInterop(options.codex_interop)) !== null
-  if (importsV1 && !codexImport) {
-    const reason = withMemoryVersion("v1", () => codexInteropBlockReason(options.codex_interop))
-    warnings.push(reason ? `Codex import disabled: ${reason}` : "Codex import is misconfigured.")
+  let codexImport = false
+  if (options.codex_interop.import) {
+    for (const version of writeMemoryVersions()) {
+      const reason = withMemoryVersion(version, () => codexInteropBlockReason(options.codex_interop))
+      if (reason) warnings.push(`Codex import disabled (${version}): ${reason}`)
+      else codexImport = true
+    }
   }
 
   // A `running` row this process does not own is either another opencode

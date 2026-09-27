@@ -40,11 +40,13 @@ describe("resolveCodexInterop", () => {
     expect(resolveCodexInterop({ import: false, export: false })).toBeNull()
   })
 
-  it("disables handbook exchange while version=v2", () => {
+  it("resolves while the plugin writer is v2", () => {
     const { applyPluginOptions } = require("../src/index.js")
     const { resolveCodexInterop } = interop()
     applyPluginOptions({ version: "v2" })
-    expect(resolveCodexInterop({ import: true, export: true, codex_home: CODEX_HOME })).toBeNull()
+    const resolved = resolveCodexInterop({ import: true, export: true, codex_home: CODEX_HOME })
+    expect(resolved?.codexMemoryRoot).toBe(CODEX_MEM)
+    expect(resolved?.codexVersion).toBe("v1")
   })
 
   it("resolves codex_home option over CODEX_HOME env over ~/.codex", () => {
@@ -474,5 +476,56 @@ describe("exportToCodexMemory v2", () => {
     expect(fs.readFileSync(path.join(extDir, "resources", "opencode", "MEMORY.md"), "utf8")).toContain("opencode fact")
     expect(fs.existsSync(path.join(CODEX_MEM, "extensions"))).toBe(false)
     expect(exportToCodexMemory(V2_ROOT, "v2")).toBe(false)
+  })
+})
+
+describe("plugin Memory V2 writer", () => {
+  const VALID_V2 = "v1\n\n## User Profile\nopencode v2 fact\n\n## User preferences\nkeep it\n\n## General Tips\nnone\n\n## What's in Memory\nhere\n"
+
+  function useV2Writer(): void {
+    const { applyPluginOptions } = require("../src/index.js")
+    applyPluginOptions({ version: "v2" })
+  }
+
+  it("copies a Codex v1 handbook into the v2 workspace without converting it", () => {
+    const { syncCodexImport } = interop()
+    useV2Writer()
+    seedCodexMemory()
+    expect(syncCodexImport(CODEX_MEM, "v1")).toBe(true)
+    const extDir = path.join(pluginMemoryRoot(), "extensions", "codex_import")
+    expect(pluginMemoryRoot()).toContain("memories_v2")
+    expect(fs.readFileSync(path.join(extDir, "resources", "codex", "MEMORY.md"), "utf8")).toContain("codex fact")
+    expect(fs.existsSync(path.join(pluginMemoryRoot(), "MEMORY.md"))).toBe(false)
+    const instructions = fs.readFileSync(path.join(extDir, "instructions.md"), "utf8")
+    expect(instructions).toContain("Do not create, update, or restore `MEMORY.md`")
+    expect(instructions).toContain("[from codex]")
+  })
+
+  it("exports only a valid v2 summary and tells Codex v1 to fold it into the handbook", () => {
+    const { exportToCodexMemory } = interop()
+    useV2Writer()
+    fs.mkdirSync(CODEX_MEM, { recursive: true })
+    fs.mkdirSync(pluginMemoryRoot(), { recursive: true })
+    fs.writeFileSync(path.join(pluginMemoryRoot(), "memory_summary.md"), "v1\n\nnot a v2 summary\n")
+    expect(exportToCodexMemory(CODEX_MEM, "v1")).toBe(false)
+    fs.writeFileSync(path.join(pluginMemoryRoot(), "memory_summary.md"), VALID_V2)
+    fs.writeFileSync(path.join(pluginMemoryRoot(), "MEMORY.md"), "must not be exported\n")
+    expect(exportToCodexMemory(CODEX_MEM, "v1")).toBe(true)
+    const extDir = path.join(CODEX_MEM, "extensions", "opencode_import")
+    expect(fs.existsSync(path.join(extDir, "resources", "opencode", "MEMORY.md"))).toBe(false)
+    expect(fs.readFileSync(path.join(extDir, "resources", "opencode", "memory_summary.md"), "utf8")).toContain("opencode v2 fact")
+    expect(fs.readFileSync(path.join(extDir, "instructions.md"), "utf8")).toContain("Fold supported claims into Codex `MEMORY.md`")
+  })
+
+  it("tells a Codex v2 store not to create a handbook from our v2 summary", () => {
+    const { exportToCodexMemory } = interop()
+    useV2Writer()
+    const v2 = path.join(CODEX_HOME, "memories_v2")
+    fs.mkdirSync(v2, { recursive: true })
+    fs.mkdirSync(pluginMemoryRoot(), { recursive: true })
+    fs.writeFileSync(path.join(pluginMemoryRoot(), "memory_summary.md"), VALID_V2)
+    expect(exportToCodexMemory(v2, "v2")).toBe(true)
+    const instructions = fs.readFileSync(path.join(v2, "extensions", "opencode_import", "instructions.md"), "utf8")
+    expect(instructions).toContain("Do not create, update, or restore a Codex `MEMORY.md`")
   })
 })

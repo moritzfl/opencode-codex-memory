@@ -803,8 +803,10 @@ describe("memory_inspect", () => {
     pluginOptions.codex_interop = { import: true, export: false, codex_home: home }
     try {
       const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain("v1 writer:")
       expect(r.output).toContain(`codex memories (v2): ${path.join(home, "memories_v2")}`)
       expect(r.output).toContain("not found yet")
+      expect(r.output).not.toContain("requires the v1 writer")
 
       fs.writeFileSync(path.join(home, "config.toml"), "version = = =\n")
       const bad = await memory_inspect.execute({}, CTX)
@@ -812,6 +814,23 @@ describe("memory_inspect", () => {
       expect(bad.output).not.toContain("overlaps")
     } finally {
       pluginOptions.codex_interop = { import: false, export: false }
+    }
+  })
+
+  it("reports the v2 writer root when that writer is active", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const home = path.join(TEST_ROOT, "codex-for-v2-writer")
+    fs.mkdirSync(home, { recursive: true })
+    applyPluginOptions({ version: "v2", codex_interop: { import: true, export: false, codex_home: home } })
+    try {
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain("v2 writer:")
+      expect(r.output).toContain("memories_v2")
+      expect(r.output).not.toContain("requires the v1 writer")
+      expect(r.output).not.toContain("v1 writer:")
+    } finally {
+      applyPluginOptions({})
     }
   })
 

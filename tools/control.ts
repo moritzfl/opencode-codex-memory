@@ -100,21 +100,23 @@ function renderEffectiveConfig(): string[] {
   if (!ci.import && !ci.export) {
     lines.push("  codex_interop: off")
   } else {
-    const resolved = withMemoryVersion("v1", () => resolveCodexInterop(ci))
-    if (!writeMemoryVersions().includes("v1")) {
-      lines.push("  codex_interop: disabled (handbook exchange requires the v1 writer)")
-    } else if (!resolved) {
-      const reason = withMemoryVersion("v1", () => codexInteropBlockReason(ci))
-      lines.push(`  codex_interop: disabled — ${reason ?? "unresolved"}`)
-    } else {
+    lines.push(`  codex_interop: import=${ci.import} export=${ci.export}`)
+    const fmt = (ms: number | null) => (ms == null ? "none" : new Date(ms).toISOString())
+    for (const version of writeMemoryVersions()) {
+      const resolved = withMemoryVersion(version, () => resolveCodexInterop(ci))
+      if (!resolved) {
+        const reason = withMemoryVersion(version, () => codexInteropBlockReason(ci))
+        lines.push(`  ${version} writer: disabled — ${reason ?? "unresolved"}`)
+        continue
+      }
       const reachable = fs.existsSync(resolved.codexMemoryRoot)
+      const writerRoot = withMemoryVersion(version, () => memoryRoot())
       lines.push(
-        `  codex_interop: import=${ci.import} export=${ci.export}`,
+        `  ${version} writer: ${writerRoot}`,
         `    codex memories (${resolved.codexVersion}): ${resolved.codexMemoryRoot}${reachable ? "" : " (not found yet — nothing is imported/exported until Codex's memory feature creates it)"}`,
       )
       if (reachable) {
-        const mt = withMemoryVersion("v1", () => codexInteropMtimes(resolved.codexMemoryRoot))
-        const fmt = (ms: number | null) => (ms == null ? "none" : new Date(ms).toISOString())
+        const mt = withMemoryVersion(version, () => codexInteropMtimes(resolved.codexMemoryRoot))
         lines.push(
           `    last import mtimes: MEMORY.md=${fmt(mt.importMemoryMd)} summary=${fmt(mt.importSummary)}`,
           `    last export mtimes: MEMORY.md=${fmt(mt.exportMemoryMd)} summary=${fmt(mt.exportSummary)}`,
