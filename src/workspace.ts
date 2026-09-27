@@ -106,6 +106,78 @@ export function isValidV2Summary(summary: string): boolean {
   return V2_SUMMARY_HEADINGS.every((heading) => lines.includes(heading))
 }
 
+/**
+ * Artifacts the consolidation agent owns. `raw_memories.md` and
+ * `rollout_summaries/` are phase-1 prep output, not consolidation output, so
+ * they are deliberately excluded: a change there says nothing about whether the
+ * agent promoted anything into the durable artifacts.
+ */
+const CONSOLIDATION_ARTIFACTS = ["MEMORY.md", "memory_summary.md"]
+
+/**
+ * Fingerprint of the consolidation artifacts, for detecting a no-op run.
+ *
+ * `consolidateViaSubagent` resolves as soon as the helper session closes and
+ * throws only on prompt/timeout/shutdown failure. The consolidation contract
+ * also explicitly permits a no-op ("No-op content updates are allowed and
+ * preferred when there is no meaningful, reusable learning worth saving"), so a
+ * clean return is NOT evidence that MEMORY.md / memory_summary.md were updated.
+ * `validateConsolidationArtifactsForVersion` cannot close that gap either: it
+ * only proves the files exist and the summary header is intact, which stays true
+ * for artifacts that are merely stale.
+ *
+ * Comparing this fingerprint before and after the helper runs is the only host
+ * signal that a consolidation actually happened. Uses size + mtime rather than
+ * content hashing: it runs once per phase-2 attempt over two small files, and
+ * mtime is what git's own status matrix keys on.
+ */
+export function fingerprintConsolidationArtifacts(root: string = memoryRoot()): string {
+  const parts: string[] = []
+  for (const name of CONSOLIDATION_ARTIFACTS) {
+    try {
+      const st = fs.lstatSync(path.join(root, name))
+      parts.push(st.isFile() ? `${name}:${st.size}:${st.mtimeMs}` : `${name}:not-a-file`)
+    } catch {
+      // v2 does not use MEMORY.md, so "missing" is a legitimate steady state.
+      parts.push(`${name}:missing`)
+    }
+  }
+  try {
+    const skills = fs
+      .readdirSync(path.join(root, SKILLS_DIR), { withFileTypes: true })
+      .map((entry) => entry.name)
+      .sort()
+    parts.push(`${SKILLS_DIR}:${skills.join(",")}`)
+  } catch {
+    parts.push(`${SKILLS_DIR}:none`)
+  }
+  return parts.join("|")
+}
+
+/**
+ * True when the workspace diff carries learning material the consolidator was
+ * required to propagate.
+ *
+ * Scoped to the two input families the consolidation contract names as
+ * consolidation triggers: added/modified/deleted files under
+ * `rollout_summaries/`, and resources under `extensions/<name>/resources/`.
+ * `raw_memories.md` is deliberately excluded even though it is derived from the
+ * same inputs, because `rebuildRawMemories([])` always writes a placeholder
+ * ("No raw memories yet."), so on a first INIT run it would register as new learning material on its own and turn a legitimately
+ * empty consolidation into a permanent retry loop. A new or updated stage-1
+ * output always changes the rollout_summaries set too (the file stem embeds
+ * source_updated_at), so nothing real is lost by keying on rollouts alone.
+ */
+export function diffCarriesNewLearning(changes: readonly { path: string }[]): boolean {
+  return changes.some(({ path: changed }) => {
+    if (changed.startsWith(`.${ROLLOUT_DIR}/`) || changed.startsWith(`${ROLLOUT_DIR}/.`)) return false
+    if (changed.startsWith(`${ROLLOUT_DIR}/`)) return true
+    // extensions/<name>/resources/<file>.md
+    const parts = changed.split("/")
+    return parts.length >= 3 && parts[0] === EXTENSIONS_DIR && parts[1] !== "." && parts[2] === "resources"
+  })
+}
+
 export function validateConsolidationArtifacts(root: string = memoryRoot()): { ok: true } | { ok: false; reason: string } {
   return validateConsolidationArtifactsForVersion(root, "v1")
 }

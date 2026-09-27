@@ -273,6 +273,78 @@ describe("validateConsolidationArtifacts", () => {
   })
 })
 
+describe("fingerprintConsolidationArtifacts", () => {
+  it("is stable when nothing is written and changes as soon as an artifact is touched", async () => {
+    const { ensureLayout, fingerprintConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    ensureLayout()
+    fs.writeFileSync(path.join(root, "MEMORY.md"), "# MEMORY.md\n")
+    fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\nprofile\n")
+
+    const before = fingerprintConsolidationArtifacts(root)
+    expect(fingerprintConsolidationArtifacts(root)).toBe(before)
+
+    // Stale-but-valid artifacts must still fingerprint as unchanged: this is
+    // exactly the state a no-op consolidation leaves behind, and detecting it is
+    // the whole point of the helper.
+    expect(validateStaleStillValid(root)).toBe(true)
+
+    // mtime granularity can hide a same-millisecond write, so bump it explicitly.
+    const future = new Date(Date.now() + 5000)
+    fs.utimesSync(path.join(root, "memory_summary.md"), future, future)
+    expect(fingerprintConsolidationArtifacts(root)).not.toBe(before)
+  })
+
+  it("reports a missing MEMORY.md as a steady state rather than throwing (v2)", () => {
+    const { fingerprintConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    fs.mkdirSync(root, { recursive: true })
+    expect(fingerprintConsolidationArtifacts(root)).toContain("MEMORY.md:missing")
+  })
+
+  it("notices a newly created skill directory", () => {
+    const { fingerprintConsolidationArtifacts } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const root = memoryRoot()
+    fs.mkdirSync(path.join(root, "skills"), { recursive: true })
+    const before = fingerprintConsolidationArtifacts(root)
+    fs.mkdirSync(path.join(root, "skills", "new-skill"), { recursive: true })
+    expect(fingerprintConsolidationArtifacts(root)).not.toBe(before)
+    expect(fingerprintConsolidationArtifacts(root)).toContain("skills:new-skill")
+  })
+})
+
+describe("diffCarriesNewLearning", () => {
+  it("flags rollout summary additions, modifications and deletions", () => {
+    const { diffCarriesNewLearning } = require("../src/workspace.js")
+    expect(diffCarriesNewLearning([{ path: "rollout_summaries/2026-07-03T05-11-22-abcd-fix.md" }])).toBe(true)
+    expect(diffCarriesNewLearning([{ path: "raw_memories.md" }])).toBe(false)
+    expect(diffCarriesNewLearning([{ path: "MEMORY.md" }])).toBe(false)
+    expect(diffCarriesNewLearning([])).toBe(false)
+  })
+
+  it("flags extension resources, which the contract also treats as consolidation input", () => {
+    const { diffCarriesNewLearning } = require("../src/workspace.js")
+    expect(diffCarriesNewLearning([{ path: "extensions/codex_memory_import/resources/a.md" }])).toBe(true)
+    // instructions.md is scaffolding, not learned content.
+    expect(diffCarriesNewLearning([{ path: "extensions/ad_hoc/instructions.md" }])).toBe(false)
+  })
+
+  it("ignores a raw_memories.md-only diff so a first INIT run cannot loop", () => {
+    // rebuildRawMemories([]) always writes the "No raw memories yet." placeholder,
+    // so on a fresh workspace that file alone must not count as new learning.
+    const { diffCarriesNewLearning } = require("../src/workspace.js")
+    expect(diffCarriesNewLearning([{ path: "raw_memories.md" }, { path: "skills/.keep" }])).toBe(false)
+  })
+})
+
+function validateStaleStillValid(root: string): boolean {
+  const { validateConsolidationArtifactsForVersion } = require("../src/workspace.js")
+  return validateConsolidationArtifactsForVersion(root, "v1").ok
+}
+
 describe("pruneExtensionResources", () => {
   it("prunes old timestamped resources but never notes or instructions.md", () => {
     const { ensureLayout, pruneExtensionResources } = require("../src/workspace.js")

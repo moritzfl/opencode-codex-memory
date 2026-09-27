@@ -8,6 +8,8 @@ import {
   writeWorkspaceDiff,
   validateConsolidationArtifactsForVersion,
   removeMemorySymlinks,
+  fingerprintConsolidationArtifacts,
+  diffCarriesNewLearning,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
 import {
@@ -254,6 +256,12 @@ async function runVersionPhase2(
 
       writeWorkspaceDiff(diff)
 
+      // Snapshot the artifacts the consolidator owns before handing it the diff.
+      // See fingerprintConsolidationArtifacts: a clean return from
+      // consolidateViaSubagent does not prove the agent wrote anything, and the
+      // contract lets it no-op. Compared after the helper closes.
+      const artifactsBeforeConsolidator = fingerprintConsolidationArtifacts(root)
+
       let heartbeatLost = false
       let heartbeatFailure: unknown = "ownership lost"
       const heartbeatOnce = (): boolean => {
@@ -343,6 +351,29 @@ async function runVersionPhase2(
       if (!artifacts.ok) {
         store.markPhase2Failed(claim.ownershipToken, `failed_invalid_artifacts: ${artifacts.reason}`)
         return { status: "failed_invalid_artifacts" }
+      }
+
+      // The consolidation agent returned successfully but left MEMORY.md /
+      // memory_summary.md byte-identical while the diff carried new rollouts, so
+      // the new memories were never promoted. Validation cannot catch this: the
+      // stale files still exist and the summary header is still "v1".
+      //
+      // Resetting the baseline here would be the damaging part. It would fold the
+      // un-consolidated rollout summaries into the baseline, the next pass would
+      // then see zero changes, take the no_workspace_changes early return above,
+      // and never invoke the consolidator again — the new memories would be
+      // stranded in the workspace permanently and silently, with the job reported
+      // as succeeded. Keep the diff instead and let the normal failure backoff
+      // retry, so the run is observable and recoverable.
+      if (
+        fingerprintConsolidationArtifacts(root) === artifactsBeforeConsolidator &&
+        diffCarriesNewLearning(diff.changes)
+      ) {
+        store.markPhase2Failed(
+          claim.ownershipToken,
+          "consolidation agent made no artifact changes while the workspace diff carried new rollouts",
+        )
+        return { status: "no_artifact_changes" }
       }
 
       if (!await withHostTimeout(resetBaseline(diff.extensionSnapshot), GIT_TIMEOUT_MS, "resetBaseline")) {

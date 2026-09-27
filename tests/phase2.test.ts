@@ -149,6 +149,82 @@ describe("phase 2 orchestration", () => {
     expect(fs.existsSync(path.join(memoryRoot(), "phase2_workspace_diff.md"))).toBe(true)
   })
 
+  it("fails a successful-but-empty consolidation and keeps the diff so the next run retries", async () => {
+    // The consolidation contract explicitly permits a no-op: "No-op content
+    // updates are allowed and preferred when there is no meaningful, reusable
+    // learning worth saving." The helper can therefore read the diff, change
+    // nothing, and exit cleanly. That is not a consolidation, and it must not be
+    // recorded as one.
+    const store = new MemoryStore()
+    const ts = Date.now()
+    store.upsertStage1Output({
+      session_id: "ses_noop",
+      source_updated_at: ts,
+      raw_memory: "### Task 1: reproducible fact\n\n- the retry budget is per-job, not global",
+      rollout_summary: "# Reproducible fact\n\nThe stage-1 retry budget is per-job.",
+      rollout_slug: "reproducible-fact",
+      cwd: "/p",
+      generated_at: ts,
+    })
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-noop" } }),
+          prompt: async () => ({ data: { info: {}, parts: [{ type: "text", text: "nothing worth saving" }] } }),
+          delete: async () => ({ data: {} }),
+          get: async (req: { path: { id: string } }) => ({ data: { id: req.path.id }, response: { status: 200 } }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const result = await runPhase2(new MemoryStore())
+    expect(result.status).toBe("no_artifact_changes")
+
+    const job = openDb()
+      .prepare("SELECT status, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { status: string; lease_until: number | null; retry_at: number | null; last_error: string }
+    expect(job.status).toBe("failed")
+    expect(job.lease_until).toBeNull()
+    expect(job.last_error).toMatch(/no artifact changes/)
+    // Failure backoff, not a hot loop.
+    expect(job.retry_at).toBeGreaterThan(0)
+
+    // The load-bearing assertion. If the baseline had been reset here, the next
+    // pass would see zero changes, return no_workspace_changes, and never invoke
+    // the consolidator again — stranding this rollout in the workspace forever
+    // while the job reported success.
+    const pending = await captureWorkspaceDiff()
+    expect(pending.changes.some((change) => change.path.startsWith("rollout_summaries/"))).toBe(true)
+  })
+
+  it("accepts a no-op consolidation when the diff carries no new learning material", async () => {
+    // No stage-1 outputs: prep writes the raw_memories.md placeholder and no
+    // rollout summaries, so there is genuinely nothing to promote and a no-op is
+    // the correct outcome. Pre-seeding a valid baseline keeps the diff to the
+    // placeholder file, which must not be treated as learning material.
+    const { resetBaseline } = require("../src/git-baseline.js")
+    const root = memoryRoot()
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(path.join(root, "MEMORY.md"), "# MEMORY.md\n")
+    fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\n## User Profile\n")
+    await resetBaseline(new Map())
+
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: "sub-phase2-noop-clean" } }),
+          prompt: async () => ({ data: { info: {}, parts: [{ type: "text", text: "nothing to add" }] } }),
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const result = await runPhase2(new MemoryStore())
+    expect(result.status).toBe("succeeded")
+  })
+
   it("v2 succeeds with only memory_summary.md and does not write raw_memories.md", async () => {
     const { applyPluginOptions } = require("../src/index.js")
     applyPluginOptions({ version: "v2" })
