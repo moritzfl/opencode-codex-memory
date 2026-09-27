@@ -112,7 +112,7 @@ export async function selectLivePhase2Inputs(
 function maybeExportToCodex(interop: ReturnType<typeof resolveCodexInterop>): void {
   if (!interop?.exportEnabled) return
   try {
-    exportToCodexMemory(interop.codexMemoryRoot)
+    exportToCodexMemory(interop.codexMemoryRoot, interop.codexVersion)
   } catch (err) {
     console.warn("[opencode-codex-memory] codex export failed:", err)
   }
@@ -218,7 +218,7 @@ async function runVersionPhase2(
       // consolidation succeeds. Never fails the run.
       if (interop?.importEnabled) {
         try {
-          syncCodexImport(interop.codexMemoryRoot)
+          syncCodexImport(interop.codexMemoryRoot, interop.codexVersion)
         } catch (err) {
           console.warn("[opencode-codex-memory] codex import sync failed:", err)
         }

@@ -787,8 +787,29 @@ describe("memory_inspect", () => {
     try {
       const r = await memory_inspect.execute({}, CTX)
       expect(r.output).toContain("codex_interop: import=true export=false")
-      expect(r.output).toContain(path.join(TEST_ROOT, "codex-home", "memories"))
+      expect(r.output).toContain(`codex memories (v1): ${path.join(TEST_ROOT, "codex-home", "memories")}`)
       expect(r.output).toContain("not found yet")
+    } finally {
+      pluginOptions.codex_interop = { import: false, export: false }
+    }
+  })
+
+  it("reports the v2 codex root and a bad version without calling it an overlap", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { pluginOptions } = require("../src/options.js")
+    const home = path.join(TEST_ROOT, "codex-v2")
+    fs.mkdirSync(home, { recursive: true })
+    fs.writeFileSync(path.join(home, "config.toml"), '[memories]\nversion = "v2"\n')
+    pluginOptions.codex_interop = { import: true, export: false, codex_home: home }
+    try {
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain(`codex memories (v2): ${path.join(home, "memories_v2")}`)
+      expect(r.output).toContain("not found yet")
+
+      fs.writeFileSync(path.join(home, "config.toml"), "version = = =\n")
+      const bad = await memory_inspect.execute({}, CTX)
+      expect(bad.output).toContain("could not parse")
+      expect(bad.output).not.toContain("overlaps")
     } finally {
       pluginOptions.codex_interop = { import: false, export: false }
     }

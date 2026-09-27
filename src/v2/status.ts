@@ -4,7 +4,7 @@ import { getAgentHealth } from "../agent-health.js"
 import { isPhase2InFlight } from "../phase2.js"
 import { isPluginShuttingDown } from "../lifecycle.js"
 import { activeProviderCapacityBackoffs } from "../ratelimit.js"
-import { resolveCodexInterop } from "../codex-interop.js"
+import { codexInteropBlockReason, resolveCodexInterop } from "../codex-interop.js"
 import type { MemoryStatus } from "./status-rpc.js"
 import { injectionTotals, sessionInjection } from "./injection.js"
 import { memoryRoot } from "../paths.js"
@@ -83,7 +83,10 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
   }
   const importsV1 = options.codex_interop.import && writeMemoryVersions().includes("v1")
   const codexImport = importsV1 && withMemoryVersion("v1", () => resolveCodexInterop(options.codex_interop)) !== null
-  if (importsV1 && !codexImport) warnings.push("Codex import is misconfigured.")
+  if (importsV1 && !codexImport) {
+    const reason = withMemoryVersion("v1", () => codexInteropBlockReason(options.codex_interop))
+    warnings.push(reason ? `Codex import disabled: ${reason}` : "Codex import is misconfigured.")
+  }
 
   // A `running` row this process does not own is either another opencode
   // instance's live job or an orphaned lease (e.g. a server restart killed the

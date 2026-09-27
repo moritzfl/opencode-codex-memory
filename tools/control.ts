@@ -8,7 +8,7 @@ import { estimateTokens } from "../src/token.js"
 import { assertMemoryRootSafe, readRegularFileNoFollow } from "../src/path-guard.js"
 import { isPhase2InFlight } from "../src/phase2.js"
 import { pluginOptions, getConfigWarnings } from "../src/options.js"
-import { codexInteropMtimes, resolveCodexInterop } from "../src/codex-interop.js"
+import { codexInteropBlockReason, codexInteropMtimes, resolveCodexInterop } from "../src/codex-interop.js"
 import { claudeImportStatus, resolveClaudeHome } from "../src/claude-import.js"
 import {
   formatDiagnosticLine,
@@ -104,14 +104,13 @@ function renderEffectiveConfig(): string[] {
     if (!writeMemoryVersions().includes("v1")) {
       lines.push("  codex_interop: disabled (handbook exchange requires the v1 writer)")
     } else if (!resolved) {
-      lines.push(
-        `  codex_interop: MISCONFIGURED — the Codex memory root overlaps the plugin memory root (${memoryRoot()}); interop is disabled`,
-      )
+      const reason = withMemoryVersion("v1", () => codexInteropBlockReason(ci))
+      lines.push(`  codex_interop: disabled — ${reason ?? "unresolved"}`)
     } else {
       const reachable = fs.existsSync(resolved.codexMemoryRoot)
       lines.push(
         `  codex_interop: import=${ci.import} export=${ci.export}`,
-        `    codex memories: ${resolved.codexMemoryRoot}${reachable ? "" : " (not found yet — nothing is imported/exported until Codex's memory feature creates it)"}`,
+        `    codex memories (${resolved.codexVersion}): ${resolved.codexMemoryRoot}${reachable ? "" : " (not found yet — nothing is imported/exported until Codex's memory feature creates it)"}`,
       )
       if (reachable) {
         const mt = withMemoryVersion("v1", () => codexInteropMtimes(resolved.codexMemoryRoot))
