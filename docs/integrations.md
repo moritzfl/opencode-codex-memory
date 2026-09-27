@@ -6,7 +6,7 @@ You do not need Codex CLI or Claude Code to use this plugin. If you also use
 them on the same machine, these optional integrations can reuse what they
 have learned. Both are off by default.
 
-| Integration | Direction | Supported memory writer |
+| Integration | Direction | This plugin's writer |
 |---|---|---|
 | Codex CLI sharing | Import, export, or both | **Memory V1 only** |
 | Claude Code import | Claude Code → this plugin | Memory V1 and Memory V2 |
@@ -40,11 +40,15 @@ Enable either direction or both:
 
 No changes to Codex's config are required. The plugin reads
 `$CODEX_HOME/config.toml` `[memories] version` and uses that store:
-`memories/` for Memory V1 (the default when the key is unset), or
-`memories_v2/` for Memory V2. It does not guess from which directory exists,
-and it does not merge profile, project, or session overrides. A leftover
-`memories/` handbook is ignored while Codex is on Memory V2. `dual_write`
-does not change the store: exchange follows the version Codex injects.
+`memories/` for Memory V1, or `memories_v2/` for Memory V2. An unset key is
+treated as Memory V1. It does not guess from which directory exists. A leftover
+`memories/` handbook is ignored when that file selects Memory V2. `dual_write`
+does not change the store.
+
+That file is not always the version Codex injects. A selected profile file
+(`--profile`), a trusted project config, or a `codex -c memories.version=...`
+override can point Codex at the other store. Those are not merged. If they
+disagree with `config.toml`, exchange follows the file, not the live session.
 
 Codex must already have created that workspace; the plugin does not bootstrap
 it. Codex's primary memory files are not rewritten in place. Export writes an
