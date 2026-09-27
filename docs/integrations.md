@@ -8,12 +8,12 @@ have learned. Both are off by default.
 
 | Integration | Direction | This plugin's writer |
 |---|---|---|
-| Codex CLI sharing | Import, export, or both | **Memory V1 only** |
+| Codex CLI sharing | Import, export, or both | Memory V1 and Memory V2 |
 | Claude Code import | Claude Code → this plugin | Memory V1 and Memory V2 |
 
-With dual-write enabled, Codex exchange runs through Memory V1 only;
-it does not transfer the handbook into Memory V2. Claude
-imports run for each active writer.
+With dual-write enabled, Codex exchange runs for each active writer.
+A Memory V2 writer folds the copies into its summary and does not create a
+handbook. Claude imports run for each active writer.
 
 Examples on this page are **plugin options**. Put them in the
 [options object in your config](configuration.md#where-to-put-options),
@@ -34,9 +34,12 @@ Enable either direction or both:
 ```
 
 - **Import:** during this plugin's consolidation, durable memory from Codex is
-  incorporated into the Memory V1 store with an origin tag.
-- **Export:** after successful Memory V1 consolidation, validated memory is
-  placed where Codex can merge it on its next consolidation pass.
+  copied into each active writer's workspace with instructions and an origin tag.
+  The consolidator folds those copies. The files themselves are not rewritten.
+- **Export:** after successful consolidation, that writer's validated memory is
+  copied where Codex can merge it on its next consolidation pass. A Memory V1
+  writer offers its handbook and summary. A Memory V2 writer offers its summary
+  only.
 
 No changes to Codex's config are required. The plugin reads
 `$CODEX_HOME/config.toml` `[memories] version` and uses that store:
@@ -54,12 +57,12 @@ Codex must already have created that workspace; the plugin does not bootstrap
 it. Codex's primary memory files are not rewritten in place. Export writes an
 extension under the selected store that Codex's consolidator can read.
 
-Memory V1 import copies `MEMORY.md` and `memory_summary.md`. Memory V2 import
-copies `memory_summary.md` only — that file is the memory, and there is no
+Codex Memory V1 copies are `MEMORY.md` and `memory_summary.md`. Codex Memory V2
+copies are `memory_summary.md` only — that file is the memory, and there is no
 handbook. Routes inside it that point at Codex rollout files are not copied
-and will not resolve here. Export still offers this plugin's Memory V1
-handbook. On a Memory V2 Codex store the instructions tell Codex to fold that
-into `memory_summary.md` and not to create `MEMORY.md`.
+and will not resolve here. Instructions tell a Memory V2 consolidator, on
+either side, to fold claims into `memory_summary.md` and not to create
+`MEMORY.md`.
 
 ### Codex options
 
@@ -67,17 +70,15 @@ All fields are inside `codex_interop`:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `import` | `false` | Bring Codex's selected memory store into this plugin's Memory V1 workspace. |
-| `export` | `false` | Offer this plugin's Memory V1 memory to that same Codex store. |
+| `import` | `false` | Bring Codex's selected memory store into each active writer. |
+| `export` | `false` | Offer each active writer's validated memory to that same Codex store. |
 | `codex_home` | `$CODEX_HOME`, otherwise `~/.codex` | Codex CLI's data location. |
 
 The exchange instructions use `[from codex]` / `[from opencode]` tags and tell
 each consolidator to skip re-importing the other side's content, limiting
 feedback loops. Overlapping Codex and plugin memory roots disable exchange.
 
-Check `memory_inspect` for the resolved paths and `codex_interop` status.
-With `version: "v2", dual_write: false`, it reports exchange as disabled
-because the Memory V1 writer is inactive.
+Check `memory_inspect` for each writer's resolved path and `codex_interop` status.
 
 ### Stop Codex sharing
 

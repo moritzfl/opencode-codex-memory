@@ -318,10 +318,10 @@ schema change.
 
 Two-way exchange of *consolidated* global memory:
 
-The handbook exchange applies only to the **Memory V1 writer**. With
-dual-write enabled it runs through that writer even if new sessions read
-Memory V2; with only the Memory V2 writer enabled it is disabled. Claude
-import below works with either memory writer.
+Exchange runs for each active writer. A Memory V2 writer receives the same
+byte copies under `memories_v2/extensions/` and is instructed to fold them
+into `memory_summary.md` rather than create a handbook. Dual-write runs the
+copy in both workspaces. Claude import below works the same way.
 
 - **Import** (`codex_interop.import`): inside each claimed phase-2 job —
   after the baseline, before the diff capture — Codex's consolidated
@@ -338,9 +338,10 @@ import below works with either memory writer.
 - **Export** (`codex_interop.export`): after a successful phase 2, our
   validated artifacts are copied into
   `<selected-root>/extensions/opencode_import/resources/opencode/` with an
-  instructions.md written for that store's consolidator. v2 instructions tell
-  Codex to fold the handbook into `memory_summary.md` and not to create
-  `MEMORY.md`. Strictly additive: never bootstraps Codex's workspace, never
+  instructions.md written for that store's consolidator. A Memory V2 writer
+  exports a valid summary only. Instructions tell a Memory V2 receiver to
+  fold claims into `memory_summary.md` and not to create `MEMORY.md`.
+  Strictly additive: never bootstraps Codex's workspace, never
   touches Codex's state DB — Codex discovers the files through its own
   workspace diff.
 - **Echo guard**: both instructions files require a provenance tag

@@ -44,7 +44,7 @@ the consolidation cooldown but still respects session eligibility.
 | `discovery` says `ok`, but `v2_discovery_source` is `observed` | Only this process's observed sessions were listed. Check `v2_discovery_warning` for the global discovery failure; the memory panel also reports it. |
 | Extraction errors mention rate limits or usage limits | Check `provider_capacity_backoff` and retry times. Capacity errors retry after about an hour when quota returns; `other_exhausted` indicates other exhausted failures. |
 | Consolidation never completes | Read `phase2_last_error` and agent health. Failed artifacts leave workspace changes for a later retry. |
-| Codex sharing stopped after switching memory versions | Codex exchange needs the Memory V1 writer. Memory V2-only learning disables it; see [Integrations](integrations.md). |
+| Codex sharing uses the wrong store | Exchange follows `$CODEX_HOME/config.toml` `memories.version`, not a `--profile` file, project config, or `codex -c` override. See [Integrations](integrations.md). |
 | Retrieval tools are missing, or the agent says they are not in this runtime | Check `use_memories` and `dedicated_tools`. On OpenCode 2 they are normal tools, not tools inside `execute`. Maintenance tools remain available. Restart the server after upgrading the plugin. |
 
 ## Check OpenCode's server

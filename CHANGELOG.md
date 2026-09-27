@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Codex memory exchange runs for each active writer. A Memory V2 writer
+  receives the same copies under its extensions folder and folds them into
+  the summary. It does not create a handbook. Export from Memory V2 offers
+  a valid summary only.
+
 ## [0.9.3] - 2026-09-27
 
 ### Fixed
