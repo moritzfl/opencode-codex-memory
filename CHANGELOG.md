@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Consolidation regression coverage for failed and interrupted host turns,
+  incomplete replies, tool continuations, and legitimate completed no-ops in
+  both memory versions. Investigation prompted by
+  [Tony-ooo's report in PR #6](https://github.com/moritzfl/opencode-codex-memory/pull/6).
+  Completion remains based on host lifecycle state, matching Codex, rather than
+  requiring artifact changes or a special no-op acknowledgement.
+
 ## [0.9.2] - 2026-09-26
 
 ### Fixed
