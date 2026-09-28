@@ -391,6 +391,13 @@ mappings:
       upstream is not emitted (no plugin telemetry backend). OpenCode helper
       permissions restrict each job to its own memory root even in dual mode;
       V1 uses session external_directory rules, V2 uses session deny-first rules.
+      DELIBERATE DIVERGENCE (OpenCode 2.0.18 FileAccess.resolve): in-tree targets
+      are asserted as session-relative resources, so V2 helper rules also allow
+      the posix-relative form of that one memory root, including helpers at or
+      inside it, with normalized parent escapes denied. external_directory
+      grants remain absolute. Codex instead rebinds the consolidator cwd and
+      managed sandbox to the memory root; these string rules adapt OpenCode's
+      permission API without changing global memory scope.
   - ours: src/workspace.ts
     theirs: codex-rs/memories/write/src/storage.rs
     note: >

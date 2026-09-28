@@ -203,7 +203,13 @@ differs by host:
 - **OpenCode2:** V2 agents are location-scoped, so helpers spawn in the
   active plugin location (`setSubSessionDirectory`). Session boundary is the
   project; path permissions scope `read`/`edit` + `external_directory` to the
-  memory workspace. `glob`/`grep` permissions match search patterns, so V2
+  memory workspace. OpenCode 2 asserts a session-relative resource when the
+  target is inside the session or project directory, so the helper session
+  also allows that posix-relative form of its one root. When the helper runs
+  at or inside the root, relative grants exclude normalized traversal above
+  that root and absolute paths outside it. `external_directory` grants remain
+  absolute. Memory remains global. `glob`/`grep` permissions match
+  search patterns, so V2
   wraps their built-in executors to validate paths against the helper's one
   session-granted memory root, defaulting relative searches to that root.
   Helper creation supplies session-scoped deny-first rules that narrow access
