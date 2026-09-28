@@ -555,13 +555,14 @@ export function buildV1ClientShim(): unknown {
           releasedSubSessions.delete(EXTRACT_STUB_SESSION_ID)
           return { data: { id: EXTRACT_STUB_SESSION_ID } }
         }
+        const directory = opts?.query?.directory ?? memoryRoot()
         const res = await (ctx().session as any).create({
           ...(opts?.body?.title ? { title: opts.body.title } : {}),
           ...(opts?.body?.metadata ? { metadata: opts.body.metadata } : {}),
           ...(opts?.body?.title === "codex-memory-consolidate"
-            ? { permissions: consolidationPermissions(memoryRoot()) }
+            ? { permissions: consolidationPermissions(memoryRoot(), directory) }
             : {}),
-          location: { directory: opts?.query?.directory ?? memoryRoot() },
+          location: { directory },
         })
         return { data: { id: und(res)?.id } }
       } catch (e) {

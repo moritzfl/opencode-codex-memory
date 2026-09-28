@@ -47,31 +47,58 @@ export function buildMemorizeAgent(): V2AgentDefinition {
     system: MEMORIZE_SYSTEM,
     permissions: [
       { action: "*", resource: "*", effect: "deny" },
-      // Memories live outside every project: without this grant the wildcard
-      // deny blocks consolidation from touching the memory workspace (same
-      // role as external_directory in the V1 definition).
+      // Absolute grants cover a memory root outside the session (same role as
+      // external_directory in the V1 definition). The helper session adds the
+      // session-relative form; see consolidationPermissions.
       ...writeMemoryVersions().flatMap((version) => workspacePermissions(memoryRoot(version))),
     ],
   }
 }
 
-/** Session rules run after agent rules: a concurrent helper gets one root only. */
-export function consolidationPermissions(root: string): V2AgentDefinition["permissions"] {
+/**
+ * Session rules run after agent rules: a concurrent helper gets one root only.
+ * `sessionDir` is the helper location. OpenCode 2 asserts a session-relative
+ * resource when the target is inside the session or project directory, so
+ * absolute grants alone miss and the leading wildcard deny blocks the global
+ * store. Pass the same directory the session is created in.
+ */
+export function consolidationPermissions(root: string, sessionDir?: string): V2AgentDefinition["permissions"] {
   return [
     { action: "*", resource: "*", effect: "deny" },
-    ...workspacePermissions(root),
+    ...workspacePermissions(root, sessionDir),
   ]
 }
 
-function workspacePermissions(root: string): V2AgentDefinition["permissions"] {
+function workspacePermissions(root: string, sessionDir?: string): V2AgentDefinition["permissions"] {
+  const absolute = [root, path.join(root, "*")]
   return [
-    ...["read", "edit", "external_directory"].flatMap((action) => [root, path.join(root, "*")].map((resource) => ({
+    ...sessionRelativePermissions(root, sessionDir),
+    ...["read", "edit", "external_directory"].flatMap((action) => absolute.map((resource) => ({
       action, resource, effect: "allow" as const,
     }))),
     // These actions check the search pattern, not a path. search-sandbox.ts
     // wraps the built-in executors to enforce this helper's single root.
     ...["glob", "grep"].map((action) => ({ action, resource: "*", effect: "allow" as const })),
   ]
+}
+
+/**
+ * FileAccess resolves and normalizes paths before permission evaluation.
+ * When the session is within the memory root, allow relative paths but deny
+ * absolute paths and traversal above that root. Absolute workspace grants run
+ * afterwards. external_directory always uses absolute resources.
+ */
+function sessionRelativePermissions(root: string, sessionDir?: string): V2AgentDefinition["permissions"] {
+  if (!sessionDir) return []
+  const rel = path.relative(sessionDir, root)
+  if (path.isAbsolute(rel)) return [] // Different Windows drives.
+  const posix = rel.split(path.sep).join("/")
+  const inside = !posix || posix.split("/").every((seg) => seg === "..")
+  const escape = posix ? `${posix}/..` : ".."
+  return ["read", "edit"].flatMap((action) => inside ? [
+    { action, resource: "*", effect: "allow" as const },
+    ...["/*", "?:/*", escape, `${escape}/*`].map((resource) => ({ action, resource, effect: "deny" as const })),
+  ] : [posix, `${posix}/*`].map((resource) => ({ action, resource, effect: "allow" as const })))
 }
 
 /**
