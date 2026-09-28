@@ -36,7 +36,9 @@ function fail(msg: string, tempDirs: string[]): never {
 }
 
 async function run(command: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" })
+  // Bun's implicit environment does not include process.env changes made
+  // after startup. Carry the test-root override into the installed probe.
+  const proc = Bun.spawn(command, { cwd, env: process.env, stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -129,24 +131,67 @@ async function main(): Promise<number> {
   // installed copy. Optional peers (V2 SDK, opentui) are intentionally absent,
   // so probe the entrypoints that need only runtime dependencies: the V1 entry
   // and the V2 tool adapter (whose static `zod` import is the exact
-  // regression). The V2 `/v2` entry and `/tui` need host-provided peers
-  // (covered by contract:v2).
+  // regression). Exercise hooks/assets and tool schemas too: successful
+  // imports alone cannot establish that the installed plugin works.
   const toolsModule = path.join(pluginDir, "dist", "src", "v2", "tools.js")
   if (!fs.existsSync(toolsModule)) fail("packed V2 tool adapter missing", tempDirs)
   const probe = `
+    const { default: assert } = await import("node:assert/strict");
+    assert.equal(process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT, ${JSON.stringify(testRoot)}, "probe must use the isolated memory root");
     const report = { ok: true, errors: [] };
     try {
       const v1 = (await import("opencode-codex-memory")).default;
-      if (typeof v1?.server !== "function") report.errors.push("V1 default.server missing");
-    } catch (e) { report.errors.push("V1 import: " + e.message); }
+      assert.equal(typeof v1?.server, "function");
+      assert.equal((await import("./server.js")).default, v1, "local server entry must match npm export");
+      const hooks = await v1.server({
+        client: { session: { list: async () => ({ data: [] }) }, mcp: { status: async () => ({ data: {} }) } },
+        directory: process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT,
+        worktree: process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT,
+        project: { id: "packed-smoke" },
+      });
+      try {
+        assert.equal(Object.keys(hooks.tool).length, 7);
+        const config = {};
+        await hooks.config(config);
+        assert.ok(config.agent?.memorize && config.agent?.["memorize-extract"], "packed agents missing");
+        const out = { system: [] };
+        await hooks["experimental.chat.system.transform"]({ sessionID: "ses_packed_v1", model: {} }, out);
+        assert.ok(out.system.join("\\n").includes("smoke memory"), "packed read-path template missing");
+        const read = await hooks.tool.memory_read.execute({ path: "memory_summary.md" }, { sessionID: "ses_packed_v1" });
+        assert.ok(read.output.includes("smoke memory"), "packed V1 read failed");
+      } finally { await hooks.dispose?.(); }
+      const tui = (await import("opencode-codex-memory/tui")).default;
+      assert.equal((await import("./tui.js")).default, tui, "local TUI entry must match npm export");
+      assert.equal(typeof tui.tui, "function");
+      assert.equal(typeof tui.setup, "function");
+      assert.equal(tui.server, undefined);
+      await tui.tui();
+    } catch (e) { report.errors.push("V1 hooks/assets/tui: " + e.message); }
     try {
-      const tools = await import(${JSON.stringify(toolsModule)});
-      if (typeof tools.buildV2Tools !== "function" || tools.buildV2Tools().length === 0) report.errors.push("V2 tools missing");
-    } catch (e) { report.errors.push("V2 tools (needs zod): " + e.message); }
+      const { buildV2Tools } = await import(${JSON.stringify(toolsModule)});
+      const { z } = await import("zod");
+      const tools = buildV2Tools();
+      assert.equal(tools.length, 6);
+      for (const tool of tools) {
+        assert.equal(tool.options.codemode, false);
+        assert.equal(z.toJSONSchema(tool.input).type, "object");
+      }
+      for (const [name, args, expected] of [
+        ["memory_read", { path: "memory_summary.md" }, "smoke memory"],
+        ["memory_search", { queries: ["smoke memory"] }, "smoke memory"],
+        ["memory_list", {}, "memory_summary.md"],
+      ]) {
+        const tool = tools.find((t) => t.name === name);
+        const result = await tool.execute(tool.input.parse(args), { sessionID: "ses_packed_v2", messageID: "msg_smoke", agent: "build" });
+        assert.ok(result.content.includes(expected), name + " returned unexpected content");
+        assert.deepEqual(result, JSON.parse(JSON.stringify(result)), name + " returned non-JSON metadata");
+      }
+    } catch (e) { report.errors.push("V2 schemas/tools: " + e.message); }
     report.ok = report.errors.length === 0;
     console.log(JSON.stringify(report));
   `
-  const probed = await run(["bun", "-e", probe], pluginDir)
+  const probed = await run([process.execPath, "-e", probe], pluginDir)
+  if (probed.code !== 0) fail(`installed-artifact probe exited ${probed.code}: ${probed.stderr.slice(-1000)}`, tempDirs)
   const line = probed.stdout.trim().split("\n").filter(Boolean).pop() ?? ""
   let result: { ok?: boolean; errors?: string[] } = {}
   try {
@@ -156,7 +201,7 @@ async function main(): Promise<number> {
   }
   if (result.ok !== true) fail(`installed artifact failed to load: ${(result.errors ?? []).join("; ")}`, tempDirs)
 
-  console.log(`smoke: OK — dev entry loads (${tools.length} tools, agents, templates) + packed artifact installs and loads V1 + V2 tools`)
+  console.log(`smoke: OK — dev entry loads (${tools.length} tools, agents, templates) + packed V1 hooks/assets/tui and V2 schemas/tools work`)
   return 0
 }
 
@@ -164,4 +209,3 @@ main().then(
   (code) => exit(code, tempDirs),
   (e) => fail(e instanceof Error ? e.message : String(e), tempDirs),
 )
-

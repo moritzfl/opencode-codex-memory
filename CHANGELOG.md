@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add conventional server and TUI entrypoints so OpenCode 2 loads the plugin
   when configured as a local package directory, including an installed tarball.
 
+### Tests
+
+- Exercise packed V1 hooks, assets, and TUI loading plus V2 tool schemas and
+  execution; verify real V2 host activation without optional SDK peers.
+- Require runtime dependencies except explicitly host-provided modules, preserve
+  the smoke subprocess's isolated memory root, and check probe exit status.
+
 ## [0.9.6] - 2026-09-28
 
 ### Fixed

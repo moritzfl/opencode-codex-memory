@@ -152,7 +152,6 @@ describe("v2 setup", () => {
   it("declares every bare specifier the runtime graph imports", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "..", "package.json"), "utf8")) as {
       dependencies?: Record<string, string>
-      optionalDependencies?: Record<string, string>
       peerDependencies?: Record<string, string>
     }
     const ts = require("typescript") as typeof import("typescript")
@@ -160,9 +159,8 @@ describe("v2 setup", () => {
     const builtins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)])
 
     // Only shipped sources: src/** and tools/** compile into dist/ and load in
-    // the plugin cache. tests/ and scripts/ are not published. preProcessFile
-    // reports real import/export/dynamic-import edges, ignoring strings and
-    // comments, so no hand-rolled regex can drift from the TS grammar.
+    // the plugin cache. Erase types first: type-only SDK imports need not be
+    // installed at runtime. Parse emitted imports instead of matching strings.
     const bare = new Set<string>()
     const walk = (dir: string): void => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -172,23 +170,41 @@ describe("v2 setup", () => {
           continue
         }
         if (!/\.tsx?$/.test(entry.name)) continue
-        const info = ts.preProcessFile(fs.readFileSync(full, "utf8"), true, true)
-        for (const ref of [...info.importedFiles, ...info.referencedFiles]) bare.add(ref.fileName)
+        const emitted = ts.transpileModule(fs.readFileSync(full, "utf8"), {
+          fileName: full,
+          compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.Preserve },
+        }).outputText
+        const info = ts.preProcessFile(emitted, true, true)
+        for (const ref of info.importedFiles) bare.add(ref.fileName)
       }
     }
     for (const root of ["src", "tools"]) walk(path.join(import.meta.dir, "..", root))
+    for (const entry of ["server.js", "tui.js"]) {
+      const source = fs.readFileSync(path.join(import.meta.dir, "..", entry), "utf8")
+      for (const ref of ts.preProcessFile(source, true, true).importedFiles) bare.add(ref.fileName)
+    }
 
-    const declared = { ...pkg.dependencies, ...pkg.optionalDependencies, ...pkg.peerDependencies }
+    // These exact specifiers are supplied by the V2 host. An arbitrary optional
+    // peer (the 0.9.5 failure) or optional dependency cannot satisfy this guard.
+    const hostProvided = new Set(["@opencode/plugin", "@opencode/plugin/tui", "@opentui/solid", "solid-js"])
     const packageName = (spec: string): string => {
       const parts = spec.split("/")
       return spec.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]!
     }
-    const undeclared = [...bare]
-      .filter((spec) => !spec.startsWith(".") && !spec.startsWith("file:") && !builtins.has(spec))
-      .map(packageName)
-      .filter((name) => !(name in declared))
+    const runtimePackages = [...new Set([...bare]
+      .filter((spec) => !spec.startsWith(".") && !spec.startsWith("file:") && !builtins.has(spec) && !hostProvided.has(spec))
+      .map(packageName))]
+    const missing = (dependencies: Record<string, string> = {}) => runtimePackages.filter((name) => !(name in dependencies))
 
-    expect(undeclared).toEqual([])
+    expect(missing(pkg.dependencies)).toEqual([])
+    for (const name of runtimePackages) {
+      const dependencies = { ...pkg.dependencies }
+      delete dependencies[name]
+      expect(missing(dependencies)).toContain(name)
+    }
+    for (const spec of [...bare].filter((spec) => hostProvided.has(spec))) {
+      expect(pkg.peerDependencies?.[packageName(spec)]).toBeDefined()
+    }
     // The specific regression: zod must be reachable without the optional peer.
     expect(bare.has("zod")).toBe(true)
     expect(pkg.dependencies?.zod).toBeDefined()
