@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-09-28
+
+### Fixed
+
+- OpenCode 2 consolidation no longer fails with `Permission denied: edit` when
+  the global memory home sits inside the session or project directory, such as
+  running OpenCode in the user home. Helper sessions now also allow the
+  session-relative form of their one memory root; `external_directory` stays
+  absolute and traversal above the root stays denied. Memory remains global.
+  Reported in
+  [#7](https://github.com/moritzfl/opencode-codex-memory/issues/7).
+
 ## [0.9.4] - 2026-09-27
 
 ### Changed
@@ -921,7 +933,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.1...v0.9.2
