@@ -5,12 +5,13 @@
  *
  * Checks:
  *   1. OpenCode 2 binary present; version ≥ floor (OPENCODE2_MIN_VERSION,
- *      default 2.0.0)
+ *      default 2.0.3)
  *   2. Live OpenAPI (/openapi.json via the background service): every
  *      operation the shim + setup depend on is present
  *   3. Built plugin dual-exports V1 server() and V2 setup()
  *   4. V2 memorize agent satisfies the deny-first allowlist shape
- *   5. V2 tool registration yields the expected 7/3 tool sets
+ *   5. V2 tool registration yields the expected tools (reset stays panel-only)
+ *   6. Packed artifact loads in isolated consumers and boots on the real V2 host
  *
  * Exit 0 = aligned. Exit 1 = contract break. Exit 2 = setup error.
  */
@@ -18,7 +19,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { $ } from "bun"
-import { api, basicAuth, createSandbox, startServe, type ServeHandle } from "./lib/harness.js"
+import { api, basicAuth, createSandbox, createSession, startServe, tail, waitFor, type ServeHandle } from "./lib/harness.js"
 import { installFilePermissionProbe, probeFilePermissions } from "./lib/v2-file-permission-probe.js"
 
 const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.3"
@@ -40,7 +41,7 @@ function failSetup(msg: string): never {
 }
 
 async function runQuiet(command: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" })
+  const proc = Bun.spawn(command, { cwd, env: process.env, stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -282,7 +283,10 @@ async function main(): Promise<void> {
         // satisfy a missing runtime dependency. The published 0.9.5 loaded
         // here only because @opencode/plugin's own zod hoisted; nested makes
         // that masking impossible.
-        const v1Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v1-"))
+        // Keep both consumers under the finally-cleaned root, including when
+        // spawning npm or a probe throws.
+        const v1Install = path.join(testRoot, "v1-consumer")
+        fs.mkdirSync(v1Install)
         const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@types/node"], v1Install)
         note(v1.code === 0, `packed artifact installs for V1${v1.code === 0 ? "" : `: ${v1.stderr.slice(-1000)}`}`)
         if (v1.code === 0) {
@@ -308,10 +312,46 @@ async function main(): Promise<void> {
           )
           const typecheckOutput = typecheck.stderr || typecheck.stdout
           note(typecheck.code === 0, `packed V1 declarations typecheck without V2 peers${typecheck.code === 0 ? "" : `: ${typecheckOutput.slice(-1000)}`}`)
+
+          // The actual cache does not install the V2 SDK peer. Boot that exact
+          // package on V2: importing /v2 with a manually installed peer cannot
+          // prove the host loader invokes the dual entrypoint's lazy setup.
+          const packedSandbox = createSandbox({ bare: true })
+          let packedServe: ServeHandle | undefined
+          try {
+            const configPath = path.join(packedSandbox.configHome, "opencode", "opencode.json")
+            const config = JSON.parse(fs.readFileSync(configPath, "utf8"))
+            config.plugins = [{
+              package: path.join(v1Install, "node_modules", "opencode-codex-memory"),
+              options: { test: true, generate_memories: false },
+            }]
+            fs.writeFileSync(configPath, JSON.stringify(config))
+            packedServe = await startServe(packedSandbox, { bin: "opencode2" })
+            // RPC itself does not activate a location's plugins on every host.
+            await createSession(packedServe, packedSandbox, "packed-plugin-contract")
+            await waitFor("packed plugin activation", async () => {
+              const plugins = await api(packedServe!, packedSandbox, "GET", "/api/plugin", undefined, { "location[directory]": packedSandbox.project })
+              const plugin = (plugins.json as { data?: { id: string; state: { status: string }; features?: { tui?: boolean } }[] })?.data
+                ?.find((plugin) => plugin.id === "opencode-codex-memory" || plugin.state.status === "failed")
+              if (plugin?.state.status === "failed") throw new Error(`packed plugin failed: ${JSON.stringify(plugin)}`)
+              if (plugin?.state.status === "active") note(plugin.features?.tui === true, "packed local TUI entry discovered by V2")
+              return plugin?.state.status === "active"
+            }, { timeoutMs: 30_000, intervalMs: 200 })
+            const status = await api(packedServe, packedSandbox, "POST", "/api/rpc/opencode-codex-memory/status", {
+              input: {},
+            }, { "location[directory]": packedSandbox.project })
+            const state = (status.json as { output?: { activity?: string; memoryRoot?: string } })?.output
+            note(status.status === 200 && state?.activity === "read_only" && state.memoryRoot === packedSandbox.memories,
+              `packed plugin boots on V2 without SDK peers and serves isolated status${status.status === 200 ? "" : `: ${status.text.slice(-1000)}\n${tail(packedServe.logPath, 20)}`}`)
+          } finally {
+            await packedServe?.stop()
+            packedSandbox.cleanup()
+          }
         }
         fs.rmSync(v1Install, { recursive: true, force: true })
 
-        const v2Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v2-"))
+        const v2Install = path.join(testRoot, "v2-consumer")
+        fs.mkdirSync(v2Install)
         const v2 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@opencode/plugin@2.0.3"], v2Install)
         note(v2.code === 0, `packed artifact installs for V2${v2.code === 0 ? "" : `: ${v2.stderr.slice(-1000)}`}`)
         if (v2.code === 0) {

@@ -28,6 +28,8 @@
   },
   "files": [
     "dist",
+    "server.js",
+    "tui.js",
     "opencode.json",
     "NOTICE"
   ],

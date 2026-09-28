@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Add conventional server and TUI entrypoints so OpenCode 2 loads the plugin
+  when configured as a local package directory, including an installed tarball.
+
 ## [0.9.6] - 2026-09-28
 
 ### Fixed
