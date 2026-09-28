@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-09-28
+
+### Fixed
+
+- Install `zod` with the plugin so V1 tool definitions and V2 tool adapters load
+  in a standalone OpenCode plugin cache. `0.9.5` declared `zod` as an optional
+  peer that the plugin cache never installs, so loading it failed.
+
 ## [0.9.5] - 2026-09-28
 
 ### Fixed
@@ -18,8 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absolute and traversal above the root stays denied. Memory remains global.
   Reported in
   [#7](https://github.com/moritzfl/opencode-codex-memory/issues/7).
-- Install `zod` with the plugin so V1 tool definitions and V2 tool adapters load
-  in a standalone OpenCode plugin cache.
 
 ## [0.9.4] - 2026-09-27
 
@@ -935,7 +941,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.2...v0.9.3
