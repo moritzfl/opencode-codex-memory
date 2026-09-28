@@ -141,6 +141,59 @@ describe("v2 setup", () => {
     expect(pkg.exports?.["./tui"]?.import).toBe("./dist/src/tui.js")
   })
 
+  /**
+   * Regression guard for the shipped 0.9.5: zod was an optional peer, and the
+   * plugin cache (`~/.cache/opencode/packages/<spec>/`, a bare `npm install`)
+   * never installs optional peers. `dist/src/v2/tools.js` statically imports
+   * zod, so V2 setup died with ERR_MODULE_NOT_FOUND. Every bare specifier the
+   * shipped runtime graph imports must be a declared dependency (or a Node
+   * builtin carried by the host runtime).
+   */
+  it("declares every bare specifier the runtime graph imports", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "..", "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>
+      optionalDependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+    }
+    const ts = require("typescript") as typeof import("typescript")
+    const { builtinModules } = require("node:module") as { builtinModules: string[] }
+    const builtins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)])
+
+    // Only shipped sources: src/** and tools/** compile into dist/ and load in
+    // the plugin cache. tests/ and scripts/ are not published. preProcessFile
+    // reports real import/export/dynamic-import edges, ignoring strings and
+    // comments, so no hand-rolled regex can drift from the TS grammar.
+    const bare = new Set<string>()
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          walk(full)
+          continue
+        }
+        if (!/\.tsx?$/.test(entry.name)) continue
+        const info = ts.preProcessFile(fs.readFileSync(full, "utf8"), true, true)
+        for (const ref of [...info.importedFiles, ...info.referencedFiles]) bare.add(ref.fileName)
+      }
+    }
+    for (const root of ["src", "tools"]) walk(path.join(import.meta.dir, "..", root))
+
+    const declared = { ...pkg.dependencies, ...pkg.optionalDependencies, ...pkg.peerDependencies }
+    const packageName = (spec: string): string => {
+      const parts = spec.split("/")
+      return spec.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]!
+    }
+    const undeclared = [...bare]
+      .filter((spec) => !spec.startsWith(".") && !spec.startsWith("file:") && !builtins.has(spec))
+      .map(packageName)
+      .filter((name) => !(name in declared))
+
+    expect(undeclared).toEqual([])
+    // The specific regression: zod must be reachable without the optional peer.
+    expect(bare.has("zod")).toBe(true)
+    expect(pkg.dependencies?.zod).toBeDefined()
+  })
+
   it("serves read-only status with effective options without starting memory jobs", async () => {
     const f = fakeCtx({
       generate_memories: false,

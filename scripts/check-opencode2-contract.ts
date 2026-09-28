@@ -277,8 +277,13 @@ async function main(): Promise<void> {
       }
       note(Boolean(tarball && fs.existsSync(tarball)), "packed artifact exists")
       if (tarball && fs.existsSync(tarball)) {
+        // `--install-strategy=nested` mirrors an isolated plugin cache: a
+        // transitive/peer dependency cannot hoist to the root and silently
+        // satisfy a missing runtime dependency. The published 0.9.5 loaded
+        // here only because @opencode/plugin's own zod hoisted; nested makes
+        // that masking impossible.
         const v1Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v1-"))
-        const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball, "@types/node"], v1Install)
+        const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@types/node"], v1Install)
         note(v1.code === 0, `packed artifact installs for V1${v1.code === 0 ? "" : `: ${v1.stderr.slice(-1000)}`}`)
         if (v1.code === 0) {
           const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) }).then(() => import('opencode-codex-memory/tui')).then(async (m) => { if (typeof m.default?.tui !== 'function' || typeof m.default?.setup !== 'function' || typeof m.default?.server === 'function') process.exit(1); await m.default.tui() })"], v1Install)
@@ -307,11 +312,19 @@ async function main(): Promise<void> {
         fs.rmSync(v1Install, { recursive: true, force: true })
 
         const v2Install = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-contract2-v2-"))
-        const v2 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", tarball, "@opencode/plugin@2.0.3"], v2Install)
+        const v2 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@opencode/plugin@2.0.3"], v2Install)
         note(v2.code === 0, `packed artifact installs for V2${v2.code === 0 ? "" : `: ${v2.stderr.slice(-1000)}`}`)
         if (v2.code === 0) {
+          // zod is a static import of dist/src/v2/tools.js. Assert it resolves
+          // from the plugin's own directory, not via a hoisted copy.
+          const reachable = await runQuiet(
+            [process.execPath, "--input-type=module", "-e", "import('zod').then(() => process.exit(0)).catch(() => process.exit(1))"],
+            path.join(v2Install, "node_modules", "opencode-codex-memory"),
+          )
+          note(reachable.code === 0, "zod resolves from the installed plugin directory (no hoisted peer)")
+
           const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory/v2').then((m) => { if (typeof m.default?.setup !== 'function') process.exit(1) })"], v2Install)
-          note(loaded.code === 0, "packed V2 artifact loads with the V2 peer")
+          note(loaded.code === 0, `packed V2 artifact loads with the V2 peer${loaded.code === 0 ? "" : `: ${(loaded.stderr || loaded.stdout).slice(-1000)}`}`)
         }
         fs.rmSync(v2Install, { recursive: true, force: true })
       }
