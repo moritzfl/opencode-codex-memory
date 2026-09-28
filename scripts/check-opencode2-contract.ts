@@ -19,6 +19,7 @@ import os from "os"
 import path from "path"
 import { $ } from "bun"
 import { api, basicAuth, createSandbox, startServe, type ServeHandle } from "./lib/harness.js"
+import { installFilePermissionProbe, probeFilePermissions } from "./lib/v2-file-permission-probe.js"
 
 const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.3"
 
@@ -101,6 +102,7 @@ async function main(): Promise<void> {
   // --- OpenAPI from an isolated host, using its own sandbox auth ---
   let doc: { paths?: Record<string, Record<string, { operationId?: string }>> }
   const sandbox = createSandbox({ bare: true })
+  installFilePermissionProbe(sandbox)
   let serve: ServeHandle | undefined
   try {
     serve = await startServe(sandbox, { bin: "opencode2" })
@@ -141,6 +143,49 @@ async function main(): Promise<void> {
         const checked = await api(serve, sandbox, "POST", `/api/session/${id}/permission`, { action, resources: [resource] })
         const effect = (checked.json as { data?: { effect?: string } })?.data?.effect
         note(effect === expected, `${version} helper ${action}: ${expected} ${resource}`)
+      }
+      // FileAccess.resolve asserts this form when the session directory contains
+      // the memory root. Absolute-only grants deny it.
+      const parent = path.dirname(own)
+      const nested = await api(serve, sandbox, "POST", "/api/session", {
+        title: `contract-memory-nested-${version}`,
+        location: { directory: parent },
+        permissions: consolidationPermissions(own, parent),
+      }, { directory: parent })
+      const nestedId = (nested.json as { data?: { id?: string } })?.data?.id
+      if (!nestedId) throw new Error(`nested sandbox session create HTTP ${nested.status}`)
+      const relRoot = path.basename(own)
+      for (const [action, resource, expected] of [
+        ["edit", `${relRoot}/memory_summary.md`, "allow"],
+        ["edit", `${relRoot}/rollout_summaries/x.md`, "allow"],
+        ["read", relRoot, "allow"],
+        ["edit", "README.md", "deny"],
+        ["edit", `${path.basename(other)}/memory_summary.md`, "deny"],
+      ] as const) {
+        const checked = await api(serve, sandbox, "POST", `/api/session/${nestedId}/permission`, { action, resources: [resource] }, { directory: parent })
+        const effect = (checked.json as { data?: { effect?: string } })?.data?.effect
+        note(effect === expected, `${version} nested helper ${action}: ${expected} ${resource}`)
+      }
+      for (const directory of [parent, own, path.join(own, "rollout_summaries")]) {
+        fs.mkdirSync(directory, { recursive: true })
+        const created = await api(serve, sandbox, "POST", "/api/session", {
+          title: "native-file-permissions", location: { directory },
+          permissions: consolidationPermissions(own, directory),
+        }, { directory })
+        const sessionID = (created.json as { data?: { id?: string } })?.data?.id
+        if (!sessionID) throw new Error(created.text)
+        const target = path.join(own, "probe.md")
+        const outside = path.join(other, "probe.md")
+        fs.mkdirSync(other, { recursive: true })
+        fs.writeFileSync(outside, "outside")
+        const results = await probeFilePermissions(serve, sandbox, sessionID, directory, [
+          { tool: "write", input: { path: target, content: "inside" } },
+          { tool: "read", input: { path: target } },
+          { tool: "write", input: { path: outside, content: "forbidden" } },
+          { tool: "read", input: { path: outside } },
+        ])
+        note(results[0]?.ok === true && results[1]?.ok === true, `native memory write/read from ${directory}: ${JSON.stringify(results)}`)
+        note(results[2]?.ok === false && results[3]?.ok === false && fs.readFileSync(outside, "utf8") === "outside", "native tools deny sibling memory root")
       }
     }
   } catch (e) {

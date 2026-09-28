@@ -247,11 +247,30 @@ describe("V1 client shim", () => {
     for (const version of ["v1", "v2"] as const) {
       const permissions = rules.find((row) => row.metadata.version === version).permissions
       expect(permissions[0]).toEqual({ action: "*", resource: "*", effect: "deny" })
-      expect(permissions.filter((rule: any) => rule.action === "read").map((rule: any) => rule.resource)).toEqual([
+      expect(permissions.filter((rule: any) => rule.action === "external_directory").map((rule: any) => rule.resource)).toEqual([
         memoryRoot(version), path.join(memoryRoot(version), "*"),
       ])
       expect(permissions.find((rule: any) => rule.action === "grep")).toMatchObject({ resource: "*", effect: "allow" })
     }
+  })
+
+  it("grants the session-relative memory root for a helper directory that contains it", async () => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx)
+    const client = buildV1ClientShim() as any
+    const root = memoryRoot()
+    const sessionDir = path.dirname(root)
+    await client.session.create({
+      query: { directory: sessionDir },
+      body: { title: "codex-memory-consolidate" },
+    })
+    const created = calls.find((call) => call.name === "create")?.args as any
+    expect(created.location).toEqual({ directory: sessionDir })
+    const rel = path.basename(root)
+    expect(created.permissions.filter((rule: any) => rule.action === "edit").map((rule: any) => rule.resource)).toEqual([
+      rel, `${rel}/*`, root, path.join(root, "*"),
+    ])
+    expect(created.permissions.some((rule: any) => rule.action === "edit" && rule.resource === "*")).toBe(false)
   })
 
   it("accepts only the registered service owned by this host process", async () => {

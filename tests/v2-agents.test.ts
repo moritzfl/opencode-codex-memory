@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "bun:test"
 import path from "path"
-import { buildMemorizeAgent, buildMemorizeExtractAgent, ensureV2Agents, toV1AgentDefinition, MEMORIZE_SYSTEM, MEMORIZE_EXTRACT_SYSTEM } from "../src/v2/agents.js"
+import { buildMemorizeAgent, buildMemorizeExtractAgent, consolidationPermissions, ensureV2Agents, toV1AgentDefinition, MEMORIZE_SYSTEM, MEMORIZE_EXTRACT_SYSTEM } from "../src/v2/agents.js"
 import { memoryRoot } from "../src/paths.js"
 import { getAgentHealth, resetAgentHealth } from "../src/agent-health.js"
 import { resetPluginOptions } from "../src/options.js"
@@ -77,6 +77,58 @@ describe("v2 agent definitions", () => {
     expect(allows.has("write")).toBe(false)
     expect(allows.has("shell")).toBe(false)
     expect(allows.has("subagent")).toBe(false)
+  })
+
+  it("grants the session-relative memory root without opening the project", () => {
+    const root = path.join("/home/user", ".local", "share", "opencode", "memories")
+    const rules = consolidationPermissions(root, "/home/user")
+    const edit = rules.filter((r) => r.action === "edit").map((r) => r.resource)
+    expect(edit).toEqual([
+      ".local/share/opencode/memories",
+      ".local/share/opencode/memories/*",
+      root,
+      path.join(root, "*"),
+    ])
+    expect(edit).not.toContain("*")
+    expect(edit).not.toContain("README.md")
+    expect(rules.filter((r) => r.action === "read").map((r) => r.resource)).toEqual(edit)
+    expect(rules.filter((r) => r.action === "external_directory").map((r) => r.resource)).toEqual([root, path.join(root, "*")])
+  })
+
+  it("grants a specific ../ prefix when the session does not contain the root", () => {
+    const root = "/data/opencode/memories"
+    const sessionDir = "/home/user/project"
+    const posix = path.relative(sessionDir, root).split(path.sep).join("/")
+    const edit = consolidationPermissions(root, sessionDir)
+      .filter((r) => r.action === "edit")
+      .map((r) => r.resource)
+    expect(posix.startsWith("../")).toBe(true)
+    expect(edit).toContain(posix)
+    expect(edit).toContain(`${posix}/*`)
+    expect(edit).not.toContain("../*")
+    expect(edit).not.toContain("*")
+  })
+
+  it.each(["", "rollout_summaries", "skills/nested"])("bounds relative access from a helper inside memory: %s", (suffix) => {
+    const root = path.resolve("/home/user/.local/share/opencode/memories")
+    const directory = path.join(root, suffix)
+    const rules = consolidationPermissions(root, directory)
+    // Host-style anchored wildcard matching; resources have already been normalized.
+    const matches = (pattern: string, value: string) => new RegExp("^" + pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".") + "$", "s").test(value)
+    const effect = (action: string, resource: string) => rules.filter((r) =>
+      matches(r.action, action) && matches(r.resource.replaceAll("\\", "/"), resource.replaceAll("\\", "/")),
+    ).at(-1)?.effect
+    for (const action of ["read", "edit"]) {
+      expect(effect(action, "local.md")).toBe("allow")
+      expect(effect(action, path.relative(directory, path.join(root, "memory_summary.md")))).toBe("allow")
+      expect(effect(action, path.relative(directory, path.dirname(root)))).toBe("deny")
+      expect(effect(action, path.relative(directory, path.join(path.dirname(root), "memories_v2/file.md")))).toBe("deny")
+      expect(effect(action, "/outside/file.md")).toBe("deny")
+      expect(effect(action, "C:/outside/file.md")).toBe("deny")
+      expect(effect(action, path.join(root, "file.md"))).toBe("allow")
+    }
+    expect(effect("external_directory", "*")).toBe("deny")
   })
 
   it("built memorize agent adds the memory-root external_directory grant", () => {
