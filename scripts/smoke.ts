@@ -107,7 +107,9 @@ async function main(): Promise<number> {
   await hooks.dispose?.()
 
   // --- Phase 2: real-world install flow ------------------------------------
-  const packed = await run(["npm", "pack", "--ignore-scripts", "--json", "--pack-destination", stage], root)
+  // An outer `npm pack --dry-run` exports npm_config_dry_run to prepack.
+  // The smoke's temporary artifact and consumer must still be real.
+  const packed = await run(["npm", "pack", "--dry-run=false", "--ignore-scripts", "--json", "--pack-destination", stage], root)
   if (packed.code !== 0) fail(`npm pack failed: ${packed.stderr.slice(-500)}`, tempDirs)
   const meta = JSON.parse(packed.stdout) as Array<{ filename?: string }>
   const tarball = path.join(stage, meta[0]?.filename ?? "")
@@ -121,7 +123,7 @@ async function main(): Promise<number> {
     path.join(consumer, "package.json"),
     JSON.stringify({ name: "smoke-consumer", private: true, type: "module" }, null, 2),
   )
-  const install = await run(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball], consumer)
+  const install = await run(["npm", "install", "--dry-run=false", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball], consumer)
   if (install.code !== 0) fail(`npm install of packed artifact failed: ${install.stderr.slice(-1000)}`, tempDirs)
 
   const pluginDir = path.join(consumer, "node_modules", "opencode-codex-memory")
