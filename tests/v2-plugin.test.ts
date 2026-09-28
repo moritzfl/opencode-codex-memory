@@ -123,7 +123,7 @@ afterEach(() => {
 })
 
 describe("v2 setup", () => {
-  it("publishes the V2 SDK as an optional peer at the package boundary", () => {
+  it("publishes zod as a runtime dependency and the V2 SDK as an optional peer", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "..", "package.json"), "utf8")) as {
       dependencies?: Record<string, string>
       peerDependencies?: Record<string, string>
@@ -132,9 +132,8 @@ describe("v2 setup", () => {
     }
     expect(pkg.dependencies?.["@opencode/plugin"]).toBeUndefined()
     expect(pkg.peerDependencies?.["@opencode/plugin"]).toBe(">=2.0.3")
-    expect(pkg.dependencies?.zod).toBeUndefined()
-    expect(pkg.peerDependencies?.zod).toBe(">=4")
-    expect(pkg.peerDependenciesMeta?.zod?.optional).toBe(true)
+    expect(pkg.dependencies?.zod).toBe("4.1.8")
+    expect(pkg.peerDependencies?.zod).toBeUndefined()
     expect(pkg.peerDependenciesMeta?.["@opencode/plugin"]?.optional).toBe(true)
     expect(pkg.exports?.["."]?.import).toBe("./dist/src/index.js")
     expect(pkg.exports?.["./server"]?.import).toBe("./dist/src/index.js")

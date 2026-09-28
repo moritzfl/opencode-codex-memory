@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absolute and traversal above the root stays denied. Memory remains global.
   Reported in
   [#7](https://github.com/moritzfl/opencode-codex-memory/issues/7).
+- Install `zod` with the plugin so V1 tool definitions and V2 tool adapters load
+  in a standalone OpenCode plugin cache.
 
 ## [0.9.4] - 2026-09-27
 

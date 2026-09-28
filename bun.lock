@@ -10,6 +10,7 @@
         "diff": "^9.0.0",
         "isomorphic-git": "^1.38.6",
         "xdg-basedir": "^5.1.0",
+        "zod": "4.1.8",
       },
       "devDependencies": {
         "@opencode/plugin": "2.0.3",
@@ -19,7 +20,6 @@
         "@types/bun": "^1.1.0",
         "solid-js": "1.9.15",
         "typescript": "^5.5.0",
-        "zod": "4.1.8",
       },
       "peerDependencies": {
         "@opencode/client": ">=2.0.3",
@@ -27,7 +27,6 @@
         "@opentui/core": ">=0.5.10",
         "@opentui/solid": ">=0.5.10",
         "solid-js": ">=1.9.0",
-        "zod": ">=4",
       },
       "optionalPeers": [
         "@opencode/client",
@@ -35,7 +34,6 @@
         "@opentui/core",
         "@opentui/solid",
         "solid-js",
-        "zod",
       ],
     },
   },
