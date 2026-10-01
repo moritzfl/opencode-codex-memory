@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-10-01
+
 ### Fixed
 
 - Avoid false degraded consolidator health warnings when dual-write grants both
@@ -965,7 +967,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.7...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.8...HEAD
+[0.9.8]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.4...v0.9.5
