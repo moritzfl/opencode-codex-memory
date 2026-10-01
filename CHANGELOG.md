@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Avoid false degraded consolidator health warnings when dual-write grants both
+  memory workspaces, while still rejecting unrelated external-directory grants.
+
 ## [0.9.7] - 2026-09-28
 
 ### Fixed

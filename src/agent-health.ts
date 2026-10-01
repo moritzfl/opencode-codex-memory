@@ -1,6 +1,7 @@
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
+import { writeMemoryVersions } from "./memory-version.js"
 
 const AGENT_NAMES = ["memorize", "memorize-extract"] as const
 type AgentName = (typeof AGENT_NAMES)[number]
@@ -90,13 +91,16 @@ function permissionIssues(name: AgentName, definition: unknown): string[] {
 
   if (name === "memorize") {
     const external = asRecord(permission.external_directory)
-    const expectedPath = path.join(memoryRoot(), "*")
-    if (external?.[expectedPath] !== "allow") {
-      issues.push(`consolidator must allow external_directory '${expectedPath}'`)
+    // Agent grants cover all writers; helper-session rules narrow each job to one root.
+    const expectedPaths = new Set(writeMemoryVersions().map((version) => path.join(memoryRoot(version), "*")))
+    for (const expectedPath of expectedPaths) {
+      if (external?.[expectedPath] !== "allow") {
+        issues.push(`consolidator must allow external_directory '${expectedPath}'`)
+      }
     }
     if (external) {
       for (const [grantedPath, action] of Object.entries(external)) {
-        if (grantedPath === expectedPath) continue
+        if (expectedPaths.has(grantedPath)) continue
         if (hasNonDenyAction(action)) {
           issues.push(`consolidator must deny extra external_directory '${grantedPath}'`)
         }

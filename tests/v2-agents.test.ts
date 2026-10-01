@@ -148,6 +148,23 @@ describe("v2 agent definitions", () => {
 })
 
 describe("ensureV2Agents", () => {
+  it.each([["v1", false], ["v1", true], ["v2", false], ["v2", true]] as const)(
+    "records healthy shipped agents with version=%s dual_write=%j",
+    async (version, dual_write) => {
+      applyPluginOptions({ version, dual_write })
+      const f = fakeAgentCtx()
+      await ensureV2Agents(f.ctx as any)
+      const grants = f.updates[0].applied.permissions as { action: string; resource: string; effect: string }[]
+      expect(grants.filter((rule) => rule.action === "external_directory" && rule.resource.endsWith("*"))).toEqual(
+        (dual_write ? ["v1", "v2"] as const : [version]).map((writer) => ({
+          action: "external_directory", resource: path.join(memoryRoot(writer), "*"), effect: "allow",
+        })),
+      )
+      expect(getAgentHealth().agents.memorize).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+      expect(getAgentHealth().agents["memorize-extract"]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+    },
+  )
+
   it("creates both agents when absent and records shipped health", async () => {
     const f = fakeAgentCtx()
     await ensureV2Agents(f.ctx as any)

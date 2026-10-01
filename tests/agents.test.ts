@@ -83,6 +83,82 @@ describe("agent auto-registration", () => {
     }
   })
 
+  it.each([["v1", false], ["v1", true], ["v2", false], ["v2", true]] as const)(
+    "reports healthy shipped agents with version=%s dual_write=%j",
+    (version, dual_write) => {
+      const { injectAgentDefinitions, applyPluginOptions } = require("../src/index.js")
+      const { getAgentHealth, resetAgentHealth } = require("../src/agent-health.js")
+      const { memoryRoot } = require("../src/paths.js")
+      try {
+        applyPluginOptions({ version, dual_write })
+        const config: { agent?: Record<string, any> } = {}
+        injectAgentDefinitions(config)
+        expect(config.agent!["memorize"].permission.external_directory).toEqual(Object.fromEntries(
+          (dual_write ? ["v1", "v2"] : [version]).map((writer) => [path.join(memoryRoot(writer), "*"), "allow"]),
+        ))
+        injectAgentDefinitions(config)
+        for (const name of ["memorize", "memorize-extract"]) {
+          expect(getAgentHealth().agents[name]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+        }
+      } finally {
+        applyPluginOptions({})
+        resetAgentHealth()
+      }
+    },
+  )
+
+  it.each(["v1", "v2"] as const)("requires the %s external-directory grant when dual-writing", (writer) => {
+    const { injectAgentDefinitions, applyPluginOptions } = require("../src/index.js")
+    const { getAgentHealth, recordAgentConfig, resetAgentHealth, loadBundledAgentDefinitions } = require("../src/agent-health.js")
+    const { memoryRoot } = require("../src/paths.js")
+    try {
+      applyPluginOptions({ dual_write: true })
+      const config: { agent?: Record<string, any> } = {}
+      injectAgentDefinitions(config)
+      const missingPath = path.join(memoryRoot(writer), "*")
+      delete config.agent!["memorize"].permission.external_directory[missingPath]
+      recordAgentConfig(config, true, loadBundledAgentDefinitions())
+      expect(getAgentHealth().agents.memorize).toMatchObject({
+        healthy: false,
+        issues: [`consolidator must allow external_directory '${missingPath}'`],
+      })
+    } finally {
+      applyPluginOptions({})
+      resetAgentHealth()
+    }
+  })
+
+  it.each([["v1", false], ["v1", true], ["v2", false], ["v2", true]] as const)(
+    "rejects only non-denied extra grants with version=%s dual_write=%j",
+    (version, dual_write) => {
+      const { injectAgentDefinitions, applyPluginOptions } = require("../src/index.js")
+      const { getAgentHealth, recordAgentConfig, resetAgentHealth, loadBundledAgentDefinitions } = require("../src/agent-health.js")
+      const { memoryRoot } = require("../src/paths.js")
+      try {
+        applyPluginOptions({ version, dual_write })
+        const config: { agent?: Record<string, any> } = {}
+        injectAgentDefinitions(config)
+        const external = config.agent!["memorize"].permission.external_directory
+        const extras = [path.join(path.dirname(memoryRoot()), "unrelated", "*")]
+        if (!dual_write) extras.push(path.join(memoryRoot(version === "v1" ? "v2" : "v1"), "*"))
+        for (const extraPath of extras) {
+          for (const action of ["allow", "ask", "deny"]) {
+            external[extraPath] = action
+            recordAgentConfig(config, true, loadBundledAgentDefinitions())
+            expect(getAgentHealth().agents.memorize).toMatchObject({
+              healthy: action === "deny",
+              issues: action === "deny" ? [] : [`consolidator must deny extra external_directory '${extraPath}'`],
+            })
+          }
+          delete external[extraPath]
+        }
+      } finally {
+        applyPluginOptions({})
+        resetAgentHealth()
+      }
+    },
+  )
+
   it("leaves user-defined agents of the same name untouched", () => {
     const { injectAgentDefinitions } = require("../src/index.js")
     const userDef = { mode: "subagent", model: "my/model", prompt: "custom" }
