@@ -17,7 +17,7 @@
 
 # codex commit this map was last verified against.
 codex_ref: 0a76a2520f45af68b7a5386688a9714af0a3ccd2
-codex_ref_date: 2026-09-30
+codex_ref_date: 2026-10-01
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -403,6 +403,8 @@ mappings:
     note: >
       rebuild raw_memories, write rollout summaries, prune extension resources,
       validate_consolidation_artifacts (also codex workspace.rs).
+      V2 summary validation keeps Codex's exact predicate; the plugin additionally
+      reports content-free header, heading, and UTF-8 byte-limit failure reasons.
       DIVERGENCES: raw_memories.md entries are truncated at 10k chars each
       (codex: unbounded; guards the consolidation prompt against giant
       extractions); rollout summary headers add usage_count and drop

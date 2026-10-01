@@ -99,11 +99,25 @@ export function ensureLayout(): void {
  */
 const V2_SUMMARY_HEADINGS = ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"] as const
 
-export function isValidV2Summary(summary: string): boolean {
-  if (summary.split(/\r?\n/, 1)[0] !== "v1") return false
-  if (Buffer.byteLength(summary, "utf8") >= 10_000) return false
+/** Same Codex predicate, with content-free diagnostics for inspect and failed jobs. */
+export function validateV2Summary(summary: string): { ok: boolean; bytes: number; reason: string | null } {
+  const bytes = Buffer.byteLength(summary, "utf8")
+  if (summary.split(/\r?\n/, 1)[0] !== "v1") {
+    const hint = summary.startsWith("\uFEFF") ? " (UTF-8 BOM detected)" : ""
+    return { ok: false, bytes, reason: `summary must start with the exact line 'v1'${hint}` }
+  }
+  if (bytes >= 10_000) {
+    return { ok: false, bytes, reason: `summary must be under 10000 UTF-8 bytes (got ${bytes})` }
+  }
   const lines = summary.split(/\r?\n/).map((line) => line.trim())
-  return V2_SUMMARY_HEADINGS.every((heading) => lines.includes(heading))
+  const missing = V2_SUMMARY_HEADINGS.filter((heading) => !lines.includes(heading))
+  return missing.length
+    ? { ok: false, bytes, reason: `missing required headings: ${missing.join(", ")}` }
+    : { ok: true, bytes, reason: null }
+}
+
+export function isValidV2Summary(summary: string): boolean {
+  return validateV2Summary(summary).ok
 }
 
 export function validateConsolidationArtifacts(root: string = memoryRoot()): { ok: true } | { ok: false; reason: string } {
@@ -148,8 +162,9 @@ export function validateConsolidationArtifactsForVersion(
   if (first !== "v1") {
     return { ok: false, reason: `memory summary artifact does not start with v1: ${summaryPath}` }
   }
-  if (version === "v2" && !isValidV2Summary(summary)) {
-    return { ok: false, reason: "invalid v2 memory summary" }
+  if (version === "v2") {
+    const validation = validateV2Summary(summary)
+    if (!validation.ok) return { ok: false, reason: `invalid v2 memory summary: ${validation.reason}` }
   }
   return { ok: true }
 }

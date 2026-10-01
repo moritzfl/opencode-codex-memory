@@ -176,6 +176,45 @@ describe("workspace rendering", () => {
   })
 })
 
+describe("V2 summary validation diagnostics", () => {
+  const valid = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
+
+  it.each(["LF", "CRLF"])("accepts %s without changing the format contract", (ending) => {
+    const { validateV2Summary, isValidV2Summary } = require("../src/workspace.js")
+    const summary = ending === "CRLF" ? valid.replaceAll("\n", "\r\n") : valid
+    expect(validateV2Summary(summary)).toEqual({ ok: true, bytes: Buffer.byteLength(summary), reason: null })
+    expect(isValidV2Summary(summary)).toBe(true)
+  })
+
+  it("explains header and BOM failures without exposing summary content", () => {
+    const { validateV2Summary, isValidV2Summary } = require("../src/workspace.js")
+    for (const summary of ["", valid.replace("v1", "v2"), "PRIVATE-CONTENT\n" + valid]) {
+      const result = validateV2Summary(summary)
+      expect(result).toMatchObject({ ok: false, reason: "summary must start with the exact line 'v1'" })
+      expect(result.reason).not.toContain("PRIVATE-CONTENT")
+      expect(isValidV2Summary(summary)).toBe(false)
+    }
+    expect(validateV2Summary("\uFEFF" + valid)).toMatchObject({
+      ok: false, reason: "summary must start with the exact line 'v1' (UTF-8 BOM detected)",
+    })
+  })
+
+  it("reports missing exact headings and UTF-8 byte overflow", () => {
+    const { validateV2Summary, isValidV2Summary } = require("../src/workspace.js")
+    expect(validateV2Summary(valid.replace("## General Tips", "## General tips"))).toMatchObject({
+      ok: false, reason: "missing required headings: ## General Tips",
+    })
+    expect(validateV2Summary(valid.padEnd(9999, "x"))).toMatchObject({ ok: true, bytes: 9999, reason: null })
+    for (const summary of [valid.padEnd(10000, "x"), valid + "ö".repeat(5000)]) {
+      const bytes = Buffer.byteLength(summary)
+      expect(validateV2Summary(summary)).toEqual({
+        ok: false, bytes, reason: `summary must be under 10000 UTF-8 bytes (got ${bytes})`,
+      })
+      expect(isValidV2Summary(summary)).toBe(false)
+    }
+  })
+})
+
 describe("validateConsolidationArtifacts", () => {
   it("rejects missing MEMORY.md, empty summary, and non-v1 header", () => {
     const { ensureLayout, validateConsolidationArtifacts } = require("../src/workspace.js")
@@ -212,7 +251,9 @@ describe("validateConsolidationArtifacts", () => {
     fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\n## User Profile\n")
     const invalid = validateConsolidationArtifactsForVersion(root, "v2")
     expect(invalid.ok).toBe(false)
-    if (!invalid.ok) expect(invalid.reason).toMatch(/invalid v2 memory summary/)
+    if (!invalid.ok) expect(invalid.reason).toBe(
+      "invalid v2 memory summary: missing required headings: ## User preferences, ## General Tips, ## What's in Memory",
+    )
   })
 
   it("rejects a directory named MEMORY.md", () => {
