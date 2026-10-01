@@ -259,6 +259,34 @@ describe("v2 setup", () => {
     await cleanup?.()
   })
 
+  it("exposes readiness diagnostics over RPC and accepts older status payloads", async () => {
+    const f = fakeCtx({ generate_memories: false, dual_write: true })
+    const cleanup = await setup(f.ctx)
+    try {
+      const snapshot = parseMemoryStatus(await f.rpcHandlers.status())
+      expect(snapshot).toMatchObject({ v2Ready: false, v2SummaryBytes: null })
+      expect(snapshot.v2NotReadyReason).toContain("ENOENT")
+      const legacy = structuredClone(snapshot)
+      delete legacy.v2NotReadyReason
+      delete legacy.v2SummaryBytes
+      expect(parseMemoryStatus(legacy)).toEqual(legacy)
+      for (const patch of [
+        { v2NotReadyReason: 42 }, { v2SummaryBytes: -1 }, { v2SummaryBytes: 1.5 }, { v2SummaryBytes: "100" },
+      ]) {
+        expect(() => parseMemoryStatus({ ...snapshot, ...patch })).toThrow("invalid memory status payload")
+      }
+      const dir = path.join(TEST_ROOT, "memories_v2")
+      fs.mkdirSync(dir, { recursive: true })
+      const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
+      fs.writeFileSync(path.join(dir, "memory_summary.md"), summary)
+      expect(parseMemoryStatus(await f.rpcHandlers.status())).toMatchObject({
+        v2Ready: false, v2SummaryBytes: Buffer.byteLength(summary),
+        v2NotReadyReason: "insufficient consolidated threads: 0 < 20",
+      })
+      expect(fs.existsSync(path.join(TEST_ROOT, "memory_v2.db"))).toBe(false)
+    } finally { await cleanup?.() }
+  })
+
   it("serves the memory panel controls: option toggles, session mode, and consolidate-now", async () => {
     const f = fakeCtx({ generate_memories: false })
     const cleanup = await setup(f.ctx)

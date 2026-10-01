@@ -2,7 +2,7 @@ import fs from "node:fs"
 import { memoryDbPath, memoryRoot } from "./paths.js"
 import { MemoryStore, existingMemoryStores } from "./store.js"
 import { withMemoryVersion } from "./memory-version.js"
-import { isValidV2Summary } from "./workspace.js"
+import { validateV2Summary } from "./workspace.js"
 import { safeResolveUnderRoot, readRegularFileNoFollow } from "./path-guard.js"
 
 export const DEFAULT_MIN_CONSOLIDATED_THREADS = 20
@@ -16,13 +16,27 @@ export function readMigrationStatus(minConsolidatedThreads = DEFAULT_MIN_CONSOLI
     ? withMemoryVersion("v2", () => new MemoryStore().maxConsolidatedThreadCount())
     : 0
   let valid = false
+  let v2SummaryBytes: number | null = null
+  let v2NotReadyReason: string | null = null
   try {
     const file = safeResolveUnderRoot(memoryRoot("v2"), "memory_summary.md")
-    valid = isValidV2Summary(readRegularFileNoFollow(file).content.toString("utf8"))
-  } catch { /* Missing or unsafe summary is not ready. */ }
+    const validation = validateV2Summary(readRegularFileNoFollow(file).content.toString("utf8"))
+    valid = validation.ok
+    v2SummaryBytes = validation.bytes
+    v2NotReadyReason = validation.reason
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code
+    const message = error instanceof Error ? error.message : String(error)
+    v2NotReadyReason = `cannot read V2 memory summary${typeof code === "string" ? ` (${code})` : ""}: ${message}`
+  }
+  if (valid && v2ConsolidatedThreads < minConsolidatedThreads) {
+    v2NotReadyReason = `insufficient consolidated threads: ${v2ConsolidatedThreads} < ${minConsolidatedThreads}`
+  }
   return {
     v2ConsolidatedThreads,
     v2Ready: valid && v2ConsolidatedThreads >= minConsolidatedThreads,
+    v2NotReadyReason,
+    v2SummaryBytes,
     minConsolidatedThreads,
   }
 }

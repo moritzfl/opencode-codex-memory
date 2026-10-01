@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Avoid false degraded consolidator health warnings when dual-write grants both
   memory workspaces, while still rejecting unrelated external-directory grants.
+- Explain V2 readiness failures and UTF-8 summary size in memory inspect and
+  the OpenCode 2 inspector; show per-writer consolidation errors and retry times
+  so a healthy V1 reader cannot hide a failing V2 shadow writer. Readiness rules
+  and memory contents are unchanged.
 
 ## [0.9.7] - 2026-09-28
 

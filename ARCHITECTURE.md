@@ -129,6 +129,9 @@ V2 consolidation. Readiness also requires a currently valid V2 summary and
 defaults to 20 sessions. Inspect and the OpenCode-2 status RPC report it; version
 switching is explicit and affects new sessions. The V2 prompt remains one
 cache-stable string (D1); Codex's 8.9k fragment split is skipped.
+Readiness diagnostics distinguish summary read/validation failures from missing
+progress and include V2 UTF-8 summary bytes. Inspect reports each writer's
+consolidation error and retry time independently of the session's read version.
 
 ---
 

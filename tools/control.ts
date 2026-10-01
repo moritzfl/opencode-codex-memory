@@ -284,7 +284,7 @@ export const memory_inspect = tool({
   description:
     "Inspect the current memory state. Returns: stage1_outputs count, stage-1 job status " +
     "breakdown, failure classes (backoff / provider_capacity / other_exhausted), recent errors, " +
-    "Phase 2 job status (including last error / retry time), " +
+    "Phase 2 job status (including per-writer last error / retry time), V2 readiness failure reason and UTF-8 summary bytes, " +
     "last discovery outcome, pipeline diagnostics, memory_summary token estimate " +
     "(on-disk; injection caps at ~2500), a listing of the memories directory, the " +
     "effective plugin options, and any configuration warnings. Use it to verify " +
@@ -394,8 +394,14 @@ function inspect(args: { min_consolidated_threads?: number }, ctx?: { sessionID?
         `read_version: ${peekSessionMemoryVersion(ctx?.sessionID)}`,
         `dual_write: ${pluginOptions.dual_write}`,
         `v2_ready: ${migration.v2Ready}`,
+        `v2_not_ready_reason: ${migration.v2NotReadyReason ?? "none"}`,
+        `v2_summary_bytes: ${migration.v2SummaryBytes ?? "unknown"} (UTF-8; must be under 10000)`,
         `v2_consolidated_threads: ${migration.v2ConsolidatedThreads} (minimum ${migration.minConsolidatedThreads})`,
-        ...pipelines.map((p) => `pipeline_${p.version}: outputs=${p.stage1Count}, phase2=${p.phase2?.status ?? "none"}, root=${p.root}`),
+        ...pipelines.flatMap((p) => [
+          `pipeline_${p.version}: outputs=${p.stage1Count}, phase2=${p.phase2?.status ?? "none"}, root=${p.root}`,
+          `  pipeline_${p.version}_phase2_last_error: ${p.phase2?.last_error ?? "none"}`,
+          `  pipeline_${p.version}_phase2_retry_at: ${fmtUnixSec(p.phase2?.retry_at ?? null)}`,
+        ]),
         ...stage1Lines,
         ...phase2Lines,
         discoveryLine,

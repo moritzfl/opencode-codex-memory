@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -187,6 +187,101 @@ describe("Codex memory migration", () => {
     expect(v2.getMemoryMode("ses_disabled")).toBe("disabled")
     expect(() => readMigrationStatus(0)).toThrow("between 1 and 4096")
     expect(() => readMigrationStatus(4097)).toThrow("between 1 and 4096")
+  })
+
+  it("distinguishes insufficient progress from invalid summaries above the threshold", () => {
+    summary("v2")
+    expect(readMigrationStatus()).toMatchObject({
+      v2Ready: false, v2NotReadyReason: "insufficient consolidated threads: 0 < 20",
+      v2SummaryBytes: Buffer.byteLength(SUMMARY + "v2"),
+    })
+    expect(fs.existsSync(path.join(root, "memory_v2.db"))).toBe(false)
+
+    const v2 = store("v2")
+    const selected = Array.from({ length: 186 }, (_, i) => seed(v2, `ses_${i}`))
+    const claim = v2.claimGlobalPhase2Job()
+    if (claim.type !== "claimed") throw new Error(claim.type)
+    v2.markPhase2Succeeded(claim.ownershipToken, selected)
+    const file = path.join(memoryRoot("v2"), "memory_summary.md")
+    for (const content of [SUMMARY, SUMMARY.replaceAll("\n", "\r\n")]) {
+      fs.writeFileSync(file, content)
+      expect(readMigrationStatus()).toMatchObject({
+        v2ConsolidatedThreads: 186, v2Ready: true, v2NotReadyReason: null,
+        v2SummaryBytes: Buffer.byteLength(content),
+      })
+    }
+    for (const [content, reason] of [
+      ["\uFEFF" + SUMMARY, "summary must start with the exact line 'v1' (UTF-8 BOM detected)"],
+      [SUMMARY.replace("## General Tips", "## General tips"), "missing required headings: ## General Tips"],
+      [SUMMARY.padEnd(10000, "x"), "summary must be under 10000 UTF-8 bytes (got 10000)"],
+      [SUMMARY + "ö".repeat(5000), `summary must be under 10000 UTF-8 bytes (got ${Buffer.byteLength(SUMMARY) + 10000})`],
+    ]) {
+      fs.writeFileSync(file, content!)
+      expect(readMigrationStatus()).toMatchObject({
+        v2ConsolidatedThreads: 186, v2Ready: false, v2NotReadyReason: reason,
+        v2SummaryBytes: Buffer.byteLength(content!),
+      })
+    }
+  })
+
+  it("explains missing and unsafe summary reads without creating or changing files", () => {
+    const missing = readMigrationStatus()
+    expect(missing).toMatchObject({ v2Ready: false, v2SummaryBytes: null })
+    expect(missing.v2NotReadyReason).toContain("ENOENT")
+    expect(fs.existsSync(path.join(root, "memory_v2.db"))).toBe(false)
+    summary("v2")
+    const file = path.join(memoryRoot("v2"), "memory_summary.md")
+    fs.unlinkSync(file)
+    const outside = path.join(root, "outside-summary.md")
+    fs.writeFileSync(outside, SUMMARY)
+    fs.symlinkSync(outside, file)
+    const unsafe = readMigrationStatus()
+    expect(unsafe).toMatchObject({ v2Ready: false, v2SummaryBytes: null })
+    expect(unsafe.v2NotReadyReason).toContain("symlinks are not allowed")
+    expect(fs.lstatSync(file).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(outside, "utf8")).toBe(SUMMARY)
+  })
+
+  it.each(["EACCES", "EBUSY"])("preserves %s summary-read failures in readiness diagnostics", (code) => {
+    summary("v2")
+    const file = path.join(memoryRoot("v2"), "memory_summary.md")
+    const originalOpen = fs.openSync
+    const open = spyOn(fs, "openSync").mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+      if (args[0] === file) throw Object.assign(new Error("summary unavailable"), { code })
+      return originalOpen(...args)
+    })
+    try {
+      expect(readMigrationStatus()).toMatchObject({
+        v2Ready: false, v2SummaryBytes: null,
+        v2NotReadyReason: `cannot read V2 memory summary (${code}): summary unavailable`,
+      })
+    } finally { open.mockRestore() }
+  })
+
+  it("inspect exposes shadow failures and V2 size while keeping V1 summary statistics", async () => {
+    summary("v1")
+    summary("v2")
+    const v1 = store("v1"), v2 = store("v2")
+    const success = v1.claimGlobalPhase2Job()
+    const failed = v2.claimGlobalPhase2Job()
+    if (success.type !== "claimed" || failed.type !== "claimed") throw new Error("expected claims")
+    v1.markPhase2Succeeded(success.ownershipToken)
+    const invalid = SUMMARY + "ö".repeat(5000)
+    fs.writeFileSync(path.join(memoryRoot("v2"), "memory_summary.md"), invalid)
+    v2.markPhase2Failed(failed.ownershipToken, "failed_invalid_artifacts: summary too large")
+    const before = openDb("v2").prepare("SELECT * FROM memory_jobs").all()
+    const result = await memory_inspect.execute({}, ctx("ses_shadow_diagnostics"))
+    const output = text(result)
+    const bytes = Buffer.byteLength(invalid)
+    expect(output).toContain("read_version: v1")
+    expect(output).toContain("phase2_last_error: none")
+    expect(output).toContain("pipeline_v2_phase2_last_error: failed_invalid_artifacts: summary too large")
+    expect(output).toContain("pipeline_v2_phase2_retry_at:")
+    expect(output).toContain(`v2_summary_bytes: ${bytes} (UTF-8; must be under 10000)`)
+    expect(output).toContain(`v2_not_ready_reason: summary must be under 10000 UTF-8 bytes (got ${bytes})`)
+    expect(output).toContain(`memory_summary_chars: ${(SUMMARY + "v1").length}`)
+    expect(openDb("v2").prepare("SELECT * FROM memory_jobs").all()).toEqual(before)
+    expect(openDb("v1").prepare("SELECT * FROM memory_session_versions").all()).toEqual([])
   })
 
   it("deletes and resets both namespaces even when only V1 is configured", async () => {

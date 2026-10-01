@@ -164,6 +164,7 @@ function pipelineRows(s: MemoryStatus, now: number): Row[] {
           : pipeline.phase2Status === "pending" ? "Queued · next activity" : consolidation,
         tone: pipeline.lastError ? "warn" : "muted",
       },
+      ...(pipeline.lastError ? [{ label: `${version} last error`, value: pipeline.lastError, tone: "warn" as const }] : []),
     ]
   })
 }
@@ -173,7 +174,12 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
     { label: "Activity", value: labels[s.activity] },
     { label: "Memory version", value: `${s.sessionVersion} (default ${s.version})` },
     { label: "Learning pipelines", value: s.dualWrite ? "v1 + v2" : s.version },
-    { label: "V2 readiness", value: `${s.v2Ready ? "Ready" : "Warming"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`, tone: s.v2Ready ? "ok" : "muted" },
+    { label: "V2 readiness", value: `${s.v2Ready ? "Ready" : "Not ready"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`, tone: s.v2Ready ? "ok" : "muted" },
+    ...(s.v2NotReadyReason ? [{ label: "V2 not ready", value: s.v2NotReadyReason, tone: "muted" as const }] : []),
+    ...(s.v2SummaryBytes !== undefined ? [{
+      label: "V2 summary", value: s.v2SummaryBytes === null ? "Unreadable" : `${s.v2SummaryBytes} UTF-8 bytes · limit <10000`,
+      tone: s.v2SummaryBytes !== null && s.v2SummaryBytes >= 10000 ? "warn" as const : "muted" as const,
+    }] : []),
     ...pipelineRows(s, now),
     { label: "Use memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
     { label: "Learn from sessions", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },

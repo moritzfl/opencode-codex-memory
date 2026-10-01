@@ -247,6 +247,9 @@ mappings:
       Exposed via memory_inspect and OpenCode 2 status RPC/UI. No automatic
       cutover. Missing V2 DB reports zero without creating an inactive store;
       summary reads additionally reject symlinks via the plugin path guard.
+      Diagnostic extension: report V2 summary UTF-8 bytes and why readiness is
+      false (read error, invalid summary, or insufficient progress), without
+      changing the readiness predicate or creating an absent V2 database.
   - ours: src/store.ts
     theirs: codex-rs/state/src/runtime/memories.rs
     note: >

@@ -86,6 +86,19 @@ successful consolidation, not a sum across runs. Consolidating the same one
 session repeatedly cannot reach 20. Pruning does not reduce this count;
 resetting memory clears it.
 
+If readiness is false, `v2_not_ready_reason` explains whether the current V2
+summary is unreadable or invalid, or the successful-consolidation count is too
+low. `v2_summary_bytes` reports its UTF-8 size (`unknown` if it cannot be read).
+The summary must start with the exact line `v1`, contain the four required
+headings, and be under 10,000 UTF-8 bytes. LF and CRLF are accepted; a leading
+UTF-8 BOM is not. These diagnostics do not modify or repair the summary.
+
+During dual-write, check `pipeline_v2_phase2_last_error` and
+`pipeline_v2_phase2_retry_at` even when `read_version` is V1. The unprefixed
+summary token estimate and consolidation details describe the session's read
+version, not necessarily V2. The OpenCode 2 inspector also shows the V2 failure
+reason, byte count, and per-writer consolidation errors.
+
 Readiness is a progress indicator, not a quality guarantee or a switch. Read
 `memories_v2/memory_summary.md` under your [memory home](storage-and-privacy.md#where-your-data-lives)
 to assess the result. The `min_consolidated_threads` argument to
