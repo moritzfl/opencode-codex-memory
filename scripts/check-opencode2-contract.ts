@@ -21,6 +21,7 @@ import path from "path"
 import { $ } from "bun"
 import { api, basicAuth, createSandbox, createSession, startServe, tail, waitFor, type ServeHandle } from "./lib/harness.js"
 import { installFilePermissionProbe, probeFilePermissions } from "./lib/v2-file-permission-probe.js"
+import { probeV2ModelReadiness } from "./lib/v2-model-readiness-probe.js"
 import type { MemoryStatus } from "../src/v2/status-rpc.js"
 
 const MIN_VERSION = process.env.OPENCODE2_MIN_VERSION?.trim() || "2.0.3"
@@ -207,6 +208,10 @@ async function main(): Promise<void> {
     const found = op.ids.find((id) => ops.has(id))
     note(Boolean(found), `operation ${op.name} present${found && found !== op.name ? ` as ${found}` : ""}`)
   }
+
+  // --- native model startup race ---
+  const readiness = await probeV2ModelReadiness()
+  note(true, `cold model startup recovers after ${readiness.failures} selection failure(s), exactly ${readiness.inferenceCalls} inference request`)
 
   // --- built plugin dual export ---
   const root = path.resolve(import.meta.dirname, "..")
