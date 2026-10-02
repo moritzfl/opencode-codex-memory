@@ -653,10 +653,13 @@ present, are hints, not labels to trust.
 **Consolidate.** v1 rebuilds a routing inventory (`raw_memories.md`) and asks
 the consolidator to maintain `MEMORY.md` plus `memory_summary.md`. v2 updates
 **only** `memory_summary.md`. The file must start with `v1` (that line is the
-*summary format* version, not the pipeline version), then four headings —
-User Profile, User preferences, General Tips, What's in Memory — and stay
-under 10,000 bytes. Preferences belong in that section only when they were
-stated as a default or showed up across distinct tasks. Everything else is a
+*summary format* version, not the pipeline version), then four headings:
+User Profile, User preferences, General Tips, What's in Memory. Consolidation
+aims for at most 9,000 UTF-8 bytes, but an oversized, structurally valid file
+still succeeds. Injection caps the summary at 9,999 UTF-8 bytes, including a
+head/tail truncation marker; the full file stays available through memory tools.
+Preferences belong in that section only when they were stated as a default or
+showed up across distinct tasks. Everything else is a
 dated pointer to an exact recap filename and session id.
 
 **Remember.** v1's read path is progressive disclosure: skim the summary,
