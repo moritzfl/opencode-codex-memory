@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-10-02
+
+### Fixed
+
+- Retry OpenCode 2 extraction when service health precedes provider model
+  registration. Eight cancellable backoffs total 45.75 seconds; only exact
+  pre-inference model-selection errors are retried, without switching models
+  or replaying transport and provider failures. Inspect reports waits and recovery.
+
+### Tests
+
+- Cover transient and persistent model absence, cancellation, and both extraction
+  paths. V2 contract checks reproduce delayed registration on a cold native host
+  and verify recovery sends exactly one inference request.
+
 ## [0.9.9] - 2026-10-02
 
 ### Fixed
@@ -984,7 +999,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.9...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.10...HEAD
+[0.9.10]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.6...v0.9.7
