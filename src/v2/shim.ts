@@ -26,6 +26,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { memoryRoot } from "../paths.js"
 import { consolidationPermissions } from "./agents.js"
+import { retryModelSelection } from "./model-readiness.js"
 import { invalidateOwnService, lastServiceFailure, ownServiceClient, serviceRequest, type V2ServiceClient } from "./service.js"
 
 export type V2Context = Plugin.Context
@@ -421,13 +422,21 @@ async function v2promptWithWait(
     if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
     const publicClient = await ownServiceClient()
     if (typeof publicClient?.generate?.text === "function") {
-      const gen = await serviceRequest(publicClient, () => publicClient.generate!.text(payload, signal ? { signal } : undefined))
-      const outText = typeof (gen as { text?: unknown })?.text === "string" ? (gen as { text: string }).text : JSON.stringify(gen)
+      const gen = und(await retryModelSelection(async () => {
+        const result = await serviceRequest(publicClient, () => publicClient.generate!.text(payload, signal ? { signal } : undefined))
+        if ((result as { error?: unknown })?.error) throw (result as { error: unknown }).error
+        return result
+      }, payload.model, signal))
+      const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
       return { data: { parts: [{ type: "text", text: outText }] } }
     }
     // ctx.generate.text ignores request-option signals. Race AbortSignal.
-    const genP = (c as any).generate.text(payload)
-    const gen = signal ? await raceAbort(genP, signal) : await genP
+    const gen = und(await retryModelSelection(async () => {
+      const genP = (c as any).generate.text(payload)
+      const result = signal ? await raceAbort(genP, signal) : await genP
+      if (result?.error) throw result.error
+      return result
+    }, payload.model, signal))
     const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
     return { data: { parts: [{ type: "text", text: outText }] } }
   }

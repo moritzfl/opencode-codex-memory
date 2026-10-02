@@ -248,6 +248,12 @@ appends a task reminder and the requested memory-version schema after the
 historical transcript. Shared extraction parsing and validation check the JSON
 reply. Consolidation still uses a sandboxed helper session.
 
+OpenCode 2 extraction retries only exact host model-selection-unavailable errors
+before inference, with eight cancellable backoffs totaling 45.75 seconds
+for asynchronous provider registration. Persistent absence still fails normally;
+transport, authorization, variant and provider-generation errors are not replayed.
+Readiness waits and recovery appear in memory_inspect diagnostics. V1 is unchanged.
+
 #### Background model selection
 
 Precedence is plugin option (`extract_model` / `consolidation_model`) →

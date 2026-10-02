@@ -552,6 +552,44 @@ describe("V1 client shim", () => {
     expect(JSON.stringify(res.data)).toContain("raw_memory")
   })
 
+  it.each([false, true])("waits for extraction model registration on the %s service path", async (publicService) => {
+    const { ctx } = fakeCtx()
+    const payloads: unknown[] = []
+    const generate = async (payload: unknown) => {
+      payloads.push(payload)
+      if (payloads.length === 1) {
+        const error = {
+          _tag: publicService ? "InvalidRequestError" : "Generate.ModelSelectionError",
+          message: "Model unavailable: acme/m1",
+        }
+        if (publicService) return { error }
+        throw error
+      }
+      return { data: { text: '{"raw_memory":"m","rollout_summary":"s","rollout_slug":"t"}' } }
+    }
+    if (publicService) {
+      setV2ServiceDependenciesForTest({
+        service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
+        make: () => ({
+          health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid }) },
+          session: {}, generate: { text: generate },
+        }),
+      })
+    } else ctx.generate.text = generate
+    setV2Context(ctx)
+    const response = await (buildV1ClientShim() as any).session.prompt({
+      path: { id: EXTRACT_STUB_SESSION_ID },
+      body: {
+        agent: "memorize-extract", model: { providerID: "acme", modelID: "m1" }, variant: "low",
+        format: { type: "json_schema" }, parts: [{ type: "text", text: "TRANSCRIPT" }],
+      },
+    })
+    expect(payloads).toHaveLength(2)
+    expect(payloads[0]).toEqual(payloads[1])
+    expect(response.error).toBeUndefined()
+    expect(response.data.parts[0].text).toContain('"raw_memory":"m"')
+  })
+
   it("never sends a variant-only Model.Ref when the host default model is used", async () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx as any)
