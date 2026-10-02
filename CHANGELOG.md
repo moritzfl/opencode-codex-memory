@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-10-02
+
+### Fixed
+
+- Oversized, structurally valid Memory V2 summaries no longer block successful
+  consolidation or readiness. Injection is capped at 9,999 UTF-8 bytes, including
+  a head/tail truncation marker, while the full file remains available through
+  memory tools. Inspect and the OpenCode 2 panel report disk and injected sizes.
+
+### Tests
+
+- Gate live V2 checks on native summary injection rather than disk size; exercise
+  oversized Unicode artifacts, cache-stable follow-ups, and full-file retrieval
+  on both OpenCode hosts.
+- Make disposable V1 reset approval explicit and retry an extra model
+  confirmation once.
+
 ## [0.9.8] - 2026-10-01
 
 ### Fixed
@@ -967,7 +984,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.8...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.9...HEAD
+[0.9.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.7...v0.9.8
 [0.9.7]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.5...v0.9.6
