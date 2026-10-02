@@ -23,7 +23,8 @@ decisions, or provenance; redact secrets and access-bearing URL values as
 
 Begin with `v1`, followed by `## User Profile`, `## User preferences`,
 `## General Tips`, and `## What's in Memory`; keep the complete result
-comfortably under 10,000 UTF-8 bytes. Use judgment to preserve substantive older
+comfortably under 10,000 UTF-8 bytes, aiming for at most 9,000 bytes to leave
+headroom. Use judgment to preserve substantive older
 context and give recent, consequential work richer direct routes without
 obscuring actionable preferences or status.
 

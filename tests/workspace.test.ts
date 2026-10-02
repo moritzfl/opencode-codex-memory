@@ -199,7 +199,7 @@ describe("V2 summary validation diagnostics", () => {
     })
   })
 
-  it("reports missing exact headings and UTF-8 byte overflow", () => {
+  it("rejects missing exact headings but accepts oversized structurally valid summaries", () => {
     const { validateV2Summary, isValidV2Summary } = require("../src/workspace.js")
     expect(validateV2Summary(valid.replace("## General Tips", "## General tips"))).toMatchObject({
       ok: false, reason: "missing required headings: ## General Tips",
@@ -208,9 +208,12 @@ describe("V2 summary validation diagnostics", () => {
     for (const summary of [valid.padEnd(10000, "x"), valid + "ö".repeat(5000)]) {
       const bytes = Buffer.byteLength(summary)
       expect(validateV2Summary(summary)).toEqual({
-        ok: false, bytes, reason: `summary must be under 10000 UTF-8 bytes (got ${bytes})`,
+        ok: true, bytes, reason: null,
       })
-      expect(isValidV2Summary(summary)).toBe(false)
+      expect(isValidV2Summary(summary)).toBe(true)
+      expect(validateV2Summary(summary.replace("## General Tips", "## General tips"))).toMatchObject({
+        ok: false, reason: "missing required headings: ## General Tips",
+      })
     }
   })
 })

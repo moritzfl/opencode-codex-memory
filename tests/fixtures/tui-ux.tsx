@@ -306,20 +306,19 @@ await check("successful consolidation with late recaps and unrelated extraction 
   } finally { await f.close() }
 })
 
-await check("V2 readiness explains invalid summaries and shadow consolidation failures", async () => {
+await check("V2 readiness accepts capped summaries and still shows shadow consolidation failures", async () => {
   const f = await fixture({ height: 55 })
   try {
     f.setStatus({
-      v2ConsolidatedThreads: 186, v2SummaryBytes: 10079,
-      v2NotReadyReason: "summary must be under 10000 UTF-8 bytes (got 10079)",
+      v2Ready: true, v2ConsolidatedThreads: 186, v2SummaryBytes: 10079, v2InjectedSummaryBytes: 9999,
+      v2NotReadyReason: null,
       pipelines: [{ version: "v2", stage1Count: 186, extracting: 0, phase2Status: "failed", lastError: "invalid V2 summary" }],
     })
     await f.open()
     const frame = await f.frame()
-    assert.match(frame, /Not ready · 186\/20 sessions/)
-    assert.match(frame, /V2 not ready/)
-    assert.match(frame, /summary must be under 10000/)
-    assert.match(frame, /V2 summary\s+10079 UTF-8 bytes/)
+    assert.match(frame, /Ready · 186\/20 sessions/)
+    assert.doesNotMatch(frame, /V2 not ready/)
+    assert.match(frame, /V2 summary\s+10079 bytes on disk · 9999 injected \(capped\)/)
     assert.match(frame, /V2 last error\s+invalid V2 summary/)
     assert.equal(f.calls.length, 0, "diagnostics must not start or repair a job")
   } finally { await f.close() }

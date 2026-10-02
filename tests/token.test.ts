@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test"
-import { estimateTokens, truncateToTokens } from "../src/token.js"
+import { MEMORY_V2_SUMMARY_MAX_BYTES, estimateTokens, truncateToBytes, truncateToTokens } from "../src/token.js"
 
 describe("estimateTokens", () => {
   it("estimates tokens as chars/4", () => {
@@ -35,5 +35,24 @@ describe("truncateToTokens middle truncation", () => {
     expect(out.startsWith("H")).toBe(true)
     expect(out.endsWith("T")).toBe(true)
     expect(out).toContain("[...truncated...]")
+  })
+})
+
+describe("truncateToBytes", () => {
+  it("preserves summaries at the exact byte limit", () => {
+    const input = "ö".repeat(4999) + "x"
+    expect(Buffer.byteLength(input)).toBe(MEMORY_V2_SUMMARY_MAX_BYTES)
+    expect(truncateToBytes(input, MEMORY_V2_SUMMARY_MAX_BYTES)).toBe(input)
+  })
+
+  it.each(["x", "ö", "€", "😀"])("bounds %s summaries including the marker without splitting UTF-8", (char) => {
+    const input = "HEAD\n" + char.repeat(12000) + "\nTAIL"
+    const output = truncateToBytes(input, MEMORY_V2_SUMMARY_MAX_BYTES)
+    expect(Buffer.byteLength(output)).toBeLessThan(10000)
+    expect(output.startsWith("HEAD\n")).toBe(true)
+    expect(output.endsWith("\nTAIL")).toBe(true)
+    expect(output).toContain("[...truncated...]")
+    expect(output).not.toContain("\uFFFD")
+    expect(output).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u)
   })
 })

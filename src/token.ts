@@ -1,4 +1,6 @@
 export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4
+// V2's injected summary stays strictly below Codex's 10,000-byte artifact target.
+export const MEMORY_V2_SUMMARY_MAX_BYTES = 9_999
 
 export function estimateTokens(input: string): number {
   return Math.max(0, Math.round(input.length / TOKEN_ESTIMATE_CHARS_PER_TOKEN))

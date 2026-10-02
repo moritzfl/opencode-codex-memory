@@ -29,6 +29,8 @@ export interface MemoryStatus {
   /** Readiness diagnostics; optional for older servers. Null reason means ready. */
   v2NotReadyReason?: string | null
   v2SummaryBytes?: number | null
+  /** Bounded summary payload, excluding read-path instructions; optional for older servers. */
+  v2InjectedSummaryBytes?: number | null
   minConsolidatedThreads: number
   pipelines: {
     version: "v1" | "v2"
@@ -97,6 +99,7 @@ export const MemoryStatusRpc = {
           v2Ready: { type: "boolean" },
           v2NotReadyReason: { type: ["string", "null"] },
           v2SummaryBytes: { type: ["integer", "null"], minimum: 0 },
+          v2InjectedSummaryBytes: { type: ["integer", "null"], minimum: 0, maximum: 9999 },
           minConsolidatedThreads: { type: "integer", minimum: 1, maximum: 4096 },
           useMemories: { type: "boolean" },
           pipelines: {
@@ -224,8 +227,11 @@ export function isMemoryStatus(value: unknown): value is MemoryStatus {
   }
   if (!Number.isInteger(value.v2ConsolidatedThreads) || (value.v2ConsolidatedThreads as number) < 0) return false
   if (value.v2NotReadyReason !== undefined && value.v2NotReadyReason !== null && typeof value.v2NotReadyReason !== "string") return false
-  if (value.v2SummaryBytes !== undefined && value.v2SummaryBytes !== null &&
-    (!Number.isInteger(value.v2SummaryBytes) || (value.v2SummaryBytes as number) < 0)) return false
+  for (const key of ["v2SummaryBytes", "v2InjectedSummaryBytes"] as const) {
+    if (value[key] !== undefined && value[key] !== null &&
+      (!Number.isInteger(value[key]) || (value[key] as number) < 0)) return false
+  }
+  if (typeof value.v2InjectedSummaryBytes === "number" && value.v2InjectedSummaryBytes > 9999) return false
   if (!Number.isInteger(value.minConsolidatedThreads) || (value.minConsolidatedThreads as number) < 1 || (value.minConsolidatedThreads as number) > 4096) return false
   if (!Array.isArray(value.pipelines) || !value.pipelines.every((pipeline) =>
     isRecord(pipeline) && (pipeline.version === "v1" || pipeline.version === "v2")

@@ -177,8 +177,11 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
     { label: "V2 readiness", value: `${s.v2Ready ? "Ready" : "Not ready"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`, tone: s.v2Ready ? "ok" : "muted" },
     ...(s.v2NotReadyReason ? [{ label: "V2 not ready", value: s.v2NotReadyReason, tone: "muted" as const }] : []),
     ...(s.v2SummaryBytes !== undefined ? [{
-      label: "V2 summary", value: s.v2SummaryBytes === null ? "Unreadable" : `${s.v2SummaryBytes} UTF-8 bytes · limit <10000`,
-      tone: s.v2SummaryBytes !== null && s.v2SummaryBytes >= 10000 ? "warn" as const : "muted" as const,
+      label: "V2 summary", value: s.v2SummaryBytes === null ? "Unreadable"
+        : s.v2InjectedSummaryBytes != null
+          ? `${s.v2SummaryBytes} bytes on disk · ${s.v2InjectedSummaryBytes} injected${s.v2SummaryBytes >= 10000 ? " (capped)" : ""}`
+          : `${s.v2SummaryBytes} UTF-8 bytes`,
+      tone: "muted" as const,
     }] : []),
     ...pipelineRows(s, now),
     { label: "Use memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },

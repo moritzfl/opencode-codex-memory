@@ -130,7 +130,11 @@ defaults to 20 sessions. Inspect and the OpenCode-2 status RPC report it; versio
 switching is explicit and affects new sessions. The V2 prompt remains one
 cache-stable string (D1); Codex's 8.9k fragment split is skipped.
 Readiness diagnostics distinguish summary read/validation failures from missing
-progress and include V2 UTF-8 summary bytes. Inspect reports each writer's
+progress and include V2 UTF-8 summary bytes on disk and in the bounded injection.
+V2 size is enforced at injection (9,999 UTF-8 bytes including the head/tail
+truncation marker), so oversized structurally valid artifacts do not stall
+consolidation or readiness. The full summary remains on disk for retrieval.
+Inspect reports each writer's
 consolidation error and retry time independently of the session's read version.
 
 ---

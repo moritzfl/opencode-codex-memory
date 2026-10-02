@@ -89,9 +89,16 @@ resetting memory clears it.
 If readiness is false, `v2_not_ready_reason` explains whether the current V2
 summary is unreadable or invalid, or the successful-consolidation count is too
 low. `v2_summary_bytes` reports its UTF-8 size (`unknown` if it cannot be read).
-The summary must start with the exact line `v1`, contain the four required
-headings, and be under 10,000 UTF-8 bytes. LF and CRLF are accepted; a leading
-UTF-8 BOM is not. These diagnostics do not modify or repair the summary.
+The summary must start with the exact line `v1` and contain the four required
+headings. LF and CRLF are accepted; a leading UTF-8 BOM is not.
+
+Consolidation aims for at most 9,000 UTF-8 bytes, but an oversized, structurally
+valid summary does not block successful consolidation or readiness. Injection
+caps the summary at **9,999 UTF-8 bytes**, including an explicit truncation
+marker, preserving the beginning and end on character boundaries. The full
+file stays available through `memory_read` and `memory_search`.
+`v2_injected_summary_bytes` reports the bounded payload; read-path instructions
+are additional to that budget. These diagnostics do not modify the summary.
 
 During dual-write, check `pipeline_v2_phase2_last_error` and
 `pipeline_v2_phase2_retry_at` even when `read_version` is V1. The unprefixed

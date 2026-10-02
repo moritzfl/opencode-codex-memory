@@ -4,6 +4,7 @@ import { MemoryStore, existingMemoryStores } from "./store.js"
 import { withMemoryVersion } from "./memory-version.js"
 import { validateV2Summary } from "./workspace.js"
 import { safeResolveUnderRoot, readRegularFileNoFollow } from "./path-guard.js"
+import { MEMORY_V2_SUMMARY_MAX_BYTES, truncateToBytes } from "./token.js"
 
 export const DEFAULT_MIN_CONSOLIDATED_THREADS = 20
 
@@ -17,12 +18,15 @@ export function readMigrationStatus(minConsolidatedThreads = DEFAULT_MIN_CONSOLI
     : 0
   let valid = false
   let v2SummaryBytes: number | null = null
+  let v2InjectedSummaryBytes: number | null = null
   let v2NotReadyReason: string | null = null
   try {
     const file = safeResolveUnderRoot(memoryRoot("v2"), "memory_summary.md")
-    const validation = validateV2Summary(readRegularFileNoFollow(file).content.toString("utf8"))
+    const summary = readRegularFileNoFollow(file).content.toString("utf8")
+    const validation = validateV2Summary(summary)
     valid = validation.ok
     v2SummaryBytes = validation.bytes
+    v2InjectedSummaryBytes = Buffer.byteLength(truncateToBytes(summary.trim(), MEMORY_V2_SUMMARY_MAX_BYTES), "utf8")
     v2NotReadyReason = validation.reason
   } catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code
@@ -37,6 +41,7 @@ export function readMigrationStatus(minConsolidatedThreads = DEFAULT_MIN_CONSOLI
     v2Ready: valid && v2ConsolidatedThreads >= minConsolidatedThreads,
     v2NotReadyReason,
     v2SummaryBytes,
+    v2InjectedSummaryBytes,
     minConsolidatedThreads,
   }
 }

@@ -264,14 +264,17 @@ describe("v2 setup", () => {
     const cleanup = await setup(f.ctx)
     try {
       const snapshot = parseMemoryStatus(await f.rpcHandlers.status())
-      expect(snapshot).toMatchObject({ v2Ready: false, v2SummaryBytes: null })
+      expect(snapshot).toMatchObject({ v2Ready: false, v2SummaryBytes: null, v2InjectedSummaryBytes: null })
       expect(snapshot.v2NotReadyReason).toContain("ENOENT")
       const legacy = structuredClone(snapshot)
       delete legacy.v2NotReadyReason
       delete legacy.v2SummaryBytes
+      delete legacy.v2InjectedSummaryBytes
       expect(parseMemoryStatus(legacy)).toEqual(legacy)
       for (const patch of [
         { v2NotReadyReason: 42 }, { v2SummaryBytes: -1 }, { v2SummaryBytes: 1.5 }, { v2SummaryBytes: "100" },
+        { v2InjectedSummaryBytes: -1 }, { v2InjectedSummaryBytes: 1.5 }, { v2InjectedSummaryBytes: "100" },
+        { v2InjectedSummaryBytes: 10000 },
       ]) {
         expect(() => parseMemoryStatus({ ...snapshot, ...patch })).toThrow("invalid memory status payload")
       }
@@ -280,9 +283,14 @@ describe("v2 setup", () => {
       const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
       fs.writeFileSync(path.join(dir, "memory_summary.md"), summary)
       expect(parseMemoryStatus(await f.rpcHandlers.status())).toMatchObject({
-        v2Ready: false, v2SummaryBytes: Buffer.byteLength(summary),
+        v2Ready: false, v2SummaryBytes: Buffer.byteLength(summary), v2InjectedSummaryBytes: Buffer.byteLength(summary.trim()),
         v2NotReadyReason: "insufficient consolidated threads: 0 < 20",
       })
+      fs.writeFileSync(path.join(dir, "memory_summary.md"), summary + "ö".repeat(6000))
+      const oversized = parseMemoryStatus(await f.rpcHandlers.status())
+      expect(oversized.v2SummaryBytes).toBeGreaterThan(10000)
+      expect(oversized.v2InjectedSummaryBytes!).toBeLessThan(10000)
+      expect(oversized.v2NotReadyReason).toBe("insufficient consolidated threads: 0 < 20")
       expect(fs.existsSync(path.join(TEST_ROOT, "memory_v2.db"))).toBe(false)
     } finally { await cleanup?.() }
   })

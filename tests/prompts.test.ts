@@ -147,6 +147,28 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     }
   })
 
+  it.each(["x", "ö", "😀"])("caps oversized V2 %s summaries by UTF-8 bytes without changing the file", (char) => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memorySummaryPath } = require("../src/paths.js")
+    applyPluginOptions({ version: "v2" })
+    ensureMemoryLayout()
+    const summary = "v1\n\nHEAD\n" + char.repeat(12000) + "\nTAIL"
+    fs.writeFileSync(memorySummaryPath(), summary)
+    invalidateCache()
+    const prompt = buildMemorySystemPrompt(true)!
+    const injected = prompt.split("========= MEMORY_SUMMARY BEGINS =========\n")[1]!
+      .split("\n========= MEMORY_SUMMARY ENDS =========")[0]!
+    expect(Buffer.byteLength(injected)).toBeLessThan(10000)
+    expect(injected.startsWith("v1\n\nHEAD\n")).toBe(true)
+    expect(injected.endsWith("\nTAIL")).toBe(true)
+    expect(injected).toContain("[...truncated...]")
+    expect(injected).not.toContain("\uFFFD")
+    expect(buildMemorySystemPrompt(true)).toBe(prompt)
+    expect(fs.readFileSync(memorySummaryPath(), "utf8")).toBe(summary)
+    invalidateCache()
+  })
+
   it("refuses to inject when the memory root is a symlink", () => {
     const { buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
     const { memoryRoot, memorySummaryPath } = require("../src/paths.js")

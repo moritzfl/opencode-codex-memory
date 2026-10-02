@@ -3,7 +3,7 @@ import path from "path"
 import { currentMemoryVersion } from "./memory-version.js"
 import { memoryRoot } from "./paths.js"
 import { assertMemoryRootSafe, safeResolveMemoryPath, withRegularFileNoFollow } from "./path-guard.js"
-import { truncateToTokens } from "./token.js"
+import { MEMORY_V2_SUMMARY_MAX_BYTES, truncateToBytes, truncateToTokens } from "./token.js"
 import { fillTemplate } from "./llm.js"
 
 const MEMORY_SUMMARY_TOKEN_LIMIT = 2500
@@ -78,7 +78,9 @@ function readMemorySummary(): string | null {
       const raw = fs.readFileSync(fd, "utf8").trim()
       if (!raw) return null
 
-      const truncated = truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
+      const truncated = currentMemoryVersion() === "v2"
+        ? truncateToBytes(raw, MEMORY_V2_SUMMARY_MAX_BYTES)
+        : truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
       cache.set(summaryPath, { content: truncated, identity })
       return truncated
     })

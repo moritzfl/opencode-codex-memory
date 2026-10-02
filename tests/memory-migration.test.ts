@@ -57,7 +57,7 @@ function seed(target: MemoryStore, id: string) {
   return output
 }
 
-function summary(version: MemoryVersion, suffix = version) {
+function summary(version: MemoryVersion, suffix: string = version) {
   fs.mkdirSync(memoryRoot(version), { recursive: true })
   fs.writeFileSync(path.join(memoryRoot(version), "memory_summary.md"), SUMMARY + suffix)
 }
@@ -114,7 +114,7 @@ describe("Codex memory migration", () => {
           await consolidating
           expect(currentMemoryVersion()).toBe(version)
           seen.add(`consolidate-${version}`)
-          summary(version)
+          summary(version, version === "v2" ? "ö".repeat(6000) : version)
           return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
         },
       },
@@ -125,6 +125,7 @@ describe("Codex memory migration", () => {
     expect(pluginOptions.version).toBe("v1")
     expect(store("v1").stage1Outputs()[0].raw_memory).not.toBe("")
     expect(store("v2").stage1Outputs()[0].raw_memory).toBe("")
+    expect(fs.readFileSync(path.join(memoryRoot("v2"), "memory_summary.md"), "utf8")).toBe(SUMMARY + "ö".repeat(6000))
     expect(store("v1").maxConsolidatedThreadCount()).toBe(1)
     expect(readMigrationStatus(1).v2Ready).toBe(true)
     expect(readMigrationStatus().v2Ready).toBe(false)
@@ -203,18 +204,19 @@ describe("Codex memory migration", () => {
     if (claim.type !== "claimed") throw new Error(claim.type)
     v2.markPhase2Succeeded(claim.ownershipToken, selected)
     const file = path.join(memoryRoot("v2"), "memory_summary.md")
-    for (const content of [SUMMARY, SUMMARY.replaceAll("\n", "\r\n")]) {
+    for (const content of [SUMMARY, SUMMARY.replaceAll("\n", "\r\n"), SUMMARY.padEnd(10000, "x"), SUMMARY + "ö".repeat(5000)]) {
       fs.writeFileSync(file, content)
       expect(readMigrationStatus()).toMatchObject({
         v2ConsolidatedThreads: 186, v2Ready: true, v2NotReadyReason: null,
         v2SummaryBytes: Buffer.byteLength(content),
       })
+      expect(readMigrationStatus().v2InjectedSummaryBytes!).toBeLessThan(10000)
+      expect(fs.readFileSync(file, "utf8")).toBe(content)
     }
     for (const [content, reason] of [
       ["\uFEFF" + SUMMARY, "summary must start with the exact line 'v1' (UTF-8 BOM detected)"],
       [SUMMARY.replace("## General Tips", "## General tips"), "missing required headings: ## General Tips"],
-      [SUMMARY.padEnd(10000, "x"), "summary must be under 10000 UTF-8 bytes (got 10000)"],
-      [SUMMARY + "ö".repeat(5000), `summary must be under 10000 UTF-8 bytes (got ${Buffer.byteLength(SUMMARY) + 10000})`],
+      [SUMMARY.replace("## General Tips", "## General tips") + "ö".repeat(5000), "missing required headings: ## General Tips"],
     ]) {
       fs.writeFileSync(file, content!)
       expect(readMigrationStatus()).toMatchObject({
@@ -266,19 +268,22 @@ describe("Codex memory migration", () => {
     const failed = v2.claimGlobalPhase2Job()
     if (success.type !== "claimed" || failed.type !== "claimed") throw new Error("expected claims")
     v1.markPhase2Succeeded(success.ownershipToken)
-    const invalid = SUMMARY + "ö".repeat(5000)
-    fs.writeFileSync(path.join(memoryRoot("v2"), "memory_summary.md"), invalid)
+    const oversized = SUMMARY + "ö".repeat(5000)
+    fs.writeFileSync(path.join(memoryRoot("v2"), "memory_summary.md"), oversized)
     v2.markPhase2Failed(failed.ownershipToken, "failed_invalid_artifacts: summary too large")
     const before = openDb("v2").prepare("SELECT * FROM memory_jobs").all()
     const result = await memory_inspect.execute({}, ctx("ses_shadow_diagnostics"))
     const output = text(result)
-    const bytes = Buffer.byteLength(invalid)
+    const bytes = Buffer.byteLength(oversized)
     expect(output).toContain("read_version: v1")
     expect(output).toContain("phase2_last_error: none")
     expect(output).toContain("pipeline_v2_phase2_last_error: failed_invalid_artifacts: summary too large")
     expect(output).toContain("pipeline_v2_phase2_retry_at:")
-    expect(output).toContain(`v2_summary_bytes: ${bytes} (UTF-8; must be under 10000)`)
-    expect(output).toContain(`v2_not_ready_reason: summary must be under 10000 UTF-8 bytes (got ${bytes})`)
+    expect(output).toContain(`v2_summary_bytes: ${bytes} (UTF-8 on disk)`)
+    const injectedBytes = readMigrationStatus().v2InjectedSummaryBytes
+    expect(injectedBytes!).toBeLessThan(10000)
+    expect(output).toContain(`v2_injected_summary_bytes: ${injectedBytes} (UTF-8; capped under 10000, including truncation marker)`)
+    expect(output).toContain("v2_not_ready_reason: insufficient consolidated threads: 0 < 20")
     expect(output).toContain(`memory_summary_chars: ${(SUMMARY + "v1").length}`)
     expect(openDb("v2").prepare("SELECT * FROM memory_jobs").all()).toEqual(before)
     expect(openDb("v1").prepare("SELECT * FROM memory_session_versions").all()).toEqual([])

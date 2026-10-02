@@ -99,15 +99,12 @@ export function ensureLayout(): void {
  */
 const V2_SUMMARY_HEADINGS = ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"] as const
 
-/** Same Codex predicate, with content-free diagnostics for inspect and failed jobs. */
+/** Codex format checks with content-free diagnostics; V2 size is bounded at injection. */
 export function validateV2Summary(summary: string): { ok: boolean; bytes: number; reason: string | null } {
   const bytes = Buffer.byteLength(summary, "utf8")
   if (summary.split(/\r?\n/, 1)[0] !== "v1") {
     const hint = summary.startsWith("\uFEFF") ? " (UTF-8 BOM detected)" : ""
     return { ok: false, bytes, reason: `summary must start with the exact line 'v1'${hint}` }
-  }
-  if (bytes >= 10_000) {
-    return { ok: false, bytes, reason: `summary must be under 10000 UTF-8 bytes (got ${bytes})` }
   }
   const lines = summary.split(/\r?\n/).map((line) => line.trim())
   const missing = V2_SUMMARY_HEADINGS.filter((heading) => !lines.includes(heading))

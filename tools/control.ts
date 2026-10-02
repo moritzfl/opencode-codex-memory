@@ -395,7 +395,8 @@ function inspect(args: { min_consolidated_threads?: number }, ctx?: { sessionID?
         `dual_write: ${pluginOptions.dual_write}`,
         `v2_ready: ${migration.v2Ready}`,
         `v2_not_ready_reason: ${migration.v2NotReadyReason ?? "none"}`,
-        `v2_summary_bytes: ${migration.v2SummaryBytes ?? "unknown"} (UTF-8; must be under 10000)`,
+        `v2_summary_bytes: ${migration.v2SummaryBytes ?? "unknown"} (UTF-8 on disk)`,
+        `v2_injected_summary_bytes: ${migration.v2InjectedSummaryBytes ?? "unknown"} (UTF-8; capped under 10000, including truncation marker)`,
         `v2_consolidated_threads: ${migration.v2ConsolidatedThreads} (minimum ${migration.minConsolidatedThreads})`,
         ...pipelines.flatMap((p) => [
           `pipeline_${p.version}: outputs=${p.stage1Count}, phase2=${p.phase2?.status ?? "none"}, root=${p.root}`,

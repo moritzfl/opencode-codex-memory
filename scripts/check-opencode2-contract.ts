@@ -351,7 +351,7 @@ async function main(): Promise<void> {
             const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
             for (const [label, content, reason] of [
               ["valid", summary, "insufficient consolidated threads: 0 < 20"],
-              ["oversized", summary.padEnd(10_000, "x"), "summary must be under 10000 UTF-8 bytes (got 10000)"],
+              ["oversized", summary.padEnd(10_000, "x"), "insufficient consolidated threads: 0 < 20"],
             ] as const) {
               fs.writeFileSync(path.join(v2Root, "memory_summary.md"), content)
               const result = await api(packedServe, packedSandbox, "POST", "/api/rpc/opencode-codex-memory/status", {
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
               }, { "location[directory]": packedSandbox.project })
               const output = (result.json as { output?: Partial<MemoryStatus> })?.output
               note(result.status === 200 && output?.v2Ready === false && output.v2SummaryBytes === Buffer.byteLength(content)
-                && output.v2NotReadyReason === reason,
+                && output.v2NotReadyReason === reason && output.v2InjectedSummaryBytes != null && output.v2InjectedSummaryBytes < 10000,
                 `packed V2 RPC reports ${label}-summary readiness diagnostics${result.status === 200 ? "" : `: ${result.text.slice(-1000)}`}`)
             }
             note(!fs.existsSync(path.join(packedSandbox.opencodeData, "memory_v2.db")), "packed V2 readiness does not create an inactive database")

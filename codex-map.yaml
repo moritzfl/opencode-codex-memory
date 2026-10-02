@@ -16,8 +16,12 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 0a76a2520f45af68b7a5386688a9714af0a3ccd2
-codex_ref_date: 2026-10-01
+codex_ref: 14a477ea89712071944244022e8a10142845456e
+codex_ref_date: 2026-10-02
+# Re-audited watched diffs: host extension/sandbox/approval plumbing, UI/model
+# discovery flags, named-thread persistence, and test helpers need no plugin port.
+# Upstream truncation now locates UTF-8 boundaries without scanning discarded
+# content; token.ts already uses byte-buffer boundaries with equivalent safety.
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -118,9 +122,12 @@ mappings:
       root or summary file is a symlink, then reads through the same O_NOFOLLOW
       file descriptor it verified to close the final-component race; codex
       prompts.rs trusts the root and only rejects a symlinked root on clear.
-      V2 keeps the complete valid summary in one cache-stable system string
+      V2 keeps the bounded summary in one cache-stable system string
       instead of Codex's 8900-byte contextual fragments (OpenCode has no such
       per-fragment limit). Cache is keyed by summary path, not only mtime.
+      DELIBERATE DIVERGENCE: V2 injection caps at 9999 UTF-8 bytes including
+      the head/tail marker; full artifacts remain on disk for retrieval. Codex's
+      2500-token approximate byte budget adds its marker outside that budget.
   - ours: src/session-version.ts
     theirs: codex-rs/ext/memories/src/extension.rs
     note: >
@@ -249,7 +256,10 @@ mappings:
       summary reads additionally reject symlinks via the plugin path guard.
       Diagnostic extension: report V2 summary UTF-8 bytes and why readiness is
       false (read error, invalid summary, or insufficient progress), without
-      changing the readiness predicate or creating an absent V2 database.
+      creating an absent V2 database. DELIBERATE DIVERGENCE: an oversized
+      structurally valid summary remains ready; the source.ts injection cap
+      bounds its payload instead of blocking cutover. Also report bounded
+      v2InjectedSummaryBytes, excluding read-path instructions.
   - ours: src/store.ts
     theirs: codex-rs/state/src/runtime/memories.rs
     note: >
@@ -389,7 +399,9 @@ mappings:
       an unconfirmed 404 — sessionDeletionConfirmed returns false on hosts without session.get
       and would otherwise stall every job for a full lease.
       Opt-in version=v2: skip raw_memories rebuild; validate summary headings
-      and <10k bytes, no MEMORY.md.
+      (no MEMORY.md). DELIBERATE DIVERGENCE: oversized structurally valid V2
+      artifacts succeed rather than fail_invalid_artifacts; source.ts enforces
+      the byte cap on injection without discarding the stored summary.
       DELIBERATE DIVERGENCE: post-success storage-byte OTEL histogram added
       upstream is not emitted (no plugin telemetry backend). OpenCode helper
       permissions restrict each job to its own memory root even in dual mode;
@@ -406,8 +418,9 @@ mappings:
     note: >
       rebuild raw_memories, write rollout summaries, prune extension resources,
       validate_consolidation_artifacts (also codex workspace.rs).
-      V2 summary validation keeps Codex's exact predicate; the plugin additionally
-      reports content-free header, heading, and UTF-8 byte-limit failure reasons.
+      V2 summary validation keeps Codex's exact header/heading predicate and
+      reports content-free failure reasons. DELIBERATE DIVERGENCE: size does
+      not invalidate artifacts; injection is capped under 10k UTF-8 bytes.
       DIVERGENCES: raw_memories.md entries are truncated at 10k chars each
       (codex: unbounded; guards the consolidation prompt against giant
       extractions); rollout summary headers add usage_count and drop
@@ -528,6 +541,8 @@ mappings:
       Adapted: session_id not thread_id; [REDACTED:secret]; file tools only
       (no shell/delete); same extension placeholders as consolidation.md.
       Summary-only (no MEMORY.md). Opt-in; default v1.
+      Adds a 9000-byte target to leave headroom below Codex's 10k-byte target;
+      runtime injection handles oversize even when the model misses it.
 
   # --- Control / lifecycle ---
   - ours: tools/control.ts
@@ -692,7 +707,11 @@ mappings:
       non-conversation content here.
   - ours: src/token.ts
     theirs: codex-rs/utils/output-truncation
-    note: token-limit truncation for the 2500-token summary cap (chars/4 estimate here).
+    note: >
+      V1 token-limit truncation keeps the 2500-token chars/4 estimate here.
+      V2 uses UTF-8-safe head/tail byte truncation and a 9999-byte injection cap
+      including the marker (Codex's approximate 2500-token byte budget excludes
+      its marker). Per-session extraction keeps its existing 9k-byte cap.
   - ours: src/ratelimit.ts
     theirs: codex-rs/memories/write/src/guard.rs
     note: >
