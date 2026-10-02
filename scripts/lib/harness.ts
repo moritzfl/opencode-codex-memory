@@ -323,6 +323,52 @@ export function requireAuth(): LiveEnv {
   return live
 }
 
+/** Observe native model-bound hooks; persist only the sandbox's injected summary. */
+export function captureMemoryInjections(sandbox: Sandbox, entry = path.join(repoRoot(), "dist/src/index.js")) {
+  const snapshots = path.join(sandbox.root, "memory-injections.jsonl")
+  fs.writeFileSync(path.join(sandbox.project, ".opencode/memory-plugin/index.js"), `
+import fs from "node:fs"
+import plugin from ${JSON.stringify(entry)}
+function capture(sessionID, system) {
+  if (!sessionID) return
+  for (const part of system ?? []) {
+    const text = typeof part === "string" ? part : part.text
+    if (typeof text !== "string") continue
+    const start = "========= MEMORY_SUMMARY BEGINS =========\\n"
+    const end = "\\n========= MEMORY_SUMMARY ENDS ========="
+    const index = text.indexOf(start)
+    if (index < 0) continue
+    const after = text.slice(index + start.length)
+    const finish = after.indexOf(end)
+    if (finish < 0) continue
+    fs.appendFileSync(${JSON.stringify(snapshots)}, JSON.stringify({ sessionID, summary: after.slice(0, finish) }) + "\\n")
+  }
+}
+export default {
+  ...plugin,
+  async server(input, options) {
+    const hooks = await plugin.server(input, options)
+    const transform = hooks["experimental.chat.system.transform"]
+    hooks["experimental.chat.system.transform"] = async (input, output) => {
+      await transform(input, output)
+      capture(input.sessionID, output.system)
+    }
+    return hooks
+  },
+  async setup(ctx) {
+    const cleanup = await plugin.setup(ctx)
+    if (typeof ctx?.session?.hook === "function" && typeof ctx?.location?.directory === "string") {
+      await ctx.session.hook("context", (event) => capture(event.sessionID, event.system))
+    }
+    return cleanup
+  },
+}
+`)
+  return (): { sessionID: string; summary: string }[] => fs.existsSync(snapshots)
+    ? fs.readFileSync(snapshots, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    : []
+}
+
 export function requireModels(models: HostModels = resolveHostModels()): {
   model: string
   smallModel: string

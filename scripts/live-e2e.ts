@@ -27,6 +27,7 @@ import {
   MARKER_LINE,
   api,
   clearPhase2Job,
+  captureMemoryInjections,
   createSandbox,
   createSession,
   log,
@@ -45,6 +46,7 @@ import {
   type Sandbox,
   type ServeHandle,
 } from "./lib/harness.js"
+import { MEMORY_V2_SUMMARY_MAX_BYTES } from "../src/token.js"
 
 // Real artifacts + repeated user constraints meet Codex's minimum-signal gate.
 // Sketch-only Q&A may correctly produce all-empty extraction output.
@@ -183,6 +185,7 @@ async function main() {
     memories: path.join(sandbox.opencodeData, sandbox.memoryVersion === "v1" ? "memories_v2" : "memories"),
   }
   const targets = args.dualWrite ? [sandbox, shadow] : [sandbox]
+  const injections = captureMemoryInjections(sandbox)
   let failures = 0
   const check = (ok: boolean, step: string, msg: string) => {
     if (ok) log(step, `OK — ${msg}`)
@@ -190,6 +193,13 @@ async function main() {
       console.error(`[${step}] FAIL — ${msg}`)
       failures++
     }
+  }
+  const checkV2Injection = (sessionID: string, step: string) => {
+    const summaries = injections().filter((row) => row.sessionID === sessionID).map((row) => row.summary)
+    check(summaries.length > 0, step, "native hook captured V2 summary injection")
+    check(summaries.length > 0 && summaries.every((summary) => Buffer.byteLength(summary) <= MEMORY_V2_SUMMARY_MAX_BYTES),
+      step, "V2 injection stays under 10k UTF-8 bytes, including the truncation marker")
+    return summaries
   }
 
   try {
@@ -405,13 +415,14 @@ async function main() {
     check(fs.existsSync(summaryMd), "phase2", "memory_summary.md exists")
     const summaryText = fs.existsSync(summaryMd) ? fs.readFileSync(summaryMd, "utf8") : ""
     check(summaryText.length > 0, "phase2", `memory_summary non-empty (${summaryText.length} chars)`)
-    check(summaryText.length < 20_000, "phase2", "memory_summary under 20k chars")
+    if (sandbox.memoryVersion === "v1") {
+      check(summaryText.length < 20_000, "phase2", "memory_summary under 20k chars")
+    }
     if (sandbox.memoryVersion === "v2") {
       check(summaryText.split(/\r?\n/, 1)[0] === "v1", "phase2", "v2 summary starts with v1")
       for (const heading of ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"]) {
         check(summaryText.split(/\r?\n/).some((line) => line.trim() === heading), "phase2", `v2 heading ${heading}`)
       }
-      check(Buffer.byteLength(summaryText, "utf8") < 10_000, "phase2", "v2 summary under 10k bytes")
     }
     const rolloutFiles = fs.existsSync(rollouts)
       ? fs.readdirSync(rollouts).filter((f) => f.endsWith(".md"))
@@ -473,6 +484,7 @@ async function main() {
         /csv|result type|readme|two-phase|memory plugin|typed rows/i.test(text) ||
         FACTS.some((f) => text.includes(f.fact.split(":")[0]!))
       check(hit, "loop", "new session sees consolidated memory")
+      if (sandbox.memoryVersion === "v2") checkV2Injection(sid, "loop")
       if (!hit) console.error("closed-loop reply:", text.slice(0, 1500))
     }
 
@@ -529,6 +541,7 @@ async function main() {
         "What did we work on in previous sessions in this project? Use memory tools to check a relevant recap, recall a specific implementation decision, and cite the recap you read.",
         { timeoutMs: 180_000 })
       check(/000742|leading zero|LEDGER_NEGATIVE_AMOUNT|bun test/i.test(reply), "cutover", "fresh session recalls learned V2 implementation decisions")
+      checkV2Injection(freshId, "cutover")
       const meta = path.join(sandbox.opencodeData, "memory.db")
       const versions = sqlAll<{ session_id: string; version: string }>(meta,
         "SELECT session_id, version FROM memory_session_versions WHERE session_id IN (?, ?)", [oldId, freshId])
@@ -541,6 +554,38 @@ async function main() {
         }, { "location[directory]": sandbox.project })
         const state = (status.json as { output?: { v2Ready?: boolean; version?: string } })?.output
         check(state?.v2Ready === true && state.version === "v2", "cutover", "readiness RPC confirms successfully warmed V2")
+      }
+    }
+
+    // Oversize is valid on disk. Exercise the bounded native read path on both
+    // hosts after V2 learning/cutover, then restore the consolidated artifact.
+    if (sandbox.memoryVersion === "v2" || args.dualWrite) {
+      const target = sandbox.memoryVersion === "v2" ? sandbox : shadow
+      const file = path.join(target.memories, "memory_summary.md")
+      const original = fs.readFileSync(file, "utf8")
+      const head = "E2E_OVERSIZED_HEAD"
+      const tailMarker = "E2E_OVERSIZED_TAIL"
+      const middle = `E2E_OVERSIZED_MIDDLE_${crypto.randomUUID()}`
+      const oversized = original.replace(/^(v1\r?\n)/, `$1${head}\n`) + "\n"
+        + "ö".repeat(12_000) + "\n" + middle + "\n" + "ö".repeat(12_000) + "\n" + tailMarker + "\n"
+      const middleLine = oversized.split("\n").indexOf(middle) + 1
+      check(oversized.length > 20_000 && Buffer.byteLength(oversized) > 10_000, "oversize", "fixture exceeds both old disk-size gates")
+      try {
+        fs.writeFileSync(file, oversized)
+        const sid = await createSession(serve, sandbox, "e2e-v2-oversized-summary")
+        await promptSession(serve, sandbox, sid, "Reply exactly: ok. Do not call tools.")
+        const reply = await promptSession(serve, sandbox, sid,
+          `Call memory_read with path="memory_summary.md", line_offset=${middleLine}, max_lines=1. Return that line's full text.`,
+        )
+        const captured = checkV2Injection(sid, "oversize")
+        check(captured.every((text) => text.includes(head) && text.endsWith(tailMarker)
+          && text.includes("[...truncated...]") && !text.includes(middle) && !text.includes("\uFFFD")),
+          "oversize", "head/tail survive UTF-8-safe truncation; middle stays off the injection")
+        check(captured.length >= 2 && captured.every((text) => text === captured[0]), "oversize", "follow-up injection remains cache-stable")
+        check(reply.includes(middle), "oversize", "native memory_read retrieves the discarded middle")
+        check(fs.readFileSync(file, "utf8") === oversized, "oversize", "injection leaves the full disk summary unchanged")
+      } finally {
+        fs.writeFileSync(file, original)
       }
     }
 
@@ -569,22 +614,24 @@ async function main() {
         check(reset.status === 200 && result?.ok === true, "reset", `panel reset: ${resetReply}`)
       } else {
         const sid = await createSession(serve, sandbox, "e2e-reset")
+        const approval = `I explicitly approve resetting both disposable test memory stores under ${sandbox.opencodeData}. These are isolated test data, not my normal memory. Call memory_reset with confirm=true now. After the tool returns, reply RESET_DONE.`
         resetReply = await promptSession(
           serve,
           sandbox,
           sid,
-          "Call the memory_reset tool now with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
+          approval,
           { timeoutMs: 180_000 },
         )
-        // One retry if the model hit the in-flight refusal (or never called the tool).
-        if (/consolidation is currently running|Reset refused|Reset aborted/i.test(resetReply)) {
-          log("reset", "tool refused or aborted — waiting and retrying once")
-          await sleep(15_000)
-          await promptSession(
+        // One retry after an in-flight refusal or an extra model confirmation.
+        const refused = /consolidation is currently running|Reset refused|Reset aborted/i.test(resetReply)
+        if (refused || targets.some((target) => stage1Rows(target).length > 0)) {
+          log("reset", "reset not completed — confirming approval and retrying once")
+          if (refused) await sleep(15_000)
+          resetReply = await promptSession(
             serve,
             sandbox,
             sid,
-            "Call the memory_reset tool again with confirm=true. Do not ask questions. After the tool returns, reply RESET_DONE.",
+            `Yes, I confirm that approval. ${approval}`,
             { timeoutMs: 180_000 },
           )
         }

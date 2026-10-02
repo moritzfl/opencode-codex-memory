@@ -2,7 +2,7 @@ import { describe, expect, it, spyOn } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { completedV2Reply, createSandbox, promptSession, repoRoot, type Sandbox, type ServeHandle } from "../scripts/lib/harness.js"
+import { captureMemoryInjections, completedV2Reply, createSandbox, promptSession, repoRoot, type Sandbox, type ServeHandle } from "../scripts/lib/harness.js"
 
 const user = { type: "user", id: "msg_new" }
 const assistant = { type: "assistant", id: "msg_answer", time: { completed: 123 }, finish: "stop", content: [{ type: "text", text: "new answer" }] }
@@ -76,6 +76,46 @@ describe("live harness", () => {
       expect(waiting).toBe(true)
     } finally {
       server.stop(true)
+      sandbox.keep = false
+      sandbox.cleanup()
+    }
+  })
+
+  it("captures only injected summaries after both native host hooks and preserves cleanup", async () => {
+    const sandbox = createSandbox()
+    const entry = path.join(sandbox.root, "fake-plugin.js")
+    const summary = "v1\n\nHEAD\nö\nTAIL"
+    const prompt = `private instructions\n========= MEMORY_SUMMARY BEGINS =========\n${summary}\n========= MEMORY_SUMMARY ENDS =========`
+    fs.writeFileSync(entry, `export default {
+      id: "fake-memory",
+      async server() { return { "experimental.chat.system.transform": async (_, out) => out.system.push(${JSON.stringify(prompt)}) } },
+      async setup(ctx) {
+        if (!ctx?.session?.hook) return
+        await ctx.session.hook("context", (event) => event.system.push({ type: "text", text: ${JSON.stringify(prompt)} }))
+        return () => { ctx.cleaned = true }
+      },
+    }`)
+    try {
+      const read = captureMemoryInjections(sandbox, entry)
+      expect(read()).toEqual([])
+      const plugin = (await import(path.join(sandbox.project, ".opencode/memory-plugin/index.js"))).default
+      const hooks = await plugin.server({})
+      const out = { system: ["private base prompt"] }
+      await hooks["experimental.chat.system.transform"]({ sessionID: "ses_v1" }, out)
+      expect(out.system.at(-1)).toBe(prompt)
+      await plugin.setup({}) // V1 can invoke setup without a V2 context.
+      const handlers: ((event: any) => void)[] = []
+      const ctx = { location: { directory: sandbox.project }, cleaned: false,
+        session: { hook: async (_: string, handler: (event: any) => void) => { handlers.push(handler) } } }
+      const cleanup = await plugin.setup(ctx)
+      const event = { sessionID: "ses_v2", system: [{ type: "text", text: "private base prompt" }] }
+      for (const handler of handlers) handler(event)
+      expect(event.system.at(-1)?.text).toBe(prompt)
+      await cleanup()
+      expect(ctx.cleaned).toBe(true)
+      expect(read()).toEqual([{ sessionID: "ses_v1", summary }, { sessionID: "ses_v2", summary }])
+      expect(fs.readFileSync(path.join(sandbox.root, "memory-injections.jsonl"), "utf8")).not.toContain("private")
+    } finally {
       sandbox.keep = false
       sandbox.cleanup()
     }
