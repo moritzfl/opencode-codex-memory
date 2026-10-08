@@ -16,12 +16,12 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 14a477ea89712071944244022e8a10142845456e
-codex_ref_date: 2026-10-02
-# Re-audited watched diffs: host extension/sandbox/approval plumbing, UI/model
-# discovery flags, named-thread persistence, and test helpers need no plugin port.
-# Upstream truncation now locates UTF-8 boundaries without scanning discarded
-# content; token.ts already uses byte-buffer boundaries with equivalent safety.
+codex_ref: c9e0fffbbc05c36478686444f6ab1edbadfe2768
+codex_ref_date: 2026-10-08
+# Re-audited watched diffs: parallel memory-tool scheduling, host config/UI,
+# sandbox/approval/lineage plumbing, cancellation, and tests need no plugin port.
+# New 64 KiB command/MCP persistence caps belong to Codex rollout storage;
+# the plugin consumes OpenCode transcripts and retains its extraction budgets.
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
