@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-19
+
+### Fixed
+
+- Extension resource pruning keeps timestamped files for 14 days instead of 7,
+  matching Codex's `RETENTION_DAYS` change (#54033). Ad-hoc notes remain
+  permanent.
+
 ## [0.9.10] - 2026-10-02
 
 ### Fixed
@@ -999,7 +1007,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.10...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.11...HEAD
+[0.9.11]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.8...v0.9.9
 [0.9.8]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.7...v0.9.8
