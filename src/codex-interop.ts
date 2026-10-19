@@ -37,7 +37,7 @@ import { readRegularFileNoFollow, safeResolveUnderRoot, writeRegularFileNoFollow
  * artifacts-gone => resources removed (deletion is the forgetting signal in
  * the workspace diff) while an unreachable source ROOT is a no-op, never a
  * deletion signal. Resource files are nested under a subdirectory and carry
- * no timestamp prefix, so extension-resource pruning (7-day retention,
+ * no timestamp prefix, so extension-resource pruning (14-day retention,
  * top-level timestamped files only) never touches them — same retention
  * exemption codex relies on for external_agent_import.
  */

@@ -6,6 +6,7 @@ import { memoryDbPath } from "./paths.js"
 import { withMemoryVersion, writeMemoryVersions } from "./memory-version.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
+import { EXTENSION_RESOURCE_RETENTION_DAYS } from "./workspace.js"
 
 const extracting = new Set<string>()
 
@@ -14,7 +15,7 @@ async function consolidate(store: MemoryStore, bypassCooldown: boolean): Promise
     const result = await runPhase2(store, {
       maxRaw: pluginOptions.max_raw_memories_for_consolidation,
       maxUnusedDays: pluginOptions.max_unused_days,
-      extensionRetentionDays: 7,
+      extensionRetentionDays: EXTENSION_RESOURCE_RETENTION_DAYS,
       consolidationModel: pluginOptions.consolidation_model,
       codexInterop: pluginOptions.codex_interop,
       claudeImport: pluginOptions.claude_import,

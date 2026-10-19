@@ -318,6 +318,11 @@ describe("validateConsolidationArtifacts", () => {
 })
 
 describe("pruneExtensionResources", () => {
+  it("uses codex's 14-day retention default", () => {
+    const { EXTENSION_RESOURCE_RETENTION_DAYS } = require("../src/workspace.js")
+    expect(EXTENSION_RESOURCE_RETENTION_DAYS).toBe(14)
+  })
+
   it("prunes old timestamped resources but never notes or instructions.md", () => {
     const { ensureLayout, pruneExtensionResources } = require("../src/workspace.js")
     const { memoryRoot } = require("../src/paths.js")
@@ -330,7 +335,7 @@ describe("pruneExtensionResources", () => {
     fs.writeFileSync(path.join(resources, "2020-01-01T00-00-00_old-res.md"), "old")
     fs.writeFileSync(path.join(resources, "2999-01-01T00-00-00_future-res.md"), "new")
     fs.writeFileSync(path.join(resources, "untimestamped.md"), "keep")
-    pruneExtensionResources(7)
+    pruneExtensionResources(14)
     expect(fs.readdirSync(notes).sort()).toEqual(["2020-01-01T00-00-00-old-note.md"])
     expect(fs.readdirSync(resources).sort()).toEqual(["2999-01-01T00-00-00_future-res.md", "untimestamped.md"])
     expect(fs.existsSync(path.join(memoryRoot(), "extensions", "ad_hoc", "instructions.md"))).toBe(true)
@@ -348,7 +353,7 @@ describe("pruneExtensionResources", () => {
     fs.writeFileSync(path.join(outside, "2020-01-01T00-00-00-old.md"), "keep")
     fs.symlinkSync(outside, path.join(extDir, "resources"))
 
-    pruneExtensionResources(7)
+    pruneExtensionResources(14)
     expect(fs.readFileSync(path.join(outside, "2020-01-01T00-00-00-old.md"), "utf8")).toBe("keep")
   })
 })

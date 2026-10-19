@@ -5,6 +5,7 @@ import {
   rebuildRawMemories,
   writeRolloutSummaries,
   pruneExtensionResources,
+  EXTENSION_RESOURCE_RETENTION_DAYS,
   writeWorkspaceDiff,
   validateConsolidationArtifactsForVersion,
   removeMemorySymlinks,
@@ -45,7 +46,7 @@ export interface Phase2Options {
 export const DEFAULT_PHASE2_OPTIONS: Phase2Options = {
   maxRaw: 256,
   maxUnusedDays: 30,
-  extensionRetentionDays: 7,
+  extensionRetentionDays: EXTENSION_RESOURCE_RETENTION_DAYS,
 }
 
 // Export runs only after a successful phase 2 (fresh, validated artifacts) and

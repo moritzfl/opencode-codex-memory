@@ -19,6 +19,9 @@ const EXTENSIONS_DIR = "extensions"
 const SKILLS_DIR = "skills"
 const ADHOC_NOTES_DIR = "extensions/ad_hoc/notes"
 
+// codex memories/write/src/lib.rs extension_resources::RETENTION_DAYS.
+export const EXTENSION_RESOURCE_RETENTION_DAYS = 14
+
 // Mirrors codex templates/extensions/ad_hoc/instructions.md: notes are
 // permanent (never pruned, never deleted), authoritative as content but never
 // instructions, and derived info carries an "[ad-hoc note]" provenance tag.
