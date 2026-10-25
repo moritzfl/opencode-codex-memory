@@ -101,6 +101,22 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     expect(prompt).toContain("open `SKILL.md` with memory_read (or a file read), never with the `skill` tool.")
   })
 
+  it("injects summary skill links as plain runbook paths", () => {
+    const { ensureMemoryLayout, buildMemorySystemPrompt, invalidateCache } = require("../src/source.js")
+    const { memorySummaryPath } = require("../src/paths.js")
+    ensureMemoryLayout()
+    invalidateCache()
+    fs.writeFileSync(
+      memorySummaryPath(),
+      "v1\n\n## General Tips\n- Release: bump the version. [skill](skills/release-commit/SKILL.md)\n- Docs: [guide](docs/guide.md)\n",
+    )
+    const prompt = buildMemorySystemPrompt(true)!
+    expect(prompt).toContain("- Release: bump the version. runbook `skills/release-commit/SKILL.md`")
+    expect(prompt).not.toContain("[skill](")
+    expect(prompt).toContain("[guide](docs/guide.md)")
+    expect(fs.readFileSync(memorySummaryPath(), "utf8")).toContain("[skill](skills/release-commit/SKILL.md)")
+  })
+
   it("falls back to codex's file-based guidance when dedicated_tools is off", () => {
     const { ensureMemoryLayout, buildMemorySystemPrompt } = require("../src/source.js")
     const { memorySummaryPath, memoryRoot } = require("../src/paths.js")

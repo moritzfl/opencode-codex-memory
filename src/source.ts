@@ -40,6 +40,10 @@ const SKILL_STEP_TOOLS = `   Files under {{ base_path }}/skills/ are memory runb
 const SKILL_STEP_FILES = `   Files under {{ base_path }}/skills/ are memory runbooks, not OpenCode skills:
    open \`SKILL.md\` with a file read, never with the \`skill\` tool.`
 
+// Consolidated summaries link skills as `[skill](skills/…)`, which models read
+// as a `skill` tool handle. Inject them as plain runbook paths instead.
+const SKILL_LINK = /\[skill\]\((skills\/[^)\s]+)\)/g
+
 const UPDATE_INSTRUCTIONS_TOOLS = `Use the \`memory_add_note\` tool, which writes
 one small note file under \`extensions/ad_hoc/notes/\` describing what to
 add/delete/update. Do not edit the memory files yourself; the consolidation
@@ -83,7 +87,7 @@ function readMemorySummary(): string | null {
         return cached.content
       }
 
-      const raw = fs.readFileSync(fd, "utf8").trim()
+      const raw = fs.readFileSync(fd, "utf8").trim().replace(SKILL_LINK, "runbook `$1`")
       if (!raw) return null
 
       const truncated = currentMemoryVersion() === "v2"

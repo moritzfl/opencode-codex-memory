@@ -123,7 +123,11 @@ mappings:
     theirs: codex-rs/ext/memories/src/prompts.rs
     note: >
       builds the injected summary block; takes no cwd/project arg (codex takes
-      codex_home only). Extra dedicatedTools flag selects tool-based vs
+      codex_home only). DELIBERATE ADAPTATION: `[skill](skills/…)` summary
+      links are injected as plain "runbook `skills/…`" paths (the file is
+      unchanged) because OpenCode models treat them as `skill` tool handles.
+      Live OpenCode 2.1.2 probe: the read-path line alone still failed 3/7;
+      with this rewrite 0/15 (6 of them on the shipped build). Extra dedicatedTools flag selects tool-based vs
       codex-style file-based guidance snippets for read_path.md.
       DELIBERATE EXTENSION (same as the memory tools' path guard): resolves
       memory_summary.md component-by-component and refuses injection when the
