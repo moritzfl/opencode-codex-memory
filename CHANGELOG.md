@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-10-25
+
+### Fixed
+
+- Memory skills load as runbooks instead of failing with "Unable to load
+  skill …". Agents were calling OpenCode's `skill` tool for
+  `skills/<name>/SKILL.md`, which cannot load memory files. The memory
+  guidance now says to open them with `memory_read`, and summary skill links
+  are injected as plain runbook paths.
+- On OpenCode 2.1+, background extraction waits when the host reports
+  "Location plugins did not finish activating" at startup, using the same
+  bounded retries as late model registration, instead of failing the attempt.
+- Memory V2 no longer creates an empty `skills/` folder; like Codex, V2 has
+  no skills. An empty leftover is removed; existing content stays.
+
 ## [0.9.11] - 2026-10-19
 
 ### Fixed
@@ -1007,7 +1022,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.11...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.12...HEAD
+[0.9.12]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.9...v0.9.10
 [0.9.9]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.8...v0.9.9
