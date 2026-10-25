@@ -730,9 +730,12 @@ export function runOpencode(
 ): { stdout: string; stderr: string; code: number } {
   ensureBuilt()
   const bin = whichOpencode()
+  const cwd = opts.cwd ?? sandbox.project
   const result = spawnSync(bin, args, {
-    cwd: opts.cwd ?? sandbox.project,
-    env: sandbox.env,
+    cwd,
+    // OpenCode 2 `run` takes its directory from PWD, not the spawn cwd; an
+    // inherited PWD would point the session at the caller's checkout.
+    env: { ...sandbox.env, PWD: cwd },
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 120_000,
   })
