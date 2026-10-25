@@ -38,6 +38,7 @@ Quick memory pass (when applicable):
 3. Only if MEMORY.md directly points to rollout summaries/skills, open the 1-2
    most relevant files under {{ base_path }}/rollout_summaries/ or
    {{ base_path }}/skills/.
+{{ skill_step }}
 4. If the above are not clear and you need exact commands, error text, or precise
    evidence, read the most relevant rollout summary files for more evidence.
 5. If there are no relevant hits, stop memory lookup and continue normally.

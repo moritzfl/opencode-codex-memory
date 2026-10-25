@@ -96,6 +96,9 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     expect(prompt).toContain("memory_read")
     expect(prompt).toContain("memory_add_note")
     expect(prompt).not.toContain("not tools inside `execute`")
+    // memory skills are files; OpenCode's native `skill` tool cannot load them
+    expect(prompt).toContain("are memory runbooks, not OpenCode skills")
+    expect(prompt).toContain("open `SKILL.md` with memory_read (or a file read), never with the `skill` tool.")
   })
 
   it("falls back to codex's file-based guidance when dedicated_tools is off", () => {
@@ -112,6 +115,7 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     // codex-style direct file access instead
     expect(prompt).toContain(`Search ${memoryRoot()}/MEMORY.md using those keywords.`)
     expect(prompt).toContain(`Write your update in ${memoryRoot()}/extensions/ad_hoc/notes/`)
+    expect(prompt).toContain("open `SKILL.md` with a file read, never with the `skill` tool.")
     // citation contract is tool-independent and must survive
     expect(prompt).toContain("<memory-citation>")
     expect(prompt).toContain("<session_ids>")
@@ -232,7 +236,7 @@ describe("template placeholder inventory", () => {
   it("templates contain only placeholders the code fills", () => {
     const dir = path.join(import.meta.dirname, "..", "src", "templates")
     const known: Record<string, string[]> = {
-      "read_path.md": ["base_path", "memory_summary", "search_step", "update_instructions"],
+      "read_path.md": ["base_path", "memory_summary", "search_step", "skill_step", "update_instructions"],
       "read_path_v2.md": ["base_path", "memory_summary", "search_step", "update_instructions"],
       "consolidation.md": [
         "memory_root",

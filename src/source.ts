@@ -32,6 +32,14 @@ Search {{ base_path }}/rollout_summaries/ with the \`memory_search\`
 
 const SEARCH_STEP_FILES_V2 = `Search {{ base_path }}/rollout_summaries/ using those keywords when a needed route is missing.`
 
+// OpenCode has a native `skill` tool; codex does not. Memory skills are plain
+// files, so a `skill` call by their name fails before the runbook is read.
+const SKILL_STEP_TOOLS = `   Files under {{ base_path }}/skills/ are memory runbooks, not OpenCode skills:
+   open \`SKILL.md\` with memory_read (or a file read), never with the \`skill\` tool.`
+
+const SKILL_STEP_FILES = `   Files under {{ base_path }}/skills/ are memory runbooks, not OpenCode skills:
+   open \`SKILL.md\` with a file read, never with the \`skill\` tool.`
+
 const UPDATE_INSTRUCTIONS_TOOLS = `Use the \`memory_add_note\` tool, which writes
 one small note file under \`extensions/ad_hoc/notes/\` describing what to
 add/delete/update. Do not edit the memory files yourself; the consolidation
@@ -104,6 +112,7 @@ export function buildMemorySystemPrompt(dedicatedTools: boolean): string | null 
     : (v2 ? SEARCH_STEP_FILES_V2 : SEARCH_STEP_FILES)
   return fillTemplate(template, {
     search_step: searchStep,
+    skill_step: dedicatedTools ? SKILL_STEP_TOOLS : SKILL_STEP_FILES,
     update_instructions: dedicatedTools ? UPDATE_INSTRUCTIONS_TOOLS : UPDATE_INSTRUCTIONS_FILES,
     // Filled last so {{ base_path }} nested inside the snippets above resolves.
     base_path: memoryRoot(),

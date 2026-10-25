@@ -105,6 +105,9 @@ mappings:
       wording (agent reads/writes the FS directly, like codex);
       rollout_summaries described as per-session .md recaps (codex: raw .jsonl
       rollouts with session_meta/rollout_path).
+      {{ skill_step }} (source.ts, tool/file wording) states that skills/ are
+      memory runbooks read as files, never via OpenCode's native `skill` tool
+      (codex has none; a `skill` call by a memory skill name fails).
       Injects a SINGLE global memory_summary.md regardless of project.
   - ours: src/templates/read_path_v2.md
     theirs: codex-rs/ext/memories/templates/memories/read_path_v2.md
