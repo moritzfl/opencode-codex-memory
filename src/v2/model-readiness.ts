@@ -7,7 +7,11 @@ type ModelRef = { providerID: string; id: string }
 // than silently changing models or indefinitely hiding a configuration error.
 const RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000] as const
 
-/** Only retry host selection failures: these occur before any inference. */
+// OpenCode 2.1+ holds model requests until location plugins activate, then
+// fails after 5s; provider plugins may still be registering at that point.
+const PLUGIN_ACTIVATION_PENDING = "Location plugins did not finish activating"
+
+/** Only retry host startup failures: these occur before any inference. */
 export function isModelSelectionUnavailable(error: unknown, model?: ModelRef): boolean {
   const message = model
     ? `Model unavailable: ${model.providerID}/${model.id}`
@@ -17,6 +21,7 @@ export function isModelSelectionUnavailable(error: unknown, model?: ModelRef): b
     seen.add(current)
     const tag = current._tag ?? current.name
     if (["InvalidRequestError", "Generate.ModelSelectionError"].includes(tag) && current.message === message) return true
+    if (tag === "ServiceUnavailableError" && current.service === "plugin" && current.message === PLUGIN_ACTIVATION_PENDING) return true
   }
   return false
 }

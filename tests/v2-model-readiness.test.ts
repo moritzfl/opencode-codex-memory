@@ -19,9 +19,17 @@ describe("V2 model startup readiness", () => {
     expect(isModelSelectionUnavailable(cyclic, model)).toBe(false)
   })
 
+  it("recognizes OpenCode 2.1 plugin activation timeouts before inference", () => {
+    const pending = { _tag: "ServiceUnavailableError", message: "Location plugins did not finish activating", service: "plugin" }
+    expect(isModelSelectionUnavailable(pending, model)).toBe(true)
+    expect(isModelSelectionUnavailable(new Error("SDK error", { cause: pending }))).toBe(true)
+  })
+
   it.each([
     new Error("fetch failed"),
     { _tag: "ServiceUnavailableError", message: unavailable.message },
+    { _tag: "ServiceUnavailableError", message: "Location plugins did not finish activating", service: "provider" },
+    { _tag: "ServiceUnavailableError", message: "Plugin service restarting", service: "plugin" },
     { ...unavailable, message: "Variant unavailable for openai/gpt-6-luna: low" },
     { ...unavailable, message: "Model unavailable: openai/different" },
     { ...unavailable, message: "Bad schema" },

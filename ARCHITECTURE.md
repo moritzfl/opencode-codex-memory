@@ -249,6 +249,7 @@ historical transcript. Shared extraction parsing and validation check the JSON
 reply. Consolidation still uses a sandboxed helper session.
 
 OpenCode 2 extraction retries only exact host model-selection-unavailable errors
+and the OpenCode 2.1+ "Location plugins did not finish activating" timeout
 before inference, with eight cancellable backoffs totaling 45.75 seconds
 for asynchronous provider registration. Persistent absence still fails normally;
 transport, authorization, variant and provider-generation errors are not replayed.

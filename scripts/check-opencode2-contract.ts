@@ -211,7 +211,7 @@ async function main(): Promise<void> {
 
   // --- native model startup race ---
   const readiness = await probeV2ModelReadiness()
-  note(true, `cold model startup recovers after ${readiness.failures} selection failure(s), exactly ${readiness.inferenceCalls} inference request`)
+  note(true, `cold model startup recovers after ${readiness.failures} startup failure(s), exactly ${readiness.inferenceCalls} inference request`)
 
   // --- built plugin dual export ---
   const root = path.resolve(import.meta.dirname, "..")
