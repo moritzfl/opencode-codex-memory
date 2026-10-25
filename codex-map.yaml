@@ -445,6 +445,8 @@ mappings:
       rollout_path/git_branch (metadata the port does not have); ensureLayout
       pre-seeds placeholder MEMORY.md + empty memory_summary.md (codex: the
       consolidator INITs them; outcome-equivalent, first diff shows M not A).
+      skills/ is v1-only: codex startup_tests asserts a V2 root has none, so
+      ensureLayout skips it for v2 and removes an empty leftover.
       Claude project memory import is no longer a divergence: see
       src/claude-import.ts. Codex-CLI consolidated-memory exchange remains in
       src/codex-interop.ts. rollout_summaries/ file stems use a 4-hex sha1 of

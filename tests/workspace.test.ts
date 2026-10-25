@@ -218,6 +218,38 @@ describe("V2 summary validation diagnostics", () => {
   })
 })
 
+describe("ensureLayout", () => {
+  it("creates skills/ only for v1, like codex", () => {
+    const { ensureLayout } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const { withMemoryVersion } = require("../src/memory-version.js")
+    withMemoryVersion("v1", () => ensureLayout())
+    expect(fs.existsSync(path.join(memoryRoot(), "skills"))).toBe(true)
+    withMemoryVersion("v2", () => {
+      ensureLayout()
+      expect(fs.existsSync(path.join(memoryRoot(), "skills"))).toBe(false)
+      expect(fs.existsSync(path.join(memoryRoot(), "rollout_summaries"))).toBe(true)
+      expect(fs.existsSync(path.join(memoryRoot(), "extensions", "ad_hoc", "notes"))).toBe(true)
+    })
+  })
+
+  it("drops an empty leftover v2 skills/ but keeps content", () => {
+    const { ensureLayout } = require("../src/workspace.js")
+    const { memoryRoot } = require("../src/paths.js")
+    const { withMemoryVersion } = require("../src/memory-version.js")
+    withMemoryVersion("v2", () => {
+      const skills = path.join(memoryRoot(), "skills")
+      fs.mkdirSync(skills, { recursive: true })
+      ensureLayout()
+      expect(fs.existsSync(skills)).toBe(false)
+      fs.mkdirSync(path.join(skills, "kept"), { recursive: true })
+      fs.writeFileSync(path.join(skills, "kept", "SKILL.md"), "user content\n")
+      ensureLayout()
+      expect(fs.readFileSync(path.join(skills, "kept", "SKILL.md"), "utf8")).toBe("user content\n")
+    })
+  })
+})
+
 describe("validateConsolidationArtifacts", () => {
   it("rejects missing MEMORY.md, empty summary, and non-v1 header", () => {
     const { ensureLayout, validateConsolidationArtifacts } = require("../src/workspace.js")

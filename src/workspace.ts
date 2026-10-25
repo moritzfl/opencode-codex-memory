@@ -81,10 +81,16 @@ export function ensureLayout(): void {
   const root = assertMemoryRootSafe()
   fs.mkdirSync(root, { recursive: true })
   removeMemorySymlinks(root)
-  for (const dir of [ROLLOUT_DIR, SKILLS_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]) {
+  const v1 = currentMemoryVersion() === "v1"
+  // Codex V2 consolidates into memory_summary.md only; it has no skills/.
+  for (const dir of v1 ? [ROLLOUT_DIR, SKILLS_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR] : [ROLLOUT_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]) {
     fs.mkdirSync(safeResolveMemoryPath(dir), { recursive: true })
   }
-  if (currentMemoryVersion() === "v1") {
+  if (!v1) {
+    // Older releases created an empty one; never remove content.
+    try { fs.rmdirSync(safeResolveMemoryPath(SKILLS_DIR)) } catch {}
+  }
+  if (v1) {
     const memoryMd = safeResolveMemoryPath("MEMORY.md")
     if (!fs.existsSync(memoryMd)) writeRegularFileNoFollow(memoryMd, "# MEMORY.md\n\n_Searchable index of memories._\n")
   }
