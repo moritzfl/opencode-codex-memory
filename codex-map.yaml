@@ -16,12 +16,14 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 89461ea6833832b0551ce24ee32205824d5c108d
-codex_ref_date: 2026-10-19
-# Re-audited watched diffs: extension-resource retention is now 14 days
-# (ported); bounded newest-first rollout reads, cancellation, typed extension
-# content, SQLite busy retry, and host hooks/MCP/config need no plugin port.
-# Memory defaults unchanged (V1, dual_write false, MemoryTool off, luna/terra).
+codex_ref: 970111f6cb62cc02fe36a82ea7d71b37a2889c97
+codex_ref_date: 2026-10-25
+# Re-audited watched diffs: the import/consolidation workspace lock, v2-aware
+# external-agent imports, attached-thread metadata, and host hooks/MCP/
+# providers/features need no plugin port. Codex now defaults fresh profiles to
+# v2 and stops dual-write once v2 is selected; the plugin deliberately keeps
+# v1 opt-in and its documented dual_write fallback (see the notes below).
+# MemoryTool still stable/off; luna/terra pins unchanged.
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -80,6 +82,9 @@ watch_paths:
   - codex-rs/utils/string/src/truncate.rs
   - codex-rs/rollout/src/lib.rs
   - codex-rs/model-provider/src/provider.rs
+  # Added after the 2026-10-25 audit — the fresh-profile memory version
+  # default (#56211) is resolved here, outside config/src/types.rs:
+  - codex-rs/core/src/config/mod.rs
 
 # ours: path in this repo. theirs: path in the codex checkout.
 # Every `theirs` is existence-checked by the drift script (catches renames like
@@ -238,6 +243,9 @@ mappings:
       Codex clones config per writer. Node AsyncLocalStorage provides immutable
       version routing through async calls instead of changing global options;
       dual_write selects both V1 and V2 regardless of the selected read default.
+      DELIBERATE DIVERGENCE (codex #55262, audited 2026-10-25): codex
+      dual-writes only while v1 is selected. The plugin keeps writing both with
+      version v2 so Memory V1 stays a current fallback (docs/memory-versions.md).
   - ours: src/pipeline.ts
     theirs: codex-rs/memories/write/src/start.rs
     note: >
@@ -260,6 +268,9 @@ mappings:
       structurally valid summary remains ready; the source.ts injection cap
       bounds its payload instead of blocking cutover. Also report bounded
       v2InjectedSummaryBytes, excluding read-path instructions.
+      DELIBERATE DIVERGENCE (codex #56211, audited 2026-10-25): codex reports
+      ready whenever no V1 workspace exists. The plugin keeps the threshold:
+      readiness only informs a manual cutover, and v1 stays the default.
   - ours: src/store.ts
     theirs: codex-rs/state/src/runtime/memories.rs
     note: >
@@ -454,6 +465,10 @@ mappings:
       project keys rejected if path-unsafe or hidden (path-guard); instructions
       add optional [from claude] provenance tag. Default-off via claude_import
       plugin option (codex: migration feature / include_memory detect gate).
+      No port needed (audited 2026-10-25): codex #56462 adds a cross-process
+      MemoryWorkspaceLock because its imports run outside consolidation; here
+      the sync runs inside the claimed phase-2 job. Codex #56414 imports into
+      every active version root; here each writer syncs its own root.
   - ours: src/codex-interop.ts
     theirs: codex-rs/external-agent-migration/src/memory_import.rs
     note: >
@@ -778,3 +793,6 @@ mappings:
       bad options); (6) options.test (live harness only) skips Codex numeric clamps
       so e2e can set min_rollout_idle_hours=0.01. Production stays integer 1–48
       like MemoriesToml. version defaults to v1; dual_write defaults to false.
+      DELIBERATE DIVERGENCE (codex #56211, audited 2026-10-25): codex
+      core/src/config/mod.rs defaults fresh profiles (memories enabled, no
+      memories/ dir, dual_write not false) to v2; the plugin keeps v1 opt-in.
