@@ -67,6 +67,10 @@ describe("rate-limit stub semantics", () => {
     expect(isProviderCapacityError("HTTP 429 too many requests")).toBe(true)
     expect(isProviderCapacityError("insufficient_quota")).toBe(true)
     expect(isProviderCapacityError("You exceeded your current quota, please check your plan")).toBe(true)
+    // GitHub Copilot via OpenCode 2 (observed: ServiceUnavailableError, HTTP 503).
+    expect(isProviderCapacityError({
+      _tag: "ServiceUnavailableError", message: "You have exceeded your monthly quota", service: "github-copilot",
+    })).toBe(true)
     expect(isProviderCapacityError("boom")).toBe(false)
     // "quota" alone is not a capacity signal (e.g. a transcript about quotas).
     expect(isProviderCapacityError("invalid JSON: memory mentions disk quota settings")).toBe(false)

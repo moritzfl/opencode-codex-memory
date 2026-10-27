@@ -47,7 +47,7 @@ const MIN_PHASE1_INTERVAL_MS = 30_000
 export const PROVIDER_CAPACITY_BACKOFF_MS = 3_600_000
 
 const PROVIDER_CAPACITY_RE =
-  /usage limit|free usage exceeded|provider capacity exhausted|rate[\s_-]?limit|quota\s+(?:exceeded|exhausted|reached)|exceeded (?:your|the) (?:current )?quota|too many requests|\b429\b|resource_exhausted|insufficient_quota|billing.?hard.?limit/i
+  /usage limit|free usage exceeded|provider capacity exhausted|rate[\s_-]?limit|quota\s+(?:exceeded|exhausted|reached)|exceeded (?:your|the) (?:[\w-]+ )?quota|too many requests|\b429\b|resource_exhausted|insufficient_quota|billing.?hard.?limit/i
 // A single request larger than the per-minute budget (OpenAI "Request too
 // large … tokens per min", sent as 429) never succeeds on retry; treating it
 // as capacity would keep that session pending forever and trip the breaker
