@@ -19,7 +19,9 @@
  *   bun run live:e2e
  *   OPENCODE_LIVE_KEEP=1 bun run live:e2e
  *   bun run live:e2e -- --skip-reset --skip-citation
- *   bun run live:e2e -- --model-fallback   # quota-exhausted stub model first
+ *
+ * On OpenCode 2 hosts, a quota-exhausted stub model leads both model chains,
+ * so every run also proves backup-model fallback.
  */
 import fs from "fs"
 import path from "path"
@@ -37,6 +39,7 @@ import {
   opencodeVersion,
   requireAuth,
   requireModels,
+  semverGte,
   whichOpencode,
   sleep,
   sqlAll,
@@ -84,7 +87,6 @@ type Args = {
   skipCitation: boolean
   memoryVersion: "v1" | "v2"
   dualWrite: boolean
-  modelFallback: boolean
   phase1TimeoutMs: number
   phase2TimeoutMs: number
 }
@@ -95,7 +97,6 @@ function parseArgs(argv: string[]): Args {
     skipReset: argv.includes("--skip-reset"),
     skipCitation: argv.includes("--skip-citation"),
     dualWrite: argv.includes("--dual-write"),
-    modelFallback: argv.includes("--model-fallback"),
     memoryVersion:
       argv.includes("--version") && argv[argv.indexOf("--version") + 1] === "v2"
         ? "v2"
@@ -205,7 +206,9 @@ async function main() {
   log("e2e", `bin ${bin} @ ${opencodeVersion(bin)}`)
   log("e2e", `models model=${models.model} small=${models.smallModel}`)
 
-  const quota = args.modelFallback ? startQuotaExhaustedUpstream() : null
+  // Backup models are OpenCode 2 only (1.x keeps the first model of a chain),
+  // and cost V2 one instant request per exhausted model, so always test them.
+  const quota = semverGte(opencodeVersion(bin), "2.0.0") ? startQuotaExhaustedUpstream() : null
   // Separate exhausted models per phase: quota backoff is per model, so a
   // shared one would make consolidation skip it instead of failing over.
   const extractModel = quota ? `exhausted/${EXHAUSTED_MODELS[0]}, ${models.model}` : models.model!
@@ -331,7 +334,7 @@ async function main() {
           const jobs = stage1Jobs(sandbox)
           if (!jobs.length && Date.now() - phase1Started > 60_000) throw new Error("no stage1 claims after real idle + trigger")
           // A trigger that lands while an earlier pass still runs is a no-op
-          // (already_running), e.g. while OpenCode 1.x retries a quota error.
+          // (already_running).
           if (Date.now() - lastTrigger > 60_000 && !workIds.some((id) => jobs.some((j) => j.job_key === id))) {
             lastTrigger = Date.now()
             log("phase1", "work sessions still unclaimed — triggering idle again")
