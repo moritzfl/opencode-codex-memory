@@ -697,6 +697,14 @@ mappings:
       or a missing variants field keeps the Codex pin (unknown variant is a
       host no-op).       Custom picker names such as "fast xhigh" are ignored.
       Opt-in version=v2 selects consolidation_v2.md / stage_one_*_v2.md.
+      DELIBERATE DIVERGENCE (model fallback): codex takes one model per phase.
+      withModelFallback tries a comma-separated extract_model /
+      consolidation_model chain in order, one fresh helper session per model,
+      within the single per-job timeout budget. Cancellation, timeout, and
+      SubagentShutdownError end the chain (a consolidator that may still be
+      alive must keep the lease; no second writer). Quota failures note that
+      model's backoff; the thrown error is the first non-quota failure, else
+      the last quota failure.
 
   # --- Utilities ---
   - ours: src/redact.ts
@@ -747,7 +755,8 @@ mappings:
       succeeds; empty/no-claim passes do not burn the interval (matches codex
       skipped_no_candidates free retry). After an observed quota/rate-limit
       error, a 1h process stamp skips further claims for the same configured
-      model (or the same phase when no model is configured). Codex start.rs skips
+      model (or the same phase when no model is configured); a fallback chain
+      is gated only when every model in it is stamped. Codex start.rs skips
       both phases when its account-level live guard fails; model scoping avoids
       blocking independently configured opencode providers. Phase 2 still has
       no 30s timer — DB claim/cooldown only, like codex. Wire
@@ -801,7 +810,10 @@ mappings:
       hard-fails the whole config parse — a plugin must not break the host on
       bad options); (6) options.test (live harness only) skips Codex numeric clamps
       so e2e can set min_rollout_idle_hours=0.01. Production stays integer 1–48
-      like MemoriesToml. version defaults to v1; dual_write defaults to false.
+      like MemoriesToml. version defaults to v1; dual_write defaults to false;
+      (7) extract_model/consolidation_model stay strings like codex but accept
+      a comma-separated fallback chain (trimmed, deduplicated; blank warns and
+      falls back to the opencode default) — see the src/llm.ts note.
       DELIBERATE DIVERGENCE (codex #56211, audited 2026-10-25): codex
       core/src/config/mod.rs defaults fresh profiles (memories enabled, no
       memories/ dir, dual_write not false) to v2; the plugin keeps v1 opt-in.

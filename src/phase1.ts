@@ -7,9 +7,7 @@ import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
 import {
   checkRateLimit,
   isProviderCapacityBlocked,
-  isProviderCapacityError,
   markRateLimitUsed,
-  noteProviderCapacityExhausted,
   ProviderCapacityError,
 } from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
@@ -103,7 +101,8 @@ async function runVersionPhase1(
       store.releaseStage1OnShutdown(sid, claim.ownershipToken)
       return
     }
-    // Sibling jobs in this pass: do not call the model after quota was observed.
+    // Sibling jobs in this pass: do not call a model after quota was observed
+    // for every model in the chain.
     if (isProviderCapacityBlocked("phase1", extractModel)) {
       store.markStage1Failed(sid, claim.ownershipToken, new ProviderCapacityError("provider capacity exhausted"))
       return
@@ -155,10 +154,10 @@ async function runVersionPhase1(
     } catch (err) {
       // Aborted mid-extract on dispose (shutdown signal / flag): release for
       // immediate reclaim, do not burn a retry or impose the 1h failure backoff.
+      // Quota backoff is per model, noted by the extraction fallback chain.
       if (err instanceof SubagentCancelledError || isPluginShuttingDown()) {
         store.releaseStage1OnShutdown(sid, claim.ownershipToken)
       } else {
-        if (isProviderCapacityError(err)) noteProviderCapacityExhausted("phase1", extractModel)
         store.markStage1Failed(sid, claim.ownershipToken, err)
       }
     }

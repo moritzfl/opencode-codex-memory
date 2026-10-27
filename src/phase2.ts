@@ -1,5 +1,5 @@
 import { MemoryStore, PHASE2_HEARTBEAT_SECONDS } from "./store.js"
-import { checkRateLimit, isProviderCapacityError, noteProviderCapacityExhausted } from "./ratelimit.js"
+import { checkRateLimit } from "./ratelimit.js"
 import {
   ensureLayout,
   rebuildRawMemories,
@@ -158,7 +158,8 @@ async function runVersionPhase2(
   phase2InFlight.add(root)
   try {
     // No 30s process gate: codex serializes phase 2 only via the DB claim.
-    // An observed quota stamp still skips both phases (Codex start.rs).
+    // An observed quota stamp on every chain model still skips both phases
+    // (Codex start.rs).
     const consolidationModel = opts.consolidationModel
     const rl = await checkRateLimit("phase2", consolidationModel)
     if (!rl.ok) return { status: "skipped_rate_limit" }
@@ -360,7 +361,7 @@ async function runVersionPhase2(
         store.releasePhase2OnShutdown(claim.ownershipToken)
         return { status: "shutting_down" }
       }
-      if (isProviderCapacityError(err)) noteProviderCapacityExhausted("phase2", consolidationModel)
+      // Quota backoff is per model, noted by the consolidation fallback chain.
       sweepMemorySymlinksBestEffort()
       store.markPhase2Failed(claim.ownershipToken, err)
       return { status: "failed" }

@@ -742,6 +742,27 @@ describe("memory_inspect", () => {
     expect(pluginOptions.claude_import.enabled).toBe(false)
   })
 
+  it("normalizes comma-separated model fallback chains and rejects empty ones", async () => {
+    const { memory_inspect } = require("../tools/control.js")
+    const { applyPluginOptions } = require("../src/index.js")
+    const { pluginOptions } = require("../src/options.js")
+    try {
+      applyPluginOptions({
+        extract_model: " github-copilot/auto ,, opencode-go/deepseek-v4.1-flash, github-copilot/auto ",
+        consolidation_model: " , ",
+      })
+      expect(pluginOptions.extract_model).toBe("github-copilot/auto, opencode-go/deepseek-v4.1-flash")
+      expect(pluginOptions.consolidation_model).toBeUndefined()
+      const r = await memory_inspect.execute({}, CTX)
+      expect(r.output).toContain("extract_model: github-copilot/auto, opencode-go/deepseek-v4.1-flash")
+      expect(r.output).toContain('consolidation_model must be a "provider/model" string or comma-separated list')
+      applyPluginOptions({ extract_model: ["a/b"] } as any)
+      expect(pluginOptions.extract_model).toBeUndefined()
+    } finally {
+      applyPluginOptions({})
+    }
+  })
+
   it("keeps Codex integer clamps unless options.test is set", async () => {
     const { applyPluginOptions } = require("../src/index.js")
     const { pluginOptions } = require("../src/options.js")

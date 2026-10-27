@@ -23,7 +23,9 @@ export interface PluginOptionsState {
   disable_on_external_context: boolean
   version: MemoryVersion
   dual_write: boolean
+  /** "provider/model", or a comma-separated fallback chain tried in order. */
   extract_model?: string
+  /** Same format as extract_model. */
   consolidation_model?: string
   /** Resolved absolute plugin home (parent of memory.db + memories/). Unset = default. */
   home?: string
@@ -63,6 +65,11 @@ export const pluginOptions: PluginOptionsState = {
   ...DEFAULT_PLUGIN_OPTIONS,
   codex_interop: { ...DEFAULT_PLUGIN_OPTIONS.codex_interop },
   claude_import: { ...DEFAULT_PLUGIN_OPTIONS.claude_import },
+}
+
+/** Splits an extract_model / consolidation_model value into its fallback chain. */
+export function modelList(value?: string): string[] {
+  return [...new Set((value ?? "").split(",").map((model) => model.trim()).filter(Boolean))]
 }
 
 export function resetPluginOptions(): void {

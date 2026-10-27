@@ -1,4 +1,4 @@
-import { pluginOptions } from "./options.js"
+import { modelList, pluginOptions } from "./options.js"
 import { memoryDbPath } from "./paths.js"
 
 export interface RateLimitInfo {
@@ -89,8 +89,10 @@ export function isProviderCapacityError(error: unknown): boolean {
   return PROVIDER_CAPACITY_RE.test(message)
 }
 
-function providerCapacityScope(phase: MemoryPhase, model?: string): string {
-  return model ? `model:${model}` : `phase:${phase}:default`
+// One scope per model in a fallback chain; an unset model shares the phase default.
+function providerCapacityScopes(phase: MemoryPhase, model?: string): string[] {
+  const models = modelList(model)
+  return models.length > 0 ? models.map((m) => `model:${m}`) : [`phase:${phase}:default`]
 }
 
 export function activeProviderCapacityBackoffs(now = Date.now()): ProviderCapacityBackoff[] {
@@ -105,21 +107,26 @@ export function activeProviderCapacityBackoffs(now = Date.now()): ProviderCapaci
   return active.sort((a, b) => a.scope.localeCompare(b.scope))
 }
 
+/** True when every model in the (comma-separated) chain is in quota backoff. */
 export function isProviderCapacityBlocked(phase: MemoryPhase, model?: string, now = Date.now()): boolean {
-  const until = providerCapacityUntil.get(providerCapacityScope(phase, model))
-  return until !== undefined && until > now
+  return providerCapacityScopes(phase, model).every((scope) => {
+    const until = providerCapacityUntil.get(scope)
+    return until !== undefined && until > now
+  })
 }
 
 /** Call after a quota/rate-limit failure so later passes skip claiming. */
 export function noteProviderCapacityExhausted(phase: MemoryPhase, model?: string, now = Date.now()): void {
-  providerCapacityUntil.set(providerCapacityScope(phase, model), now + PROVIDER_CAPACITY_BACKOFF_MS)
+  for (const scope of providerCapacityScopes(phase, model)) {
+    providerCapacityUntil.set(scope, now + PROVIDER_CAPACITY_BACKOFF_MS)
+  }
 }
 
 export async function checkRateLimit(kind: MemoryPhase = "phase1", model?: string): Promise<RateLimitInfo> {
   if (isProviderCapacityBlocked(kind, model)) {
     return {
       ok: false,
-      reason: `provider capacity exhausted for ${providerCapacityScope(kind, model)} (observed quota/rate-limit)`,
+      reason: `provider capacity exhausted for ${providerCapacityScopes(kind, model).join(", ")} (observed quota/rate-limit)`,
     }
   }
   // Phase 2: no 30s gate (codex relies on DB claim/cooldown only).

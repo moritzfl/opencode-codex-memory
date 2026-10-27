@@ -184,6 +184,39 @@ describe("phase 2 orchestration", () => {
     ).toBeNull()
   })
 
+  it("consolidates with the backup model and skips only when the whole chain is backed off", async () => {
+    const chain = "quota/primary, ok/backup"
+    const prompted: string[] = []
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => ({ data: { id: `sub-phase2-fallback-${prompted.length}` } }),
+          prompt: async (req: { body: { model: { providerID: string; modelID: string } } }) => {
+            const model = `${req.body.model.providerID}/${req.body.model.modelID}`
+            prompted.push(model)
+            if (model === "quota/primary") {
+              return { data: { info: { error: { name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } } } } }
+            }
+            const root = memoryRoot()
+            fs.writeFileSync(path.join(root, "MEMORY.md"), "# MEMORY.md\n")
+            fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\n## User Profile\n")
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
+          delete: async () => ({ data: {} }),
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+
+    const result = await runPhase2(new MemoryStore(), { ...DEFAULT_PHASE2_OPTIONS, consolidationModel: chain })
+    expect(result.status).toBe("succeeded")
+    expect(prompted).toEqual(["quota/primary", "ok/backup"])
+
+    noteProviderCapacityExhausted("phase2", "ok/backup")
+    const skipped = await runPhase2(new MemoryStore(), { ...DEFAULT_PHASE2_OPTIONS, consolidationModel: chain, bypassCooldown: true })
+    expect(skipped.status).toBe("skipped_rate_limit")
+  })
+
   it("holds the lease when the consolidation sub-session cannot be closed", async () => {
     setPluginInput({
       client: {

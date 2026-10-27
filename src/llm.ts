@@ -15,10 +15,18 @@ import {
 } from "./host-client.js"
 import { catalogVariantKeys, nearestReasoningVariant } from "./reasoning-variant.js"
 import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
-import type { MemoryVersion } from "./options.js"
+import { modelList, type MemoryVersion } from "./options.js"
 import { currentMemoryVersion } from "./memory-version.js"
 import { SCAN_LIMIT, STAGE1_LEASE_SECONDS } from "./store.js"
-import { isProviderCapacityError, ProviderCapacityError } from "./ratelimit.js"
+import {
+  isProviderCapacityBlocked,
+  isProviderCapacityError,
+  noteProviderCapacityExhausted,
+  ProviderCapacityError,
+  providerCapacityMessage,
+  type MemoryPhase,
+} from "./ratelimit.js"
+import { recordDiagnostic } from "./diagnostics.js"
 
 const EXTRACTION_TIMEOUT_MS = (STAGE1_LEASE_SECONDS - 600) * 1000
 
@@ -419,10 +427,71 @@ function extractAssistantText(body: any): string {
   return JSON.stringify(body)
 }
 
+const FALLBACK_DIAGNOSTIC_CHARS = 300
+
+/**
+ * Plugin-only (codex takes one model per phase): tries each model of a
+ * comma-separated chain in order until one succeeds. Models in quota backoff
+ * are skipped, and a quota failure starts that model's backoff. Fallbacks
+ * share one deadline. Cancellation, timeout, and a failed helper shutdown end
+ * the chain; the last means a writer may still be alive. The thrown error is
+ * the first non-quota failure, so the job keeps its quota classification
+ * (no retry burned) only when every attempted model ran out of quota.
+ */
+async function withModelFallback<T>(
+  phase: MemoryPhase,
+  configured: string | undefined,
+  deadline: number,
+  signal: AbortSignal | undefined,
+  attempt: (model: string | undefined, timeoutMs: number) => Promise<T>,
+): Promise<T> {
+  const chain: (string | undefined)[] = modelList(configured)
+  if (chain.length === 0) chain.push(undefined)
+  const available = (model: string | undefined) => !isProviderCapacityBlocked(phase, model)
+  const job = phase === "phase1" ? "extraction" : "consolidation"
+  let failure: unknown
+  let capacityFailure: unknown
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i]
+    if (!available(model)) continue
+    const remaining = deadline - Date.now()
+    if (remaining <= 0 && (failure || capacityFailure)) break
+    try {
+      return await attempt(model, Math.max(1, remaining))
+    } catch (err) {
+      if (
+        err instanceof SubagentCancelledError ||
+        err instanceof SubagentTimeoutError ||
+        err instanceof SubagentShutdownError ||
+        signal?.aborted ||
+        isPluginShuttingDown()
+      ) throw err
+      const capacity = isProviderCapacityError(err)
+      if (capacity) {
+        noteProviderCapacityExhausted(phase, model)
+        capacityFailure = err
+      } else {
+        failure ??= err
+      }
+      const next = chain.slice(i + 1).find(available)
+      if (next) {
+        recordDiagnostic(
+          "warn",
+          phase,
+          `${job} model ${model} failed${capacity ? " (quota/rate limit)" : ""}: ` +
+            `${providerCapacityMessage(err).slice(0, FALLBACK_DIAGNOSTIC_CHARS)}; falling back to ${next}`,
+        )
+      }
+    }
+  }
+  throw failure ?? capacityFailure ?? new ProviderCapacityError("provider capacity exhausted")
+}
+
 export interface ExtractOptions {
   cwd?: string
+  /** "provider/model", or a comma-separated fallback chain tried in order. */
   model?: string
-  /** Override the default 1h extract timeout (tests / advanced). */
+  /** Override the default 1h extract budget, shared by fallbacks (tests / advanced). */
   timeoutMs?: number
   /**
    * Cancel in-flight extract. Defaults to pluginShutdownSignal() so dispose
@@ -465,22 +534,37 @@ const EXTRACTION_SCHEMA_V2 = {
  * write tools (D2) so a lingering server turn cannot dual-write the memory root.
  */
 export async function extractViaSubagent(sessionId: string, transcript: string, opts: ExtractOptions = {}): Promise<ExtractionResult | null> {
+  // Bounded by the stage-1 job lease (1h), minus headroom for transcript
+  // load, session creation, and model lookups before the prompt starts.
+  // Codex has no per-request timeout; a timeout past the lease lets another
+  // process reclaim the job and silently drop this paid result.
+  const deadline = Date.now() + (opts.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
+  const signal = opts.signal ?? pluginShutdownSignal()
+  return withModelFallback("phase1", opts.model, deadline, signal, (model, timeoutMs) =>
+    extractOnce(sessionId, transcript, opts.cwd, model, timeoutMs, signal))
+}
+
+async function extractOnce(
+  sessionId: string,
+  transcript: string,
+  cwd: string | undefined,
+  configuredModel: string | undefined,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<ExtractionResult | null> {
   const agent = "memorize-extract"
+  // Fresh helper per attempt: a fallback must not inherit the failed turn.
   const subId = await createSession(`codex-memory-extract-${sessionId}`)
   try {
     const version = currentMemoryVersion()
-    const prompt = buildExtractionInput(sessionId, opts.cwd ?? "unknown", transcript, version)
-    // extract_model option > opencode small_model > session default.
-    const model = await resolveExtractionModel(opts.model)
+    const prompt = buildExtractionInput(sessionId, cwd ?? "unknown", transcript, version)
+    // extract_model chain entry > opencode small_model > session default.
+    const model = await resolveExtractionModel(configuredModel)
     const data = await runPrompt(subId, prompt, agent, {
-      // Bounded by the stage-1 job lease (1h), minus headroom for transcript
-      // load, session creation, and model lookups before the prompt starts.
-      // Codex has no per-request timeout; a timeout past the lease lets
-      // another process reclaim the job and silently drop this paid result.
-      timeoutMs: opts.timeoutMs ?? EXTRACTION_TIMEOUT_MS,
+      timeoutMs,
       system: readTemplate(version === "v2" ? "stage_one_system_v2.md" : "stage_one_system.md"),
       model,
-      signal: opts.signal ?? pluginShutdownSignal(),
+      signal,
       // opencode enforces json_schema output via a forced StructuredOutput tool
       // call (toolChoice: required) — which is why memorize-extract must allow
       // that one otherwise-denied tool.
@@ -509,12 +593,26 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
 // codex runs the consolidation agent under a 1h job lease with heartbeats;
 // its INIT pass is explicitly allowed to run long ("do not be lazy"). A short
 // timeout here would fail the job after the workspace was already synced.
+// Fallback models share this budget.
 const CONSOLIDATION_TIMEOUT_MS = 3600_000
 
+/** `model`: "provider/model", or a comma-separated fallback chain tried in order. */
 export async function consolidateViaSubagent(
   memoryRoot: string,
   diffFileName: string,
   model?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const deadline = Date.now() + CONSOLIDATION_TIMEOUT_MS
+  return withModelFallback("phase2", model, deadline, signal, (configured, timeoutMs) =>
+    consolidateOnce(memoryRoot, diffFileName, configured, timeoutMs, signal))
+}
+
+async function consolidateOnce(
+  memoryRoot: string,
+  diffFileName: string,
+  configuredModel: string | undefined,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
   const agent = "memorize"
@@ -523,11 +621,11 @@ export async function consolidateViaSubagent(
   let promptFailed = false
   try {
     const prompt = buildConsolidationPrompt(memoryRoot, diffFileName)
-    // consolidation_model option > opencode model (main) > session default.
-    const resolved = await resolveConsolidationModel(model)
+    // consolidation_model chain entry > opencode model (main) > session default.
+    const resolved = await resolveConsolidationModel(configuredModel)
     await promptSession(subId, prompt, agent, {
       model: resolved,
-      timeoutMs: CONSOLIDATION_TIMEOUT_MS,
+      timeoutMs,
       signal,
       // Codex consolidation ReasoningEffort::Medium. Nearest listed effort if missing.
       variant: await resolveReasoningVariant(CONSOLIDATE_VARIANT, resolved),

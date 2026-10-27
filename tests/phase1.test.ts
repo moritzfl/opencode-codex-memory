@@ -9,6 +9,7 @@ import { DEFAULT_PHASE1_OPTIONS, runPhase1 } from "../src/phase1.js"
 import { resetRateLimitForTest } from "../src/ratelimit.js"
 import { MemoryStore } from "../src/store.js"
 import { resetDiscoveryCacheForTest } from "../src/capture.js"
+import { pluginOptions } from "../src/options.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-phase1-${process.pid}-${Date.now()}`)
 const SESSION_ID = "ses_phase1_empty"
@@ -158,7 +159,7 @@ describe("phase 1 provider capacity", () => {
   const OTHER_ID = "ses_phase1_other"
 
   function installExtractClient(opts: {
-    prompt: (sessionId: string) => unknown
+    prompt: (sessionId: string, model?: string) => unknown
     sessions?: string[]
   }): { prompted: string[]; updatedAt: number } {
     const updatedAt = Date.now() - 7 * 60 * 60 * 1000
@@ -180,9 +181,10 @@ describe("phase 1 provider capacity", () => {
             data: [{ info: { role: "user" }, parts: [{ type: "text", text: "remember this convention" }] }],
           }),
           create: async () => ({ data: { id: `sub-extract-${created++}` } }),
-          prompt: async (request: { path: { id: string } }) => {
-            prompted.push(request.path.id)
-            return opts.prompt(request.path.id)
+          prompt: async (request: { path: { id: string }; body: { model?: { providerID: string; modelID: string } } }) => {
+            const model = request.body.model && `${request.body.model.providerID}/${request.body.model.modelID}`
+            prompted.push(model ? `${request.path.id}:${model}` : request.path.id)
+            return opts.prompt(request.path.id, model)
           },
           delete: async () => ({ data: {} }),
           get: async () => ({ response: { status: 404 } }),
@@ -311,6 +313,60 @@ describe("phase 1 provider capacity", () => {
     expect(jobRow(OTHER_ID).status).toBe("pending")
     expect(jobRow(SESSION_ID).retry_remaining).toBe(3)
     expect(jobRow(OTHER_ID).retry_remaining).toBe(3)
+  })
+
+  describe("with a fallback chain", () => {
+    const CHAIN = "quota/primary, ok/backup"
+    const quota = { data: { info: { error: { name: "APIError", data: { message: "You have exceeded your monthly quota" } } } } }
+    const auth = { data: { info: { error: { name: "ProviderAuthError", data: { message: "expired key" } } } } }
+    const extracted = {
+      data: { info: { structured: { raw_memory: "backup raw", rollout_summary: "backup summary", rollout_slug: "backup" } } },
+    }
+    // Keep the real gate but drop its 30s anti-stampede timer between passes.
+    beforeEach(() => {
+      pluginOptions.test = true
+    })
+    afterEach(() => {
+      pluginOptions.test = false
+    })
+
+    it("stores the backup model's extraction and skips the exhausted model afterwards", async () => {
+      const { prompted } = installExtractClient({
+        sessions: [SESSION_ID, OTHER_ID],
+        prompt: (_id, model) => (model === "quota/primary" ? quota : extracted),
+      })
+      const store = new MemoryStore()
+      await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: 1, extractModel: CHAIN })
+      expect(prompted.map((p) => p.split(":")[1])).toEqual(["quota/primary", "ok/backup"])
+      expect(store.stage1Outputs().map((o) => o.raw_memory)).toEqual(["backup raw"])
+      const done = [SESSION_ID, OTHER_ID].find((id) => jobRow(id)?.status === "done")!
+      expect(jobRow(done)).toEqual({ status: "done", retry_remaining: 3, last_error: null })
+
+      await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: 1, extractModel: CHAIN })
+      expect(prompted.map((p) => p.split(":")[1])).toEqual(["quota/primary", "ok/backup", "ok/backup"])
+      expect(store.stage1Outputs()).toHaveLength(2)
+    })
+
+    it("keeps a quota-only chain failure pending and skips the next pass", async () => {
+      const { prompted } = installExtractClient({ prompt: () => quota })
+      const store = new MemoryStore()
+      await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: 1, extractModel: CHAIN })
+      expect(prompted).toHaveLength(2)
+      expect(jobRow(SESSION_ID)).toMatchObject({ status: "pending", retry_remaining: 3 })
+
+      openDb().prepare("UPDATE memory_jobs SET retry_at=1 WHERE job_key=?").run(SESSION_ID)
+      await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: 1, extractModel: CHAIN })
+      expect(prompted).toHaveLength(2)
+    })
+
+    it("burns a retry when a chain model failed for a non-quota reason", async () => {
+      installExtractClient({ prompt: (_id, model) => (model === "quota/primary" ? quota : auth) })
+      const store = new MemoryStore()
+      await runPhase1(store, { ...DEFAULT_PHASE1_OPTIONS, maxClaimed: 1, extractModel: CHAIN })
+      const job = jobRow(SESSION_ID)
+      expect(job).toMatchObject({ status: "pending", retry_remaining: 2 })
+      expect(job.last_error).toContain("ProviderAuthError")
+    })
   })
 
   it("does not burn retries on queued claims beyond extraction concurrency", async () => {

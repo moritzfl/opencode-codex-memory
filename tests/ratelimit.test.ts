@@ -10,6 +10,7 @@ import { DEFAULT_PHASE1_OPTIONS, runPhase1 } from "../src/phase1.js"
 import {
   activeProviderCapacityBackoffs,
   checkRateLimit,
+  isProviderCapacityBlocked,
   isProviderCapacityError,
   markRateLimitUsed,
   noteProviderCapacityExhausted,
@@ -95,6 +96,18 @@ describe("rate-limit stub semantics", () => {
     expect(activeProviderCapacityBackoffs()).toEqual([
       expect.objectContaining({ scope: "model:limited/model" }),
     ])
+  })
+
+  it("blocks a fallback chain only when every model is backed off", async () => {
+    const chain = "limited/model, healthy/model"
+    noteProviderCapacityExhausted("phase1", "limited/model")
+    expect((await checkRateLimit("phase1", chain)).ok).toBe(true)
+    expect(isProviderCapacityBlocked("phase2", chain)).toBe(false)
+    noteProviderCapacityExhausted("phase2", "healthy/model")
+    const blocked = await checkRateLimit("phase1", chain)
+    expect(blocked.ok).toBe(false)
+    expect(blocked.reason).toContain("model:limited/model, model:healthy/model")
+    expect(isProviderCapacityBlocked("phase2", chain)).toBe(true)
   })
 
   it("keeps unresolved default models phase-specific", async () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect } from "bun:test"
+import { afterEach, beforeEach, describe, it, expect } from "bun:test"
 import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import {
   parseExtraction,
@@ -19,6 +19,8 @@ import {
   SubagentShutdownError,
 } from "../src/llm.js"
 import { SCAN_LIMIT } from "../src/store.js"
+import { isProviderCapacityBlocked, ProviderCapacityError, resetRateLimitForTest } from "../src/ratelimit.js"
+import { getRecentDiagnostics, resetDiagnosticsForTest } from "../src/diagnostics.js"
 
 describe("fillTemplate", () => {
   it("substitutes placeholders", () => {
@@ -714,6 +716,154 @@ describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finis
     controller.abort()
     await expect(running).rejects.toBeInstanceOf(SubagentCancelledError)
     expect(calls).toEqual(["abort:sub-consolidate-cancel", "delete:sub-consolidate-cancel"])
+  })
+})
+
+describe("model fallback chain", () => {
+  const QUOTA = { data: { info: { error: { name: "APIError", data: { message: "You have exceeded your monthly quota" } } } } }
+  const AUTH = { data: { info: { error: { name: "ProviderAuthError", data: { message: "expired key" } } } } }
+  const EXTRACTED = { data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "s" } } } }
+  const CONSOLIDATED = { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+
+  beforeEach(() => {
+    resetRateLimitForTest()
+    resetDiagnosticsForTest()
+  })
+  afterEach(() => {
+    setPluginInput({ client: undefined } as any)
+    resetRateLimitForTest()
+    resetDiagnosticsForTest()
+  })
+
+  /** Each prompt gets the reply mapped to its model; records create/prompt/delete order. */
+  function stubChain(replies: Record<string, (() => unknown) | unknown>, opts: { deleteFails?: boolean } = {}) {
+    const calls: string[] = []
+    let created = 0
+    setPluginInput({
+      client: {
+        session: {
+          create: async () => {
+            const id = `sub-${created++}`
+            calls.push(`create:${id}`)
+            return { data: { id } }
+          },
+          prompt: async (req: any) => {
+            const model = `${req.body.model.providerID}/${req.body.model.modelID}`
+            calls.push(`prompt:${req.path.id}:${model}`)
+            const reply = replies[model]
+            return typeof reply === "function" ? reply() : reply
+          },
+          abort: async () => ({ data: {} }),
+          delete: async (req: any) => {
+            calls.push(`delete:${req.path.id}`)
+            return opts.deleteFails ? { error: { message: "delete failed" } } : { data: {} }
+          },
+        },
+        config: { get: async () => ({ data: {} }) },
+      },
+    } as any)
+    return calls
+  }
+
+  it("falls back after a quota error and backs off only the exhausted model", async () => {
+    const calls = stubChain({ "copilot/auto": QUOTA, "go/flash": EXTRACTED })
+    const r = await extractViaSubagent("ses_fb", "transcript", { model: "copilot/auto, go/flash" })
+    expect(r?.raw_memory).toBe("rm")
+    expect(calls.filter((c) => c.startsWith("prompt"))).toEqual(["prompt:sub-0:copilot/auto", "prompt:sub-1:go/flash"])
+    expect(isProviderCapacityBlocked("phase1", "copilot/auto")).toBe(true)
+    expect(isProviderCapacityBlocked("phase1", "go/flash")).toBe(false)
+    expect(isProviderCapacityBlocked("phase1", "copilot/auto, go/flash")).toBe(false)
+    expect(getRecentDiagnostics().map((e) => e.message)).toEqual([
+      "extraction model copilot/auto failed (quota/rate limit): sub-agent prompt failed (APIError): You have exceeded your monthly quota; falling back to go/flash",
+    ])
+
+    // The next job skips the backed-off model instead of paying for another failure.
+    calls.length = 0
+    await extractViaSubagent("ses_fb2", "transcript", { model: "copilot/auto, go/flash" })
+    expect(calls.filter((c) => c.startsWith("prompt"))).toEqual(["prompt:sub-2:go/flash"])
+  })
+
+  it("falls back after a non-quota failure in a fresh helper session", async () => {
+    const calls = stubChain({ "a/one": AUTH, "b/two": EXTRACTED })
+    await extractViaSubagent("ses_auth", "transcript", { model: "a/one,b/two" })
+    expect(calls.filter((c) => c.startsWith("create") || c.startsWith("prompt"))).toEqual([
+      "create:sub-0", "prompt:sub-0:a/one", "create:sub-1", "prompt:sub-1:b/two",
+    ])
+    expect(isProviderCapacityBlocked("phase1", "a/one")).toBe(false)
+  })
+
+  it("falls back when a model returns unusable extraction output", async () => {
+    stubChain({
+      "a/one": { data: { info: {}, parts: [{ type: "text", text: "no json here" }] } },
+      "b/two": EXTRACTED,
+    })
+    expect((await extractViaSubagent("ses_bad", "transcript", { model: "a/one, b/two" }))?.rollout_summary).toBe("rs")
+  })
+
+  it("reports quota only when every attempted model ran out", async () => {
+    stubChain({ "a/one": QUOTA, "b/two": QUOTA })
+    await expect(extractViaSubagent("ses_q", "transcript", { model: "a/one, b/two" })).rejects.toBeInstanceOf(
+      ProviderCapacityError,
+    )
+    expect(isProviderCapacityBlocked("phase1", "a/one, b/two")).toBe(true)
+
+    // Every model in backoff: no model call at all.
+    const calls = stubChain({ "a/one": EXTRACTED, "b/two": EXTRACTED })
+    await expect(extractViaSubagent("ses_q2", "transcript", { model: "a/one, b/two" })).rejects.toBeInstanceOf(
+      ProviderCapacityError,
+    )
+    expect(calls).toEqual([])
+  })
+
+  it("surfaces the first non-quota failure when the chain mixes failures", async () => {
+    stubChain({ "a/one": QUOTA, "b/two": AUTH, "c/three": QUOTA })
+    const err = await extractViaSubagent("ses_mix", "transcript", { model: "a/one, b/two, c/three" }).catch((e) => e)
+    expect(err).not.toBeInstanceOf(ProviderCapacityError)
+    expect(String(err)).toContain("ProviderAuthError")
+    expect(isProviderCapacityBlocked("phase1", "a/one")).toBe(true)
+    expect(isProviderCapacityBlocked("phase1", "c/three")).toBe(true)
+  })
+
+  it("shares one deadline: a timed-out model ends the chain", async () => {
+    const calls = stubChain({ "a/one": () => new Promise(() => {}), "b/two": EXTRACTED })
+    await expect(
+      extractViaSubagent("ses_slow", "transcript", { model: "a/one, b/two", timeoutMs: 30 }),
+    ).rejects.toBeInstanceOf(SubagentTimeoutError)
+    expect(calls.some((c) => c.includes("b/two"))).toBe(false)
+  })
+
+  it("does not fall back after cancellation", async () => {
+    const controller = new AbortController()
+    const calls = stubChain({
+      "a/one": () => {
+        controller.abort()
+        return new Promise(() => {})
+      },
+      "b/two": EXTRACTED,
+    })
+    await expect(
+      extractViaSubagent("ses_cancel", "transcript", { model: "a/one, b/two", signal: controller.signal }),
+    ).rejects.toBeInstanceOf(SubagentCancelledError)
+    expect(calls.some((c) => c.includes("b/two"))).toBe(false)
+  })
+
+  it("closes the failed consolidator before the fallback model starts", async () => {
+    const calls = stubChain({ "a/one": QUOTA, "b/two": CONSOLIDATED })
+    await consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", "a/one, b/two")
+    expect(calls).toEqual([
+      "create:sub-0", "prompt:sub-0:a/one", "delete:sub-0",
+      "create:sub-1", "prompt:sub-1:b/two", "delete:sub-1",
+    ])
+    expect(isProviderCapacityBlocked("phase2", "a/one")).toBe(true)
+    expect(getRecentDiagnostics().at(-1)?.kind).toBe("phase2")
+  })
+
+  it("never starts a second consolidator while the first may still be alive", async () => {
+    const calls = stubChain({ "a/one": AUTH, "b/two": CONSOLIDATED }, { deleteFails: true })
+    await expect(
+      consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", "a/one, b/two"),
+    ).rejects.toBeInstanceOf(SubagentShutdownError)
+    expect(calls.some((c) => c.includes("b/two"))).toBe(false)
   })
 })
 

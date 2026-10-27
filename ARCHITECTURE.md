@@ -251,7 +251,8 @@ reply. Consolidation still uses a sandboxed helper session.
 OpenCode 2 extraction retries only exact host model-selection-unavailable errors
 and the OpenCode 2.1+ "Location plugins did not finish activating" timeout
 before inference, with eight cancellable backoffs totaling 45.75 seconds
-for asynchronous provider registration. Persistent absence still fails normally;
+for asynchronous provider registration. Persistent absence still fails that
+model, moving on to any configured fallback model;
 transport, authorization, variant and provider-generation errors are not replayed.
 Readiness waits and recovery appear in memory_inspect diagnostics. V1 is unchanged.
 
@@ -261,6 +262,17 @@ Precedence is plugin option (`extract_model` / `consolidation_model`) →
 available host config (`small_model` / `model`) → a model on the
 `memorize-extract` / `memorize` helper agent → host/provider default. The
 first two are passed explicitly and win over an agent-level override.
+
+A plugin option may list comma-separated fallbacks (a plugin addition; Codex
+takes one model per phase). `withModelFallback` in `src/llm.ts` tries them in
+order, each in a fresh helper session. Every failure moves to the next model
+except cancellation, timeout, and a failed consolidator shutdown; that last
+case keeps the single-writer guarantee. Fallbacks share the job's time
+budget. A quota failure starts that model's one-hour backoff, so later jobs
+skip it, and a phase is gated only when every model in its chain is backed
+off. The first non-quota failure decides the job's error. The quota
+classification, which keeps a stage-1 job pending without spending a retry,
+survives only when every attempted model ran out of quota.
 
 OpenCode 1.x's automatic small-model pick is internal to the host; the plugin
 can only use an explicitly configured `small_model`. OpenCode 2 has no
@@ -419,7 +431,7 @@ root" invariant. The extension approach is pure content.
 | Transcript access | Direct rollout files (own format) | `session.messages` + `experimental.session.list`; `opencode.db` never read | Official surfaces only (D4) |
 | Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
 | Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
-| Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 30s anti-stampede plus an observed-quota circuit breaker (1h, scoped by configured model or phase default); quota failures do not burn stage-1 retries | See `src/ratelimit.ts`; wire live provider quota when opencode exposes it |
+| Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 30s anti-stampede plus an observed-quota circuit breaker (1h, scoped per configured model or phase default; a fallback chain is gated only when every model is backed off); quota failures do not burn stage-1 retries | See `src/ratelimit.ts`; wire live provider quota when opencode exposes it |
 | Plugin dispose / reload | N/A (in-process core) | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions; startup reseeds helpers via paginated host-wide `experimental.session` | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry |
 | Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win. OpenCode2 ref-counts live location instances: panel toggles survive later setups, a disposed location re-points the shim to a survivor, and only the last dispose shuts the pipeline down | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
 | Memory version lifetime | Thread-extension runtime state | Persistent per-session read-version stamp | New sessions follow config; resumed sessions retain their namespace |

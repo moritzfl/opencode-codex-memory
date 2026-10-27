@@ -870,6 +870,35 @@ describe("V1 client shim", () => {
     expect(isProviderCapacityError(res.error)).toBe(true)
   })
 
+  it("falls back to the next extraction model after a host quota error", async () => {
+    const { resetRateLimitForTest, isProviderCapacityBlocked } = require("../src/ratelimit.js")
+    resetRateLimitForTest()
+    const { ctx, calls } = fakeCtx()
+    const generate = ctx.generate.text
+    ctx.generate.text = async (a: { model: { providerID: string } }) => {
+      if (a.model.providerID !== "github-copilot") return generate(a)
+      calls.push({ name: "generate", args: a })
+      // Observed OpenCode 2.1 error for an exhausted Copilot plan.
+      throw Object.assign(new Error("You have exceeded your monthly quota"), {
+        _tag: "ServiceUnavailableError", service: "github-copilot",
+      })
+    }
+    setV2Context(ctx)
+    setPluginInput({ client: buildV1ClientShim() } as any)
+    try {
+      const result = await withMemoryVersion("v1", () => extractViaSubagent("ses_fallback", "transcript", {
+        model: "github-copilot/auto, acme/m1",
+      }))
+      expect(result?.raw_memory).toBe("m")
+      expect(calls.filter((c) => c.name === "generate").map((c) => (c.args as any).model.providerID))
+        .toEqual(["github-copilot", "acme"])
+      expect(isProviderCapacityBlocked("phase1", "github-copilot/auto")).toBe(true)
+    } finally {
+      setPluginInput({ client: undefined } as any)
+      resetRateLimitForTest()
+    }
+  })
+
   it("interrupts the local helper before removing it through the service", async () => {
     const { ctx, calls } = fakeCtx()
     serviceRemove = async () => { calls.push({ name: "service.remove", args: null }) }

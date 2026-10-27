@@ -10,7 +10,7 @@ import { writeMemoryVersions } from "./memory-version.js"
 import { sessionMemoryVersion, withSessionMemoryVersion } from "./session-version.js"
 import { existingMemoryStores } from "./store.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession, abortActiveSubSessions } from "./llm.js"
-import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOptions } from "./options.js"
+import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOptions, modelList } from "./options.js"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "./lifecycle.js"
 import { hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
@@ -255,8 +255,9 @@ export function applyPluginOptions(opts: PluginOptions): void {
   }
   for (const key of ["extract_model", "consolidation_model"] as const) {
     if (!(key in raw)) continue
-    if (typeof raw[key] === "string") pluginOptions[key] = raw[key]
-    else recordConfigWarning(`${key} must be a string; using the opencode model default`)
+    const models = typeof raw[key] === "string" ? modelList(raw[key]) : []
+    if (models.length > 0) pluginOptions[key] = models.join(", ")
+    else recordConfigWarning(`${key} must be a "provider/model" string or comma-separated list; using the opencode model default`)
   }
   const testing = pluginOptions.test
   if ("version" in raw) {
