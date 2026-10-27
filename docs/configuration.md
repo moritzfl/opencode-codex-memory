@@ -95,7 +95,8 @@ its quota is used up:
 ```
 
 - A model that runs out of quota or hits a rate limit is skipped for one hour,
-  so later jobs go straight to the next model.
+  so later jobs go straight to the next model. OpenCode 1.x itself retries
+  some of these errors for about a minute before the next model takes over.
 - Other failures, such as a provider error or unusable output, also move on
   to the next model.
 - A timeout does not: all models share one time budget per job.
