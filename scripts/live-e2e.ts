@@ -321,6 +321,7 @@ async function main() {
     // ----- Step 4: Phase 1 -----
     log("phase1", `waiting up to ${args.phase1TimeoutMs}ms for stage1 outputs`)
     const phase1Started = Date.now()
+    let lastTrigger = phase1Started
     try {
       await waitFor(
         "phase1 outputs",
@@ -329,6 +330,13 @@ async function main() {
           if (rows.length > 0) return true
           const jobs = stage1Jobs(sandbox)
           if (!jobs.length && Date.now() - phase1Started > 60_000) throw new Error("no stage1 claims after real idle + trigger")
+          // A trigger that lands while an earlier pass still runs is a no-op
+          // (already_running), e.g. while OpenCode 1.x retries a quota error.
+          if (Date.now() - lastTrigger > 60_000 && !workIds.some((id) => jobs.some((j) => j.job_key === id))) {
+            lastTrigger = Date.now()
+            log("phase1", "work sessions still unclaimed — triggering idle again")
+            void triggerIdle(serve!, sandbox).catch(() => {})
+          }
           const failed = jobs.filter((j) => j.status === "failed" || (j.last_error && j.status !== "done"))
           if (failed.length >= FACTS.length) {
             throw new Error(
