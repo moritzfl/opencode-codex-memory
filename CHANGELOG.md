@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-28
+
 ### Added
 
-- Backup models: `extract_model` and `consolidation_model` accept a
-  comma-separated list, tried in order. When a model fails, for example
-  because its quota is used up, the next one takes over. Models out of quota
-  are skipped for an hour. See
+- Backup models on OpenCode 2: `extract_model` and `consolidation_model`
+  accept a comma-separated list, tried in order. When a model fails, for
+  example because its quota is used up, the next one takes over. Models out
+  of quota are skipped for an hour. OpenCode 1.x uses only the first model,
+  so one configuration works on both. See
   [Backup models](docs/configuration.md#backup-models).
 
 ### Fixed
@@ -1035,7 +1038,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.12...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.12...v0.10.0
 [0.9.12]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.9...v0.9.10
