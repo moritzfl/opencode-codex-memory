@@ -19,6 +19,7 @@
  *   bun run live:e2e
  *   OPENCODE_LIVE_KEEP=1 bun run live:e2e
  *   bun run live:e2e -- --skip-reset --skip-citation
+ *   bun run live:e2e -- --model-fallback   # quota-exhausted stub model first
  */
 import fs from "fs"
 import path from "path"
@@ -83,6 +84,7 @@ type Args = {
   skipCitation: boolean
   memoryVersion: "v1" | "v2"
   dualWrite: boolean
+  modelFallback: boolean
   phase1TimeoutMs: number
   phase2TimeoutMs: number
 }
@@ -93,6 +95,7 @@ function parseArgs(argv: string[]): Args {
     skipReset: argv.includes("--skip-reset"),
     skipCitation: argv.includes("--skip-citation"),
     dualWrite: argv.includes("--dual-write"),
+    modelFallback: argv.includes("--model-fallback"),
     memoryVersion:
       argv.includes("--version") && argv[argv.indexOf("--version") + 1] === "v2"
         ? "v2"
@@ -102,6 +105,43 @@ function parseArgs(argv: string[]): Args {
     phase1TimeoutMs: numEnv("OPENCODE_LIVE_PHASE1_TIMEOUT_MS", 12 * 60_000),
     phase2TimeoutMs: numEnv("OPENCODE_LIVE_PHASE2_TIMEOUT_MS", 20 * 60_000),
   }
+}
+
+const EXHAUSTED_MODELS = ["extract-quota", "consolidate-quota"] as const
+
+/**
+ * OpenAI-compatible upstream whose account is out of quota (canonical 429
+ * insufficient_quota body). Placed first in both model chains so the real
+ * host must surface the failure and the plugin must fall back.
+ */
+function startQuotaExhaustedUpstream() {
+  const hits = new Map<string, number>()
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    const body = await request.json().catch(() => ({})) as { model?: unknown }
+    const model = String(body.model)
+    hits.set(model, (hits.get(model) ?? 0) + 1)
+    return Response.json({ error: {
+      message: "You exceeded your current quota, please check your plan and billing details.",
+      type: "insufficient_quota",
+      code: "insufficient_quota",
+    } }, { status: 429 })
+  } })
+  return { hits, url: `${server.url.href}v1`, stop: () => server.stop(true) }
+}
+
+/** Adds the exhausted provider to the sandbox config for both host generations. */
+function addExhaustedProvider(sandbox: Sandbox, baseURL: string): void {
+  const file = path.join(sandbox.configHome, "opencode", "opencode.json")
+  const config = JSON.parse(fs.readFileSync(file, "utf8"))
+  const models = (v2: boolean) => Object.fromEntries(EXHAUSTED_MODELS.map((id) => [id, v2 ? { name: id, modelID: id } : { name: id }]))
+  config.provider = { ...config.provider, exhausted: {
+    npm: "@ai-sdk/openai-compatible", name: "Exhausted", options: { baseURL, apiKey: "test-only" }, models: models(false),
+  } }
+  config.providers = { ...config.providers, exhausted: {
+    name: "Exhausted", package: "@opencode/ai/providers/openai-compatible",
+    settings: { baseURL, apiKey: "test-only" }, models: models(true),
+  } }
+  fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n")
 }
 
 function numEnv(name: string, fallback: number): number {
@@ -165,6 +205,13 @@ async function main() {
   log("e2e", `bin ${bin} @ ${opencodeVersion(bin)}`)
   log("e2e", `models model=${models.model} small=${models.smallModel}`)
 
+  const quota = args.modelFallback ? startQuotaExhaustedUpstream() : null
+  // Separate exhausted models per phase: quota backoff is per model, so a
+  // shared one would make consolidation skip it instead of failing over.
+  const extractModel = quota ? `exhausted/${EXHAUSTED_MODELS[0]}, ${models.model}` : models.model!
+  const consolidationModel = quota ? `exhausted/${EXHAUSTED_MODELS[1]}, ${models.model}` : models.model!
+  if (quota) log("e2e", `model fallback: extract=${extractModel} consolidate=${consolidationModel}`)
+
   const sandbox = createSandbox({
     keep: args.keep,
     model: models.model,
@@ -173,11 +220,12 @@ async function main() {
     // Extraction/consolidation quality is the point of this suite — pin both
     // to the main model so a tiny small_model cannot no-op every stage1 job.
     pluginOptions: {
-      extract_model: models.model,
-      consolidation_model: models.model,
+      extract_model: extractModel,
+      consolidation_model: consolidationModel,
       dual_write: args.dualWrite,
     },
   })
+  if (quota) addExhaustedProvider(sandbox, quota.url)
   let serve: ServeHandle | null = null
   const shadow: Sandbox = {
     ...sandbox,
@@ -219,7 +267,7 @@ async function main() {
           "location[directory]": sandbox.project,
         })
         const effective = (status.json as { output?: { extractModel?: string; consolidationModel?: string } })?.output
-        if (status.status !== 200 || effective?.extractModel !== models.model || effective.consolidationModel !== models.model) {
+        if (status.status !== 200 || effective?.extractModel !== extractModel || effective.consolidationModel !== consolidationModel) {
           throw new Error(`plugin options not applied: ${status.text}`)
         }
         log("config", "OK — V2 plugin received configured model options")
@@ -431,6 +479,13 @@ async function main() {
 
     const gitDir = path.join(sandbox.memories, ".git")
     check(fs.existsSync(gitDir), "phase2", "memories/.git baseline present")
+    if (quota) {
+      const hits = Object.fromEntries(quota.hits)
+      log("fallback", `exhausted upstream requests ${JSON.stringify(hits)}`)
+      for (const [model, phase] of [[EXHAUSTED_MODELS[0], "extraction"], [EXHAUSTED_MODELS[1], "consolidation"]] as const) {
+        check((quota.hits.get(model) ?? 0) > 0, "fallback", `${phase} tried the exhausted model first, then succeeded on ${models.model}`)
+      }
+    }
     if (serve.v2) {
       const listed = await api(serve, sandbox, "GET", "/api/session", undefined, { search: "codex-memory-consolidate" })
       if (listed.status !== 200) throw new Error(`helper session list failed: ${listed.text}`)
@@ -675,6 +730,7 @@ async function main() {
     process.exitCode = 2
   } finally {
     if (serve) await serve.stop().catch(() => {})
+    quota?.stop()
     sandbox.cleanup()
   }
 }
