@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Backup models: `extract_model` and `consolidation_model` accept a
+  comma-separated list, tried in order. When a model fails, for example
+  because its quota is used up, the next one takes over. Models out of quota
+  are skipped for an hour. See
+  [Backup models](docs/configuration.md#backup-models).
+
+### Fixed
+
+- "You have exceeded your monthly quota" (GitHub Copilot on OpenCode 2) now
+  counts as a quota error, so it no longer uses up extraction retries.
+
 ## [0.9.12] - 2026-10-25
 
 ### Fixed

@@ -263,8 +263,9 @@ Each qualifying session produces two artifacts with different jobs:
 Both land only in the database at this stage, keyed by session. They are
 candidates, not yet markdown in the memory folder. Because sessions are
 independent, extraction is trivially parallelizable and retrievable: if the
-model provider is out of quota, the job backs off and tries again later;
-failure in one session never affects another.
+model provider is out of quota, a configured backup model takes over, or the
+job backs off and tries again later; failure in one session never affects
+another.
 
 ## Learning Part 2: Consolidating Many Sessions into One Memory
 

@@ -81,6 +81,30 @@ uses OpenCode's default for its helper session. On OpenCode 1.x, an explicitly
 configured `small_model` is used for extraction first. When upgrading to
 OpenCode 2, set `extract_model` if you want to keep that cheaper model.
 
+### Backup models
+
+Either option also accepts a comma-separated list of models. They are tried
+in order, and the next model takes over when one fails, for example because
+its quota is used up:
+
+```json
+{
+  "extract_model": "github-copilot/auto, opencode-go/deepseek-v4.1-flash",
+  "consolidation_model": "github-copilot/auto, mistral-vibe/mistral-medium-latest"
+}
+```
+
+- A model that runs out of quota or hits a rate limit is skipped for one hour,
+  so later jobs go straight to the next model.
+- Other failures, such as a provider error or unusable output, also move on
+  to the next model.
+- A timeout does not: all models share one time budget per job.
+- If every model fails, the job is retried later. A job where every model ran
+  out of quota stays queued without using up its retry attempts.
+
+`memory_inspect` lists each fallback under `recent_events` and skipped models
+under `provider_capacity_backoff`.
+
 The plugin requests low reasoning effort for extraction and medium for
 consolidation when supported. Full fallback rules are in the
 [architecture reference](../ARCHITECTURE.md#background-model-selection).
