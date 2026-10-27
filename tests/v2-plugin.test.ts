@@ -213,7 +213,7 @@ describe("v2 setup", () => {
   it("serves read-only status with effective options without starting memory jobs", async () => {
     const f = fakeCtx({
       generate_memories: false,
-      extract_model: "foundry-local/gpt-5.6-luna",
+      extract_model: "github-copilot/auto, foundry-local/gpt-5.6-luna",
       consolidation_model: "foundry-local/gpt-5.6-luna",
       codex_interop: { import: true },
     })
@@ -221,7 +221,8 @@ describe("v2 setup", () => {
     const snapshot = parseMemoryStatus(await f.rpcHandlers.status())
     expect(snapshot).toMatchObject({
       activity: "read_only",
-      extractModel: "foundry-local/gpt-5.6-luna",
+      // OpenCode 2 keeps backup-model chains.
+      extractModel: "github-copilot/auto, foundry-local/gpt-5.6-luna",
       consolidationModel: "foundry-local/gpt-5.6-luna",
       codexImport: true,
       lastSuccessAt: null,

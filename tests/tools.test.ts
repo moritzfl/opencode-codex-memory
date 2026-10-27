@@ -746,18 +746,24 @@ describe("memory_inspect", () => {
     const { memory_inspect } = require("../tools/control.js")
     const { applyPluginOptions } = require("../src/index.js")
     const { pluginOptions } = require("../src/options.js")
+    const chain = " github-copilot/auto ,, opencode-go/deepseek-v4.1-flash, github-copilot/auto "
     try {
-      applyPluginOptions({
-        extract_model: " github-copilot/auto ,, opencode-go/deepseek-v4.1-flash, github-copilot/auto ",
-        consolidation_model: " , ",
-      })
+      applyPluginOptions({ extract_model: chain, consolidation_model: " , " }, { modelFallback: true })
       expect(pluginOptions.extract_model).toBe("github-copilot/auto, opencode-go/deepseek-v4.1-flash")
       expect(pluginOptions.consolidation_model).toBeUndefined()
       const r = await memory_inspect.execute({}, CTX)
       expect(r.output).toContain("extract_model: github-copilot/auto, opencode-go/deepseek-v4.1-flash")
       expect(r.output).toContain('consolidation_model must be a "provider/model" string or comma-separated list')
-      applyPluginOptions({ extract_model: ["a/b"] } as any)
+      applyPluginOptions({ extract_model: ["a/b"] } as any, { modelFallback: true })
       expect(pluginOptions.extract_model).toBeUndefined()
+
+      // OpenCode 1.x: a shared config stays valid; only the first model runs.
+      applyPluginOptions({ extract_model: chain, consolidation_model: "solo/model" })
+      expect(pluginOptions.extract_model).toBe("github-copilot/auto")
+      expect(pluginOptions.consolidation_model).toBe("solo/model")
+      const v1 = await memory_inspect.execute({}, CTX)
+      expect(v1.output).toContain("extract_model: github-copilot/auto\n")
+      expect(v1.output).toContain("config_warnings: none")
     } finally {
       applyPluginOptions({})
     }

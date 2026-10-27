@@ -263,8 +263,10 @@ available host config (`small_model` / `model`) → a model on the
 `memorize-extract` / `memorize` helper agent → host/provider default. The
 first two are passed explicitly and win over an agent-level override.
 
-A plugin option may list comma-separated fallbacks (a plugin addition; Codex
-takes one model per phase). `withModelFallback` in `src/llm.ts` tries them in
+On OpenCode 2, a plugin option may list comma-separated fallbacks (a plugin
+addition; Codex takes one model per phase). OpenCode 1.x keeps only the first
+entry: its host retries quota errors for about 70 seconds per attempt before
+the plugin sees them. `withModelFallback` in `src/llm.ts` tries them in
 order, each in a fresh helper session. Every failure moves to the next model
 except cancellation, timeout, and a failed consolidator shutdown; that last
 case keeps the single-writer guarantee. Fallbacks share the job's time

@@ -228,7 +228,12 @@ function finiteNumber(key: string, value: unknown, fallback: number): number {
   return value
 }
 
-export function applyPluginOptions(opts: PluginOptions): void {
+/**
+ * `modelFallback`: keep comma-separated model chains (OpenCode 2 only).
+ * OpenCode 1.x retries quota errors for about 70s per attempt before the
+ * plugin sees them, so V1 uses only the first model.
+ */
+export function applyPluginOptions(opts: PluginOptions, { modelFallback = false } = {}): void {
   // Fresh pass per apply so memory_inspect never shows warnings for keys the
   // caller has since fixed. server() clears too, for boots without options.
   const previousDb = dataRoot()
@@ -256,8 +261,12 @@ export function applyPluginOptions(opts: PluginOptions): void {
   for (const key of ["extract_model", "consolidation_model"] as const) {
     if (!(key in raw)) continue
     const models = typeof raw[key] === "string" ? modelList(raw[key]) : []
-    if (models.length > 0) pluginOptions[key] = models.join(", ")
-    else recordConfigWarning(`${key} must be a "provider/model" string or comma-separated list; using the opencode model default`)
+    if (models.length === 0) {
+      recordConfigWarning(`${key} must be a "provider/model" string or comma-separated list; using the opencode model default`)
+      continue
+    }
+    // A shared V1/V2 config is valid: V1 quietly runs the first model only.
+    pluginOptions[key] = modelFallback ? models.join(", ") : models[0]
   }
   const testing = pluginOptions.test
   if ("version" in raw) {

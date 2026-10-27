@@ -292,7 +292,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
   mcpStatusInFlight = null
   clearConfigWarnings()
   const rawOptions = ctx.options as Record<string, unknown> | undefined
-  if (rawOptions && Object.keys(rawOptions).length > 0) applyPluginOptions(rawOptions)
+  if (rawOptions && Object.keys(rawOptions).length > 0) applyPluginOptions(rawOptions, { modelFallback: true })
   else {
     const previousDb = dataRoot()
     resetPluginOptions()

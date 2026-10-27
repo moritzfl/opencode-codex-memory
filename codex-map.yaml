@@ -813,7 +813,9 @@ mappings:
       like MemoriesToml. version defaults to v1; dual_write defaults to false;
       (7) extract_model/consolidation_model stay strings like codex but accept
       a comma-separated fallback chain (trimmed, deduplicated; blank warns and
-      falls back to the opencode default) — see the src/llm.ts note.
+      falls back to the opencode default) — see the src/llm.ts note. OpenCode 2
+      only (applyPluginOptions modelFallback); OpenCode 1.x silently keeps the
+      first entry because the host retries quota errors ~70s per attempt.
       DELIBERATE DIVERGENCE (codex #56211, audited 2026-10-25): codex
       core/src/config/mod.rs defaults fresh profiles (memories enabled, no
       memories/ dir, dual_write not false) to v2; the plugin keeps v1 opt-in.
