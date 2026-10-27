@@ -83,9 +83,9 @@ OpenCode 2, set `extract_model` if you want to keep that cheaper model.
 
 ### Backup models
 
-Either option also accepts a comma-separated list of models. They are tried
-in order, and the next model takes over when one fails, for example because
-its quota is used up:
+On OpenCode 2, either option also accepts a comma-separated list of models.
+They are tried in order, and the next model takes over when one fails, for
+example because its quota is used up:
 
 ```json
 {
@@ -95,8 +95,7 @@ its quota is used up:
 ```
 
 - A model that runs out of quota or hits a rate limit is skipped for one hour,
-  so later jobs go straight to the next model. OpenCode 1.x itself retries
-  some of these errors for about a minute before the next model takes over.
+  so later jobs go straight to the next model.
 - Other failures, such as a provider error or unusable output, also move on
   to the next model.
 - A timeout does not: all models share one time budget per job.
@@ -105,6 +104,10 @@ its quota is used up:
 
 `memory_inspect` lists each fallback under `recent_events` and skipped models
 under `provider_capacity_backoff`.
+
+OpenCode 1.x uses only the first model of each list, without fallback, so
+one configuration works on both hosts. OpenCode 1.x retries quota errors
+itself for about a minute per attempt, which would make fallback too slow.
 
 The plugin requests low reasoning effort for extraction and medium for
 consolidation when supported. Full fallback rules are in the
