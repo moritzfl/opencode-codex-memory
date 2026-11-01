@@ -48,6 +48,15 @@ treated as Memory V1. It does not guess from which directory exists. A leftover
 `memories/` handbook is ignored when that file selects Memory V2. `dual_write`
 does not change the store.
 
+That unset-key rule no longer matches Codex itself for fresh profiles. Since
+**2026-10-22** ([#56211](https://github.com/openai/codex/pull/56211),
+`a390571745`), Codex selects Memory V2 when its memory feature is enabled, no
+`memories/` directory exists, `memories.version` is unset, and
+`memories.dual_write` is not `false`. If Codex uses that fresh-profile default,
+set `version = "v2"` explicitly in `config.toml` so exchange follows the same
+store; otherwise the plugin treats the key as Memory V1 and does not find
+Codex's live `memories_v2/` store.
+
 That file is not always the version Codex injects. A selected profile file
 (`--profile`), a trusted project config, or a `codex -c memories.version=...`
 override can point Codex at the other store. Those are not merged. If they

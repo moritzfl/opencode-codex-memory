@@ -9,14 +9,22 @@ behavior to OpenCode, with adaptations for OpenCode's plugin APIs.
 
 ## Which version do I need?
 
-**Memory V1 is the default; Memory V2 is opt-in.** Both work on OpenCode 1.x
-and 2.x. Choose based on how you want memory to behave.
+**Memory V1 is this plugin's default; Memory V2 is opt-in.** Both work on
+OpenCode 1.x and 2.x. Choose based on how you want memory to behave.
+
+Codex changed its own default on **2026-10-22**
+([#56211](https://github.com/openai/codex/pull/56211), `a390571745`): a fresh
+profile — Codex's memory feature enabled, no `memories/` directory, no explicit
+`memories.version`, and `memories.dual_write` not `false` — now starts on
+Memory V2. Existing Memory V1 workspaces and explicit version selections stay
+on Memory V1. This plugin deliberately keeps Memory V1 as its default; set
+`"version": "v2"` to opt in.
 
 Both versions learn from past sessions in the background, inject a small
 summary, and keep their data locally. Their difference is how they turn
 individual requests into long-term guidance.
 
-| | Memory V1 — default | Memory V2 — opt-in |
+| | Memory V1 — plugin default | Memory V2 — opt-in |
 |---|---|---|
 | Main goal | Anticipate your working style from past tasks | Preserve task history and be more cautious about inferring standing preferences |
 | What the agent reads | A summary that points to a searchable handbook (`MEMORY.md`), recaps, and skills | A summary containing the memory itself, with recaps for additional evidence |

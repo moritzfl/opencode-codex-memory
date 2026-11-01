@@ -363,7 +363,9 @@ copy in both workspaces. Claude import below works the same way.
   `extensions/codex_import/resources/codex/`, so imported changes are
   consolidated in the same run (codex `memory_import.rs` orders
   prepare-workspace-then-copy the same way). The source root comes from
-  `$CODEX_HOME/config.toml` `[memories] version` (unset → `memories/`). v1
+  `$CODEX_HOME/config.toml` `[memories] version` (unset → `memories/`; Codex's
+  fresh-profile default has been `memories_v2/` since 2026-10-22,
+  `a390571745` / #56211, so those profiles need an explicit `version`). v1
   copies `MEMORY.md` and `memory_summary.md`. v2 copies `memory_summary.md`
   only; a leftover `memories/` handbook is not the live store. Profile,
   project, and session config layers are not merged. Source-gone on that

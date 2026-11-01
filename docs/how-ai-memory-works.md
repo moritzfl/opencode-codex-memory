@@ -7,8 +7,8 @@ from Codex. It deliberately stays above code level: the pieces are described
 by responsibility, data flow, and trade-off, so a reader with general
 programming background can follow without knowing the implementation language.
 
-**Reading guide:** the illustrated walkthrough describes **Memory V1**, the
-default. [Memory V2 changes the learning and recall approach](#two-versions-v1-and-v2)
+**Reading guide:** the illustrated walkthrough describes **Memory V1**, this
+plugin's default. [Memory V2 changes the learning and recall approach](#two-versions-v1-and-v2)
 while keeping the same background learning loop. For practical choices and
 switching instructions, use [Memory V1 and Memory V2](memory-versions.md).
 
@@ -95,9 +95,10 @@ when the overview suggests it. It mirrors how you would use your own notes —
 you don't reread every lab notebook every morning; you keep a rough mental map
 of what exists and pull the specific page when you need it.
 
-That pyramid is the **Memory V1** default. Codex later added an opt-in **Memory V2** that
-drops the handbook and treats the injected summary as the memory itself. The
-tour below follows Memory V1; the contrast is in
+That pyramid is the **Memory V1** default in this plugin. Codex later added
+**Memory V2** — opt-in at first, and the default for fresh profiles since
+2026-10-22 — which drops the handbook and treats the injected summary as the
+memory itself. The tour below follows Memory V1; the contrast is in
 [Memory V1 and Memory V2](#two-versions-v1-and-v2).
 
 ### Three jobs
@@ -616,11 +617,13 @@ any memory system designer will face:
 
 ## Memory V1 and Memory V2
 
-The pyramid and pipeline above are the original contract — **Memory V1**, still the
-default. Codex later shipped an opt-in **Memory V2** (`version: "v2"` in this plugin)
-that keeps the same outer loop — extract after a session, consolidate in the
-background, inject a small summary — and changes the *epistemic* contract:
-what the system is allowed to claim about you.
+The pyramid and pipeline above are the original contract — **Memory V1**, still
+this plugin's default. Codex shipped **Memory V2** as opt-in (`version: "v2"` in
+this plugin) and, on 2026-10-22 (`a390571745`, #56211), made it the default for
+fresh profiles; existing V1 workspaces keep V1. V2 keeps the same outer loop —
+extract after a session, consolidate in the background, inject a small
+summary — and changes the *epistemic* contract: what the system is allowed to
+claim about you.
 
 Memory V1 is built to **anticipate**. Extraction is told to mine a session for things
 that should change the next agent's default behavior. A one-task request can

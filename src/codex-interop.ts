@@ -413,12 +413,16 @@ function describeVersion(value: unknown): string {
 /**
  * Selected Codex read version from `$CODEX_HOME/config.toml` only.
  *
- * Unset, missing file, or a `[memories]` table with no `version` → v1, matching
- * Codex's default. Profile, project, and session layers are not merged: those
- * overrides are not on disk in a form this plugin can resolve. `dual_write`
- * does not change the root — the injected store is `version`. An unreadable
- * file, a parse failure, or a value other than "v1"/"v2" fails closed so a
- * leftover `memories/` handbook is not imported by guess.
+ * Unset, missing file, or a `[memories]` table with no `version` → v1. This is
+ * the exchange rule, not Codex's current runtime default: since 2026-10-22
+ * (a390571745, #56211) Codex selects v2 for fresh profiles (memory feature
+ * enabled, no memories/ dir, dual_write not false). Exchange follows
+ * config.toml only, so those profiles need an explicit version. Profile,
+ * project, and session layers are not merged: those overrides are not on disk
+ * in a form this plugin can resolve. `dual_write` does not change the root —
+ * the injected store is `version`. An unreadable file, a parse failure, or a
+ * value other than "v1"/"v2" fails closed so a leftover `memories/` handbook
+ * is not imported by guess.
  */
 function readCodexMemoryVersion(codexHome: string): { ok: true; version: CodexMemoryVersion } | { ok: false; reason: string } {
   const file = path.join(codexHome, CODEX_CONFIG_FILE)
