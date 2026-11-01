@@ -34,6 +34,8 @@ describe("git-baseline", () => {
     fs.writeFileSync(memFile(path.join(notes, "old.md")), "old\n")
     fs.writeFileSync(memFile(path.join(notes, "edited.md")), "before\n")
     expect(await ensureBaseline()).toBe(true)
+    // A successful run commits the current tree; the next diff starts there.
+    expect(await resetBaseline()).toBe(true)
 
     fs.writeFileSync(memFile(path.join(notes, "seen.md")), "seen\n")
     const diff = await captureWorkspaceDiff()
@@ -57,6 +59,7 @@ describe("git-baseline", () => {
     fs.mkdirSync(memFile("skills"), { recursive: true })
     fs.writeFileSync(memFile(path.join("skills", ".DS_Store")), "nested junk")
     expect(await ensureBaseline()).toBe(true)
+    expect(await resetBaseline()).toBe(true)
     expect(await isogit.listFiles({ fs, dir: memoryRoot() })).toEqual(["keep.md"])
 
     fs.writeFileSync(memFile(".DS_Store"), "finder junk changed")
@@ -70,9 +73,10 @@ describe("git-baseline", () => {
   })
 
   it("does not treat a new .DS_Store as a workspace change", async () => {
-    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
     fs.writeFileSync(memFile("keep.md"), "ok\n")
     expect(await ensureBaseline()).toBe(true)
+    expect(await resetBaseline()).toBe(true)
     fs.writeFileSync(memFile(".DS_Store"), "\0binary")
     const diff = await captureWorkspaceDiff()
     expect(diff.changes).toEqual([])
@@ -83,7 +87,11 @@ describe("git-baseline", () => {
 
     fs.writeFileSync(memFile("a.md"), "one\n")
     fs.writeFileSync(memFile("b.md"), "two\n")
+    // codex ensure_git_baseline_repository starts empty: pre-existing files
+    // stay visible to consolidation as additions.
     expect(await ensureBaseline()).toBe(true)
+    expect(statusLines(await captureWorkspaceDiff())).toEqual(["A a.md", "A b.md"])
+    expect(await resetBaseline()).toBe(true)
     expect((await captureWorkspaceDiff()).changes).toEqual([])
 
     fs.writeFileSync(memFile("a.md"), "one changed\n")
@@ -111,9 +119,10 @@ describe("git-baseline", () => {
   })
 
   it("ensureBaseline preserves an existing baseline so pre-existing changes stay in the diff", async () => {
-    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
     fs.writeFileSync(memFile("stale.md"), "old summary\n")
     expect(await ensureBaseline()).toBe(true)
+    expect(await resetBaseline()).toBe(true)
     // Changes made since the last baseline (user edits, ad-hoc notes) must NOT
     // be swallowed by a fresh commit — codex keeps the baseline untouched so
     // consolidation sees them in the diff.
@@ -138,16 +147,68 @@ describe("git-baseline", () => {
     expect(log.length).toBe(1)
   })
 
-  it("ensureBaseline recovers a corrupt .git by re-initializing (codex reset_git_repository_sync)", async () => {
-    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+  it("ensureBaseline recovers a corrupt .git with an empty baseline (codex reset_git_repository_sync)", async () => {
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
     fs.writeFileSync(memFile("a.md"), "one\n")
     expect(await ensureBaseline()).toBe(true)
+    expect(await resetBaseline()).toBe(true)
     // Corrupt the repo metadata: without self-heal every phase-2 run would
     // fail forever (codex re-inits a fresh baseline instead).
     fs.writeFileSync(path.join(TEST_ROOT, "memories", ".git", "HEAD"), "garbage")
     expect(await ensureBaseline()).toBe(true)
-    const diff = await captureWorkspaceDiff()
-    expect(diff.changes).toEqual([])
+    // Recovery must not treat existing memory files as already processed.
+    expect(statusLines(await captureWorkspaceDiff())).toEqual(["A a.md"])
+  })
+
+  it("writes the baseline version marker and migrates an unversioned baseline to empty", async () => {
+    const { ensureBaseline, captureWorkspaceDiff } = require("../src/git-baseline.js")
+    const isogit = require("isomorphic-git")
+    const { memoryRoot } = require("../src/paths.js")
+    fs.writeFileSync(memFile("legacy.md"), "old\n")
+    // Legacy baseline: commit contents without the version marker.
+    await isogit.init({ fs, dir: memoryRoot() })
+    await isogit.add({ fs, dir: memoryRoot(), filepath: "legacy.md" })
+    await isogit.commit({
+      fs,
+      dir: memoryRoot(),
+      message: "legacy baseline",
+      author: { name: "t", email: "t@example.com" },
+    })
+
+    expect(await ensureBaseline()).toBe(true)
+    expect(fs.readFileSync(path.join(TEST_ROOT, "memories", ".git", "codex-baseline-version"), "utf8")).toBe("1\n")
+    expect(await isogit.listFiles({ fs, dir: memoryRoot() })).toEqual([])
+    expect(statusLines(await captureWorkspaceDiff())).toEqual(["A legacy.md"])
+  })
+
+  it("skips files above the baseline snapshot limit", async () => {
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
+    const isogit = require("isomorphic-git")
+    const { memoryRoot } = require("../src/paths.js")
+    fs.writeFileSync(memFile("small.md"), "tiny\n")
+    fs.writeFileSync(memFile("big.md"), "")
+    fs.truncateSync(memFile("big.md"), 10 * 1024 * 1024 + 1)
+
+    expect(await ensureBaseline()).toBe(true)
+    expect(await resetBaseline()).toBe(true)
+    expect(await isogit.listFiles({ fs, dir: memoryRoot() })).toEqual(["small.md"])
+    expect((await captureWorkspaceDiff()).changes).toEqual([])
+
+    fs.writeFileSync(memFile("small.md"), "tiny changed\n")
+    expect(statusLines(await captureWorkspaceDiff())).toEqual(["M small.md"])
+  })
+
+  it("invalidates the baseline when a tracked file grows past the limit", async () => {
+    const { ensureBaseline, captureWorkspaceDiff, resetBaseline } = require("../src/git-baseline.js")
+    fs.writeFileSync(memFile("tracked.md"), "small\n")
+    expect(await ensureBaseline()).toBe(true)
+    expect(await resetBaseline()).toBe(true)
+
+    fs.truncateSync(memFile("tracked.md"), 10 * 1024 * 1024 + 1)
+    fs.writeFileSync(memFile("other.md"), "visible\n")
+    // Baseline is rebuilt empty; the oversized input is skipped and the
+    // remaining files stay visible as additions.
+    expect(statusLines(await captureWorkspaceDiff())).toEqual(["A other.md"])
   })
 
   it("does not recurse into .git (symlink cycles / Windows junctions hang phase 2)", async () => {

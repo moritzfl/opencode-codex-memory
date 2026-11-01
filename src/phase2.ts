@@ -191,9 +191,10 @@ async function runVersionPhase2(
       const interop = opts.codexInterop ? resolveCodexInterop(opts.codexInterop) : null
       ensureLayout()
 
-      // Preserves an existing baseline (only initializes a missing one): the
-      // diff below must span last-successful-run -> now so user edits and
-      // ad-hoc notes added since then reach consolidation. Stale stage-1
+      // Preserves a current-version baseline; missing/outdated/unusable
+      // metadata becomes an empty baseline (codex ensure_git_baseline_repository),
+      // so the diff below spans last-successful-run -> now and existing memory
+      // files stay visible as additions. Stale stage-1
       // output pruning happens in phase 1, before the rate gate (codex
       // start.rs ordering).
       if (!await withHostTimeout(ensureBaseline(), GIT_TIMEOUT_MS, "ensureBaseline")) {

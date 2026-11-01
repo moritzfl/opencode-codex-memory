@@ -13,6 +13,12 @@ const AUTHOR = { name: "opencode-codex-memory", email: "memory@opencode.local" }
 // baseline history or shows up as memory content.
 export const DIFF_ARTIFACT = "phase2_workspace_diff.md"
 
+// codex baseline.rs: a baseline is derived data, so snapshots skip files above
+// the automatic ghost-snapshot limit instead of reading unbounded content.
+const MAX_BASELINE_FILE_BYTES = 10 * 1024 * 1024
+const BASELINE_VERSION_FILE = "codex-baseline-version"
+const BASELINE_VERSION = "1\n"
+
 /**
  * Hidden path components are invisible to tools/path-guard (`not found`).
  * Codex's gix walker includes them and reads bytes directly; isomorphic-git
@@ -43,7 +49,9 @@ const EXTENSIONS_PREFIX = "extensions/"
 
 function workdirHash(dir: string, filepath: string): string | null {
   try {
-    const content = readRegularFileNoFollow(safeResolveUnderRoot(dir, filepath)).content
+    const file = safeResolveUnderRoot(dir, filepath)
+    if (fs.lstatSync(file).size > MAX_BASELINE_FILE_BYTES) return null
+    const content = readRegularFileNoFollow(file).content
     return createHash("sha1").update(content).digest("hex")
   } catch {
     return null
@@ -57,37 +65,74 @@ function removeDiffArtifact(dir: string): void {
   }
 }
 
-async function ensureInit(dir: string): Promise<void> {
-  const gitDir = path.join(dir, ".git")
-  let recreate = false
-  try {
-    recreate = gitMetadataUnusable(gitDir)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
-  }
-  if (recreate) fs.rmSync(gitDir, { recursive: true, force: true })
-  if (!fs.existsSync(gitDir)) {
-    await isogit.init({ fs, dir })
-  }
+function baselineVersionPath(dir: string): string {
+  return path.join(dir, ".git", BASELINE_VERSION_FILE)
 }
 
 /**
  * Only the `.git` entry itself. A recursive walk of git objects hangs on
  * Windows junctions / symlink cycles and is not needed: we only refuse a
- * `.git` that is a symlink or a non-directory.
+ * `.git` that is a symlink, a non-directory (gitfile), or a linked worktree.
  */
 function gitMetadataUnusable(gitDir: string): boolean {
   const st = fs.lstatSync(gitDir)
-  return st.isSymbolicLink() || !st.isDirectory()
+  if (st.isSymbolicLink() || !st.isDirectory()) return true
+  // codex requires common_dir == git_dir; a commondir file marks a linked worktree.
+  return fs.existsSync(path.join(gitDir, "commondir"))
+}
+
+function isOversizedFile(dir: string, filepath: string): boolean {
+  try {
+    const st = fs.lstatSync(path.join(dir, filepath))
+    return st.isFile() && st.size > MAX_BASELINE_FILE_BYTES
+  } catch {
+    return false
+  }
+}
+
+function statusMatrix(dir: string) {
+  return isogit.statusMatrix({
+    fs,
+    dir,
+    filter: (filepath) => !isHiddenBaselinePath(filepath) && !isOversizedFile(dir, filepath),
+  })
+}
+
+async function hasVersionedBaseline(dir: string): Promise<boolean> {
+  try {
+    if (gitMetadataUnusable(path.join(dir, ".git"))) return false
+    if (fs.readFileSync(baselineVersionPath(dir), "utf8") !== BASELINE_VERSION) return false
+    await isogit.resolveRef({ fs, dir, ref: "HEAD" })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * codex ensure_git_baseline_repository: missing, outdated, or unusable
+ * metadata is replaced with an EMPTY baseline, so every eligible working file
+ * stays visible to the next consolidation as an addition. The version marker
+ * is written last; an interrupted reset therefore never looks trusted.
+ */
+async function initEmptyBaseline(dir: string): Promise<void> {
+  fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true })
+  await isogit.init({ fs, dir })
+  const tree = await isogit.writeTree({ fs, dir, tree: [] })
+  await isogit.commit({ fs, dir, message: "memory baseline", author: AUTHOR, tree, parent: [] })
+  fs.writeFileSync(baselineVersionPath(dir), BASELINE_VERSION)
+}
+
+async function ensureVersionedBaseline(dir: string): Promise<void> {
+  if (!(await hasVersionedBaseline(dir))) await initEmptyBaseline(dir)
 }
 
 // statusMatrix rows are [filepath, head, workdir, stage]; head !== workdir
 // means the working tree differs from HEAD (added, modified, or deleted).
 async function stageAll(dir: string, skip?: (filepath: string) => boolean): Promise<number> {
-  const matrix = await isogit.statusMatrix({ fs, dir })
+  const matrix = await statusMatrix(dir)
   let changes = 0
   for (const [filepath, head, workdir, stage] of matrix) {
-    if (isHiddenBaselinePath(filepath)) continue
     if (head === 1 && workdir === 1 && stage === 1) continue
     if (workdir !== 0 && skip?.(filepath)) continue
     if (workdir === 0) {
@@ -101,45 +146,34 @@ async function stageAll(dir: string, skip?: (filepath: string) => boolean): Prom
   return changes
 }
 
-async function hasHeadCommit(dir: string): Promise<boolean> {
-  try {
-    await isogit.resolveRef({ fs, dir, ref: "HEAD" })
-    return true
-  } catch {
-    return false
-  }
-}
-
 async function commitBaseline(dir: string, skip?: (filepath: string) => boolean): Promise<string> {
   await stageAll(dir, skip)
-  return isogit.commit({ fs, dir, message: "memory baseline", author: AUTHOR })
+  const oid = await isogit.commit({ fs, dir, message: "memory baseline", author: AUTHOR })
+  fs.writeFileSync(baselineVersionPath(dir), BASELINE_VERSION)
+  return oid
 }
 
 /**
- * Mirrors codex prepare_memory_workspace: an existing baseline is preserved
- * untouched so the phase-2 diff spans last-successful-run -> now — including
- * manual user edits and newly added ad-hoc notes. Committing here would
- * swallow those changes and consolidation would never see them. Only a root
- * without any commit gets a fresh baseline.
+ * Mirrors codex prepare_memory_workspace: a current-version baseline is
+ * preserved untouched so the phase-2 diff spans last-successful-run -> now —
+ * including manual user edits and newly added ad-hoc notes. Committing here
+ * would swallow those changes and consolidation would never see them. Missing,
+ * outdated, or unusable metadata gets an empty baseline (codex keeps existing
+ * memory files visible as additions).
  */
 export async function ensureBaseline(): Promise<boolean> {
   const dir = memoryRoot()
   try {
     removeDiffArtifact(dir)
-    await ensureInit(dir)
-    if (!(await hasHeadCommit(dir))) {
-      await commitBaseline(dir)
-    }
+    await ensureVersionedBaseline(dir)
     return true
   } catch (err) {
     // codex ensure_git_baseline_repository: unusable/corrupt git metadata is
-    // recovered by a destructive fresh re-init (reset_git_repository_sync)
-    // instead of failing the job forever.
+    // recovered by a destructive fresh empty re-init instead of failing the
+    // job forever.
     console.error("[opencode-codex-memory] ensureBaseline error, re-initializing baseline:", err)
     try {
-      fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true })
-      await isogit.init({ fs, dir })
-      await commitBaseline(dir)
+      await initEmptyBaseline(dir)
       return true
     } catch (err2) {
       console.error("[opencode-codex-memory] baseline re-init failed:", err2)
@@ -159,7 +193,56 @@ async function readBaselineText(dir: string, headOid: string, filepath: string):
 
 function readWorkdirText(dir: string, filepath: string): string {
   const file = safeResolveUnderRoot(dir, filepath)
+  if (fs.lstatSync(file).size > MAX_BASELINE_FILE_BYTES) {
+    throw new Error(`file grew beyond the snapshot file limit during diff: ${filepath}`)
+  }
   return readRegularFileNoFollow(file).content.toString("utf8")
+}
+
+/**
+ * Every non-hidden regular file above the snapshot limit. Used to invalidate a
+ * baseline whose tracked inputs grew after preparation (codex
+ * diff_since_latest_init).
+ */
+function collectOversizedPaths(dir: string): string[] {
+  const out: string[] = []
+  const walk = (current: string, prefix: string): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name === ".git") continue
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (isHiddenBaselinePath(rel)) continue
+      const full = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        walk(full, rel)
+      } else if (entry.isFile()) {
+        try {
+          if (fs.lstatSync(full).size > MAX_BASELINE_FILE_BYTES) out.push(rel)
+        } catch {
+        }
+      }
+    }
+  }
+  walk(dir, "")
+  return out
+}
+
+async function hasTrackedOversizedFile(dir: string): Promise<boolean> {
+  const oversized = collectOversizedPaths(dir)
+  if (oversized.length === 0) return false
+  let tracked: string[]
+  try {
+    tracked = await isogit.listFiles({ fs, dir, ref: "HEAD" })
+  } catch {
+    return false
+  }
+  const trackedSet = new Set(tracked)
+  return oversized.some((filepath) => trackedSet.has(filepath))
 }
 
 // Throws on failure: codex fails the phase-2 job on workspace-status errors
@@ -167,12 +250,17 @@ function readWorkdirText(dir: string, filepath: string): string {
 // diff indistinguishable from "no changes" and falsely mark the job succeeded.
 export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
   const dir = memoryRoot()
-  await ensureInit(dir)
+  await ensureVersionedBaseline(dir)
   removeDiffArtifact(dir)
-  const matrix = await isogit.statusMatrix({ fs, dir })
+  let matrix = await statusMatrix(dir)
+  // Inputs may grow during synchronization, after the initial baseline was
+  // prepared. Rebuild empty so the remaining files stay visible as additions.
+  if (await hasTrackedOversizedFile(dir)) {
+    await initEmptyBaseline(dir)
+    matrix = await statusMatrix(dir)
+  }
   const changedRows = matrix.filter(
-    ([filepath, head, workdir]) =>
-      head !== workdir && filepath !== DIFF_ARTIFACT && !isHiddenBaselinePath(filepath),
+    ([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT,
   )
   const changes: WorkspaceChange[] = changedRows.map(([filepath, head, workdir]) => {
     if (head === 0) return { status: "A", path: filepath }
@@ -190,13 +278,14 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
   for (const [filepath, head, workdir] of changedRows) {
     const oldText = head === 1 && headOid ? await readBaselineText(dir, headOid, filepath) : ""
     const newText = workdir === 0 ? "" : readWorkdirText(dir, filepath)
-    // No per-file cap: codex renders every file's patch in full and relies
-    // on the global 4 MiB truncation in writeWorkspaceDiff.
+    // Per-file patches render in full; only the global 4 MiB truncation in
+    // writeWorkspaceDiff caps the rendered diff. Files above the baseline
+    // snapshot limit never reach this loop.
     patches.push(createPatch(filepath, oldText, newText))
   }
   const extensionSnapshot = new Map<string, string>()
   for (const [filepath, , workdir] of matrix) {
-    if (workdir === 0 || !filepath.startsWith(EXTENSIONS_PREFIX) || isHiddenBaselinePath(filepath)) continue
+    if (workdir === 0 || !filepath.startsWith(EXTENSIONS_PREFIX)) continue
     const hash = workdirHash(dir, filepath)
     if (hash) extensionSnapshot.set(filepath, hash)
   }
