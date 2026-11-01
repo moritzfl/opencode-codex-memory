@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-01
+
+### Fixed
+
+- Phase-2 workspace baselines are bounded and versioned like Codex: files
+  above 10 MiB are skipped, a tracked input that grows past the limit rebuilds
+  the baseline, and missing, outdated, or corrupt baseline metadata recovers
+  as an empty baseline so existing memory files stay visible to consolidation
+  instead of being treated as already processed.
+- Codex CLI sharing follows Codex's fresh-profile default when
+  `memories.version` is unset: an existing `memories/` workspace selects
+  Memory V1, otherwise an existing `memories_v2/` workspace selects Memory V2;
+  `memories.dual_write = false` keeps Memory V1. Explicit versions still win.
+
+### Changed
+
+- Documentation records that Codex made Memory V2 the default for fresh
+  profiles on 2026-10-22 (`a390571745`, #56211), and refreshes the Codex
+  preferred memory model names to `gpt-6-luna` / `gpt-6.1-terra`.
+
 ## [0.10.0] - 2026-10-28
 
 ### Added
@@ -1038,7 +1058,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.12...v0.10.0
 [0.9.12]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.10...v0.9.11
