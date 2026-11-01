@@ -25,8 +25,8 @@ codex_ref_date: 2026-10-31
 # session plumbing need no plugin port. MemoryTool still stable/off;
 # ExternalAgentMemoryImport still under development/off; dual_write=false
 # default unchanged. Codex defaults fresh profiles to v2 since 2026-10-22
-# (a390571745, #56211); the plugin keeps v1 opt-in and exchange still treats an
-# unset memories.version as v1 (see the codex-interop note).
+# (a390571745, #56211); the plugin keeps v1 opt-in and exchange mirrors Codex's
+# unset-version directory signal (see the codex-interop note).
 
 # Upstream directories/files to watch for ANY change since codex_ref.
 # The drift script diffs these path prefixes between codex_ref..HEAD.
@@ -494,14 +494,16 @@ mappings:
       through), and the source is Codex's own GLOBAL consolidated memory,
       not per-project Claude memories — so no scope.json, no project
       selection surface, no state-DB gating. The root is
-      $CODEX_HOME/config.toml [memories] version (unset → memories/). A
-      leftover memories/ handbook is not consulted when version is v2.
-      Profile, project, and session layers are not merged.
-      DIVERGENCE (audited 2026-10-31): Codex defaults fresh profiles to v2
-      since 2026-10-22 (a390571745, #56211) when the memory feature is enabled,
-      memories/ is absent, version is unset, and dual_write is not false.
-      Exchange still follows config.toml only and treats unset as v1, so those
-      profiles need an explicit version = "v2" to share the memories_v2 store.
+      $CODEX_HOME/config.toml [memories] version (explicit wins; unset mirrors
+      Codex's directory signal). A leftover memories/ handbook is not consulted
+      when version is v2. Profile, project, and session layers are not merged.
+      Codex defaults fresh profiles to v2 since 2026-10-22 (a390571745, #56211)
+      when the memory feature is enabled, memories/ is absent, version is
+      unset, and dual_write is not false. Exchange mirrors the observable
+      signal for unset: memories/ exists → v1, else memories_v2/ exists → v2,
+      else v1; dual_write=false keeps v1. The feature flag is not read: it only
+      matters when neither workspace exists, where there is nothing to exchange
+      yet.
       Claude per-project import lives in src/claude-import.ts (same extension
       name/layout as upstream). An unreachable selected root is NOT a deletion
       signal (only an existing selected root with missing artifacts is),

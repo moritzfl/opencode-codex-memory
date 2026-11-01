@@ -292,11 +292,37 @@ describe("Codex memory version", () => {
     return lines.join("\n")
   }
 
-  it("defaults to memories/ when config.toml is missing, even if memories_v2 exists", () => {
+  it("selects memories_v2 from directory evidence when config.toml is missing", () => {
     const { resolveCodexInterop } = interop()
     const v2 = path.join(CODEX_HOME, "memories_v2")
     fs.mkdirSync(v2, { recursive: true })
     fs.writeFileSync(path.join(v2, "memory_summary.md"), "v1\n\nv2 fact\n")
+    const resolved = resolveCodexInterop({ import: true, codex_home: CODEX_HOME })
+    expect(resolved?.codexVersion).toBe("v2")
+    expect(resolved?.codexMemoryRoot).toBe(v2)
+  })
+
+  it("prefers an existing memories/ workspace when version is unset", () => {
+    const { resolveCodexInterop } = interop()
+    fs.mkdirSync(CODEX_MEM, { recursive: true })
+    fs.mkdirSync(path.join(CODEX_HOME, "memories_v2"), { recursive: true })
+    const resolved = resolveCodexInterop({ import: true, codex_home: CODEX_HOME })
+    expect(resolved?.codexVersion).toBe("v1")
+    expect(resolved?.codexMemoryRoot).toBe(CODEX_MEM)
+  })
+
+  it("keeps v1 when dual_write is false even if only memories_v2 exists", () => {
+    const { resolveCodexInterop } = interop()
+    writeConfig("[memories]\ndual_write = false\n")
+    fs.mkdirSync(path.join(CODEX_HOME, "memories_v2"), { recursive: true })
+    const resolved = resolveCodexInterop({ import: true, codex_home: CODEX_HOME })
+    expect(resolved?.codexVersion).toBe("v1")
+    expect(resolved?.codexMemoryRoot).toBe(CODEX_MEM)
+  })
+
+  it("defaults to v1 when neither workspace exists", () => {
+    const { resolveCodexInterop } = interop()
+    writeConfig("[memories]\n")
     const resolved = resolveCodexInterop({ import: true, codex_home: CODEX_HOME })
     expect(resolved?.codexVersion).toBe("v1")
     expect(resolved?.codexMemoryRoot).toBe(CODEX_MEM)

@@ -411,18 +411,29 @@ function describeVersion(value: unknown): string {
 }
 
 /**
- * Selected Codex read version from `$CODEX_HOME/config.toml` only.
+ * Codex's runtime default when `memories.version` is unset (a390571745, #56211,
+ * 2026-10-22): a fresh profile (no `memories/` directory) uses v2 unless
+ * `dual_write = false`. Exchange mirrors the same observable signal instead of
+ * assuming v1. Explicit versions always win; profile, project, and session
+ * layers are still not merged. `memories_v2/` alone is enough evidence for v2
+ * when `memories/` is absent.
+ */
+function resolveUnsetCodexVersion(codexHome: string, dualWrite: unknown): CodexMemoryVersion {
+  if (dualWrite === false) return "v1"
+  if (fs.existsSync(path.join(codexHome, CODEX_MEMORY_DIR.v1))) return "v1"
+  if (fs.existsSync(path.join(codexHome, CODEX_MEMORY_DIR.v2))) return "v2"
+  return "v1"
+}
+
+/**
+ * Selected Codex read version from `$CODEX_HOME/config.toml` plus the same
+ * directory signal Codex uses for fresh profiles.
  *
- * Unset, missing file, or a `[memories]` table with no `version` → v1. This is
- * the exchange rule, not Codex's current runtime default: since 2026-10-22
- * (a390571745, #56211) Codex selects v2 for fresh profiles (memory feature
- * enabled, no memories/ dir, dual_write not false). Exchange follows
- * config.toml only, so those profiles need an explicit version. Profile,
- * project, and session layers are not merged: those overrides are not on disk
- * in a form this plugin can resolve. `dual_write` does not change the root —
- * the injected store is `version`. An unreadable file, a parse failure, or a
- * value other than "v1"/"v2" fails closed so a leftover `memories/` handbook
- * is not imported by guess.
+ * Explicit `memories.version` wins. Unset, missing file, or a `[memories]`
+ * table with no `version` → `memories/` exists ? v1 : `memories_v2/` exists ?
+ * v2 : v1. `memories.dual_write = false` keeps v1 (Codex's transition opt-out).
+ * An unreadable file, a parse failure, or a value other than "v1"/"v2" fails
+ * closed so a leftover `memories/` handbook is not imported by guess.
  */
 function readCodexMemoryVersion(codexHome: string): { ok: true; version: CodexMemoryVersion } | { ok: false; reason: string } {
   const file = path.join(codexHome, CODEX_CONFIG_FILE)
@@ -430,7 +441,9 @@ function readCodexMemoryVersion(codexHome: string): { ok: true; version: CodexMe
   try {
     text = fs.readFileSync(file, "utf8")
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, version: "v1" }
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ok: true, version: resolveUnsetCodexVersion(codexHome, undefined) }
+    }
     return { ok: false, reason: `could not read ${file}` }
   }
   let parsed: unknown
@@ -443,12 +456,13 @@ function readCodexMemoryVersion(codexHome: string): { ok: true; version: CodexMe
     return { ok: false, reason: `could not parse ${file}` }
   }
   const memories = (parsed as Record<string, unknown>).memories
-  if (memories == null) return { ok: true, version: "v1" }
+  if (memories == null) return { ok: true, version: resolveUnsetCodexVersion(codexHome, undefined) }
   if (typeof memories !== "object" || Array.isArray(memories)) {
     return { ok: false, reason: `${file} memories.version is not "v1" or "v2"` }
   }
-  const version = (memories as Record<string, unknown>).version
-  if (version == null) return { ok: true, version: "v1" }
+  const table = memories as Record<string, unknown>
+  const version = table.version
+  if (version == null) return { ok: true, version: resolveUnsetCodexVersion(codexHome, table.dual_write) }
   if (version === "v1" || version === "v2") return { ok: true, version }
   return { ok: false, reason: `${file} memories.version ${describeVersion(version)} is not "v1" or "v2"` }
 }
