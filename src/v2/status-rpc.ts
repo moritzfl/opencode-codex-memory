@@ -133,7 +133,13 @@ export const MemoryStatusRpc = {
         },
         required: [
           "activity",
-          "version", "sessionVersion", "dualWrite", "v2ConsolidatedThreads", "v2Ready", "minConsolidatedThreads", "pipelines",
+          "version",
+          "sessionVersion",
+          "dualWrite",
+          "v2ConsolidatedThreads",
+          "v2Ready",
+          "minConsolidatedThreads",
+          "pipelines",
           "useMemories",
           "generateMemories",
           "extractModel",
@@ -160,7 +166,12 @@ export const MemoryStatusRpc = {
         required: ["key", "value"],
         additionalProperties: false,
       },
-      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+        additionalProperties: false,
+      },
     },
     /** Same effect as the memory_mode tool. */
     setSessionMode: {
@@ -173,7 +184,12 @@ export const MemoryStatusRpc = {
         required: ["sessionID", "mode"],
         additionalProperties: false,
       },
-      output: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: false },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+        additionalProperties: false,
+      },
     },
     /** Run extraction + consolidation now, bypassing the success cooldown (not the lease). */
     consolidateNow: {
@@ -213,10 +229,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Runtime guard for the untyped RPC client result (no zod in the TUI bundle). */
 export function isMemoryStatus(value: unknown): value is MemoryStatus {
   if (!isRecord(value)) return false
-  if (
-    typeof value.activity !== "string" ||
-    !(MEMORY_STATUS_ACTIVITIES as readonly string[]).includes(value.activity)
-  ) {
+  if (typeof value.activity !== "string" || !(MEMORY_STATUS_ACTIVITIES as readonly string[]).includes(value.activity)) {
     return false
   }
   for (const key of ["useMemories", "generateMemories", "codexImport", "dualWrite", "v2Ready"] as const) {
@@ -226,23 +239,48 @@ export function isMemoryStatus(value: unknown): value is MemoryStatus {
     if (value[key] !== "v1" && value[key] !== "v2") return false
   }
   if (!Number.isInteger(value.v2ConsolidatedThreads) || (value.v2ConsolidatedThreads as number) < 0) return false
-  if (value.v2NotReadyReason !== undefined && value.v2NotReadyReason !== null && typeof value.v2NotReadyReason !== "string") return false
+  if (
+    value.v2NotReadyReason !== undefined &&
+    value.v2NotReadyReason !== null &&
+    typeof value.v2NotReadyReason !== "string"
+  )
+    return false
   for (const key of ["v2SummaryBytes", "v2InjectedSummaryBytes"] as const) {
-    if (value[key] !== undefined && value[key] !== null &&
-      (!Number.isInteger(value[key]) || (value[key] as number) < 0)) return false
+    if (
+      value[key] !== undefined &&
+      value[key] !== null &&
+      (!Number.isInteger(value[key]) || (value[key] as number) < 0)
+    )
+      return false
   }
   if (typeof value.v2InjectedSummaryBytes === "number" && value.v2InjectedSummaryBytes > 9999) return false
-  if (!Number.isInteger(value.minConsolidatedThreads) || (value.minConsolidatedThreads as number) < 1 || (value.minConsolidatedThreads as number) > 4096) return false
-  if (!Array.isArray(value.pipelines) || !value.pipelines.every((pipeline) =>
-    isRecord(pipeline) && (pipeline.version === "v1" || pipeline.version === "v2")
-    && Number.isInteger(pipeline.stage1Count) && (pipeline.stage1Count as number) >= 0
-    && Number.isInteger(pipeline.extracting) && (pipeline.extracting as number) >= 0
-    && (pipeline.phase2Status === null || typeof pipeline.phase2Status === "string")
-    && (pipeline.lastError === null || typeof pipeline.lastError === "string")
-    && ["phase2CooldownUntil", "phase1RetryAt", "phase2RetryAt"].every((key) =>
-      pipeline[key] === undefined || pipeline[key] === null || (typeof pipeline[key] === "number" && Number.isFinite(pipeline[key])),
+  if (
+    !Number.isInteger(value.minConsolidatedThreads) ||
+    (value.minConsolidatedThreads as number) < 1 ||
+    (value.minConsolidatedThreads as number) > 4096
+  )
+    return false
+  if (
+    !Array.isArray(value.pipelines) ||
+    !value.pipelines.every(
+      (pipeline) =>
+        isRecord(pipeline) &&
+        (pipeline.version === "v1" || pipeline.version === "v2") &&
+        Number.isInteger(pipeline.stage1Count) &&
+        (pipeline.stage1Count as number) >= 0 &&
+        Number.isInteger(pipeline.extracting) &&
+        (pipeline.extracting as number) >= 0 &&
+        (pipeline.phase2Status === null || typeof pipeline.phase2Status === "string") &&
+        (pipeline.lastError === null || typeof pipeline.lastError === "string") &&
+        ["phase2CooldownUntil", "phase1RetryAt", "phase2RetryAt"].every(
+          (key) =>
+            pipeline[key] === undefined ||
+            pipeline[key] === null ||
+            (typeof pipeline[key] === "number" && Number.isFinite(pipeline[key])),
+        ),
     )
-  )) return false
+  )
+    return false
   for (const key of ["extractModel", "consolidationModel", "lastSuccessAt", "retryAt"] as const) {
     const v = value[key]
     if (v !== null && typeof v !== (key === "extractModel" || key === "consolidationModel" ? "string" : "number")) {

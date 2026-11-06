@@ -6,7 +6,12 @@ import { resetRateLimitForTest } from "../src/ratelimit.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `opencode-codex-memory-tools-${process.pid}-${Date.now()}`)
 const asks: any[] = []
-const CTX = { sessionID: "ses_test", ask: async (req: unknown) => { asks.push(req) } } as any
+const CTX = {
+  sessionID: "ses_test",
+  ask: async (req: unknown) => {
+    asks.push(req)
+  },
+} as any
 
 beforeEach(() => {
   resetRateLimitForTest()
@@ -37,8 +42,7 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
 })
 
 function search(args: Record<string, unknown>) {
@@ -297,15 +301,20 @@ describe("memory_list", () => {
     expect(first.metadata.next_cursor).toBe("2")
     expect(first.metadata.truncated).toBe(true)
 
-    const second = await memory_list.execute({ path: "pagination", cursor: first.metadata.next_cursor, max_results: 2 }, CTX)
-    expect(second.metadata.entries).toEqual([
-      { path: "pagination/ccc.md", entry_type: "file" },
-    ])
+    const second = await memory_list.execute(
+      { path: "pagination", cursor: first.metadata.next_cursor, max_results: 2 },
+      CTX,
+    )
+    expect(second.metadata.entries).toEqual([{ path: "pagination/ccc.md", entry_type: "file" }])
     expect(second.metadata.next_cursor).toBe(null)
     expect(second.metadata.truncated).toBe(false)
 
-    expect((await memory_list.execute({ path: "pagination", cursor: "not-an-int", max_results: 2 }, CTX)).output).toContain("invalid cursor")
-    expect((await memory_list.execute({ path: "pagination", cursor: "99", max_results: 2 }, CTX)).output).toContain("exceeds result count")
+    expect(
+      (await memory_list.execute({ path: "pagination", cursor: "not-an-int", max_results: 2 }, CTX)).output,
+    ).toContain("invalid cursor")
+    expect((await memory_list.execute({ path: "pagination", cursor: "99", max_results: 2 }, CTX)).output).toContain(
+      "exceeds result count",
+    )
     const exhausted = await memory_list.execute({ path: "pagination", cursor: "3", max_results: 2 }, CTX)
     expect(exhausted.output).toContain("No entries at cursor 3")
     expect(exhausted.metadata).toMatchObject({ entries: [], next_cursor: null, truncated: false })
@@ -313,7 +322,10 @@ describe("memory_list", () => {
     // A cursor from a prior page remains valid if concurrent deletion shrinks
     // the listing to exactly that offset.
     fs.rmSync(path.join(paginationDir, "ccc.md"))
-    const shrunk = await memory_list.execute({ path: "pagination", cursor: first.metadata.next_cursor, max_results: 2 }, CTX)
+    const shrunk = await memory_list.execute(
+      { path: "pagination", cursor: first.metadata.next_cursor, max_results: 2 },
+      CTX,
+    )
     expect(shrunk.output).toContain("No entries at cursor 2")
     expect(shrunk.output).not.toContain("exceeds result count")
     expect(shrunk.metadata.entries).toEqual([])
@@ -453,7 +465,13 @@ describe("memory_reset", () => {
   it("asks the user before wiping and keeps memory when approval is rejected", async () => {
     const { memory_reset } = require("../tools/control.js")
     const file = path.join(TEST_ROOT, "memories", "MEMORY.md")
-    const rejecting = { ...CTX, ask: async (req: unknown) => { asks.push(req); throw new Error("rejected") } }
+    const rejecting = {
+      ...CTX,
+      ask: async (req: unknown) => {
+        asks.push(req)
+        throw new Error("rejected")
+      },
+    }
     asks.length = 0
     await expect(memory_reset.execute({ confirm: true }, rejecting)).rejects.toThrow("rejected")
     expect(asks).toEqual([expect.objectContaining({ permission: "memory_reset", always: [] })])
@@ -530,9 +548,7 @@ describe("memory_inspect", () => {
     noteProviderCapacityExhausted("phase1", "limited/model")
     const r = await memory_inspect.execute({}, CTX)
     expect(r.output).toMatch(/provider_capacity_backoff model:limited\/model: retry_at=\d{4}-/)
-    expect(r.metadata.provider_capacity_backoffs).toEqual([
-      expect.objectContaining({ scope: "model:limited/model" }),
-    ])
+    expect(r.metadata.provider_capacity_backoffs).toEqual([expect.objectContaining({ scope: "model:limited/model" })])
   })
 
   it("surfaces a failed phase-2 job without labeling the failure as success", async () => {
@@ -922,8 +938,15 @@ describe("memory_mode", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
     store.markPolluted("ses_polluted")
-    const rejecting = { ...CTX, ask: async () => { throw new Error("rejected") } }
-    await expect(memory_mode.execute({ mode: "enabled", sessionId: "ses_polluted" }, rejecting)).rejects.toThrow("rejected")
+    const rejecting = {
+      ...CTX,
+      ask: async () => {
+        throw new Error("rejected")
+      },
+    }
+    await expect(memory_mode.execute({ mode: "enabled", sessionId: "ses_polluted" }, rejecting)).rejects.toThrow(
+      "rejected",
+    )
     expect(store.getMemoryMode("ses_polluted")).toBe("polluted")
     // Tightening never asks.
     await memory_mode.execute({ mode: "disabled", sessionId: "ses_polluted" }, rejecting)

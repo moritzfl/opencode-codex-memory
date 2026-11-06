@@ -30,10 +30,8 @@ function isEnvContext(text: string): boolean {
 function isOtherAgent(text: string): boolean {
   const trimmed = text.trimStart()
   return (
-    trimmed.startsWith("<subagent_notification>")
-    || (trimmed.startsWith("Message Type:")
-      && trimmed.includes("\nTask name:")
-      && trimmed.includes("\nSender:"))
+    trimmed.startsWith("<subagent_notification>") ||
+    (trimmed.startsWith("Message Type:") && trimmed.includes("\nTask name:") && trimmed.includes("\nSender:"))
   )
 }
 
@@ -62,9 +60,13 @@ function classify(msg: TranscriptMessage): Tier | null {
 function rowText(msg: TranscriptMessage, tier: Tier): string {
   if (msg.type === "image") return "[image omitted]"
   if (msg.type === "file" && !msg.text?.trim()) return "[file omitted]"
-  let text = redact(stripCitations(msg.userReply
-    ? `Assistant question: ${msg.userReply.question}\nHuman reply: ${msg.userReply.answer}`
-    : msg.text ?? ""))
+  let text = redact(
+    stripCitations(
+      msg.userReply
+        ? `Assistant question: ${msg.userReply.question}\nHuman reply: ${msg.userReply.answer}`
+        : (msg.text ?? ""),
+    ),
+  )
   if (tier === "tool") text = truncateToBytes(text, TOOL_ROW_BYTES - TRUNCATION_RESERVE_BYTES)
   text = truncateToBytes(text, MAX_ROW_BYTES - TRUNCATION_RESERVE_BYTES)
   return text
@@ -75,10 +77,7 @@ function rowText(msg: TranscriptMessage, tier: Tier): string {
  * question-tool replies retain their question; host transcripts expose no
  * Codex MessagePhase::Commentary or internal content-item provenance.
  */
-export function serializeTieredInput(
-  items: TranscriptMessage[],
-  byteLimit: number = DEFAULT_BYTE_LIMIT,
-): string {
+export function serializeTieredInput(items: TranscriptMessage[], byteLimit: number = DEFAULT_BYTE_LIMIT): string {
   const rows: { tier: Tier; text: string }[] = []
   for (const msg of items) {
     const tier = classify(msg)
@@ -93,7 +92,8 @@ export function serializeTieredInput(
     for (let i = rows.length - 1; i >= 0; i--) {
       if (rows[i].tier !== tier || remaining <= OMITTED.length + TRUNCATION_RESERVE_BYTES) continue
       let text = rows[i].text
-      if (Buffer.byteLength(text) > remaining - OMITTED.length) text = truncateToBytes(text, Math.max(0, remaining - OMITTED.length - TRUNCATION_RESERVE_BYTES))
+      if (Buffer.byteLength(text) > remaining - OMITTED.length)
+        text = truncateToBytes(text, Math.max(0, remaining - OMITTED.length - TRUNCATION_RESERVE_BYTES))
       if (!text) continue
       remaining -= Buffer.byteLength(text) + OMITTED.length
       selected[i] = text

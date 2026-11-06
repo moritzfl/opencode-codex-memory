@@ -11,7 +11,9 @@ import { withSessionMemoryVersion } from "../src/session-version.js"
 
 // Both host adapters call these definitions. Resolve once for the whole tool
 // execution, so relative paths follow the namespace injected into this chat.
-function sessionTool<Args extends Parameters<typeof defineTool>[0]["args"]>(definition: Parameters<typeof defineTool<Args>>[0]) {
+function sessionTool<Args extends Parameters<typeof defineTool>[0]["args"]>(
+  definition: Parameters<typeof defineTool<Args>>[0],
+) {
   return defineTool<Args>({
     ...definition,
     execute: (args, ctx) => withSessionMemoryVersion(ctx.sessionID, () => definition.execute(args, ctx)),
@@ -27,7 +29,9 @@ export const memory_read = tool({
     "Paths are relative to the memory root and cannot escape it. Supports line_offset/max_lines for " +
     "reading a window of a large file; line_offset is 1-indexed and the starting line is reported.",
   args: {
-    path: tool.schema.string().describe("Relative path inside the memory workspace (e.g. MEMORY.md, rollout_summaries/session-xyz.md)."),
+    path: tool.schema
+      .string()
+      .describe("Relative path inside the memory workspace (e.g. MEMORY.md, rollout_summaries/session-xyz.md)."),
     line_offset: tool.schema.number().int().min(1).optional().describe("1-indexed line to start reading from."),
     max_lines: tool.schema.number().int().min(1).optional().describe("Maximum number of lines to return."),
   },
@@ -43,7 +47,10 @@ export const memory_read = tool({
           .sort((a, b) => comparePathNames(a.name, b.name))
           .map((e) => e.name)
         return {
-          output: `Directory ${args.path}/\n` + entries.map((e) => `- ${e}`).join("\n") + "\n(use memory_list for sorted, typed listings)",
+          output:
+            `Directory ${args.path}/\n` +
+            entries.map((e) => `- ${e}`).join("\n") +
+            "\n(use memory_list for sorted, typed listings)",
           metadata: { kind: "directory", entries },
         }
       }
@@ -70,7 +77,10 @@ export const memory_read = tool({
       if (Buffer.byteLength(body, "utf8") > MAX_READ_BYTES) {
         byteTruncated = true
         // Byte-accurate cut; drop a possibly split trailing multibyte char.
-        body = Buffer.from(body, "utf8").subarray(0, MAX_READ_BYTES).toString("utf8").replace(/\uFFFD+$/, "")
+        body = Buffer.from(body, "utf8")
+          .subarray(0, MAX_READ_BYTES)
+          .toString("utf8")
+          .replace(/\uFFFD+$/, "")
       }
       const notes: string[] = []
       if (lineTruncated) notes.push(`[stopped after ${args.max_lines} lines; file has ${totalLines}]`)
@@ -78,7 +88,12 @@ export const memory_read = tool({
       const header = startLine > 1 ? `[starting at line ${startLine}]\n` : ""
       return {
         output: header + body + (notes.length ? "\n\n" + notes.join("\n") : ""),
-        metadata: { path: args.path, bytes: stat.size, start_line_number: startLine, truncated: byteTruncated || lineTruncated },
+        metadata: {
+          path: args.path,
+          bytes: stat.size,
+          start_line_number: startLine,
+          truncated: byteTruncated || lineTruncated,
+        },
       }
     } catch (err) {
       return { output: `memory_read error: ${(err as Error).message}` }
@@ -120,9 +135,18 @@ export const memory_list = tool({
     "with entry types. Hidden files and symlinks are skipped. Supports cursor pagination and listing " +
     "a single file. Use path '' (empty) for the memory root.",
   args: {
-    path: tool.schema.string().default("").describe("Relative directory path inside the memory workspace ('' for the root)."),
+    path: tool.schema
+      .string()
+      .default("")
+      .describe("Relative directory path inside the memory workspace ('' for the root)."),
     cursor: tool.schema.string().optional().describe("Pagination cursor from a previous response's next_cursor."),
-    max_results: tool.schema.number().int().min(1).max(LIST_MAX_RESULTS).default(LIST_MAX_RESULTS).describe("Maximum entries to return."),
+    max_results: tool.schema
+      .number()
+      .int()
+      .min(1)
+      .max(LIST_MAX_RESULTS)
+      .default(LIST_MAX_RESULTS)
+      .describe("Maximum entries to return."),
   },
   async execute(args) {
     try {
@@ -179,7 +203,7 @@ export const memory_list = tool({
       }
       return {
         output:
-        listing.map((e) => `${e.entry_type === "directory" ? "d" : "f"} ${e.path}`).join("\n") +
+          listing.map((e) => `${e.entry_type === "directory" ? "d" : "f"} ${e.path}`).join("\n") +
           (truncated ? `\n[truncated: ${entries.length - endIndex} more entries; pass cursor=${nextCursor}]` : ""),
         metadata: { path: args.path, entries: listing, next_cursor: nextCursor, truncated },
       }
@@ -355,17 +379,51 @@ export const memory_search = tool({
     "notes) from that period — useful to recall what the user was working on around a given time. " +
     "With since/until and no queries, returns a chronological listing of that period's sessions/notes.",
   args: {
-    queries: tool.schema.array(tool.schema.string()).optional().describe("Search substrings (at least one, non-empty after trim). Optional only when since/until is set."),
-    match_mode: tool.schema.enum(["any", "all_on_same_line", "all_within_lines"]).default("any").describe("How multiple queries combine (default any)."),
-    line_count: tool.schema.number().int().min(1).optional().describe("Window size in lines for all_within_lines (required for that mode)."),
-    path: tool.schema.string().optional().describe("Restrict the search to a file or directory relative to the memory root."),
+    queries: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Search substrings (at least one, non-empty after trim). Optional only when since/until is set."),
+    match_mode: tool.schema
+      .enum(["any", "all_on_same_line", "all_within_lines"])
+      .default("any")
+      .describe("How multiple queries combine (default any)."),
+    line_count: tool.schema
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe("Window size in lines for all_within_lines (required for that mode)."),
+    path: tool.schema
+      .string()
+      .optional()
+      .describe("Restrict the search to a file or directory relative to the memory root."),
     cursor: tool.schema.string().optional().describe("Pagination cursor from a previous response's next_cursor."),
     context_lines: tool.schema.number().int().min(0).default(0).describe("Extra lines of context around each match."),
-    case_sensitive: tool.schema.boolean().default(true).describe("Case-sensitive matching (default true, like codex memories/search)."),
-    normalized: tool.schema.boolean().default(false).describe("Compare only alphanumeric characters, ignoring separators (blue-green == bluegreen); combine with case_sensitive=false to also ignore case."),
-    since: tool.schema.string().optional().describe("Only time-anchored files at/after this time (YYYY-MM-DD or ISO datetime)."),
-    until: tool.schema.string().optional().describe("Only time-anchored files at/before this time (YYYY-MM-DD or ISO datetime; whole day for date-only)."),
-    max_results: tool.schema.number().int().min(1).max(SEARCH_MAX_RESULTS).default(SEARCH_MAX_RESULTS).describe("Max matches per page (default/max 200, like codex)."),
+    case_sensitive: tool.schema
+      .boolean()
+      .default(true)
+      .describe("Case-sensitive matching (default true, like codex memories/search)."),
+    normalized: tool.schema
+      .boolean()
+      .default(false)
+      .describe(
+        "Compare only alphanumeric characters, ignoring separators (blue-green == bluegreen); combine with case_sensitive=false to also ignore case.",
+      ),
+    since: tool.schema
+      .string()
+      .optional()
+      .describe("Only time-anchored files at/after this time (YYYY-MM-DD or ISO datetime)."),
+    until: tool.schema
+      .string()
+      .optional()
+      .describe("Only time-anchored files at/before this time (YYYY-MM-DD or ISO datetime; whole day for date-only)."),
+    max_results: tool.schema
+      .number()
+      .int()
+      .min(1)
+      .max(SEARCH_MAX_RESULTS)
+      .default(SEARCH_MAX_RESULTS)
+      .describe("Max matches per page (default/max 200, like codex)."),
   },
   async execute(args, ctx) {
     try {
@@ -401,7 +459,9 @@ export const memory_search = tool({
           return { output: `Not found: ${args.path}` }
         }
         const rel = args.path.replace(/\/+$/, "")
-        files = st.isFile() ? [{ rel, abs: start, ts: fileTimestamp(path.basename(start)) }] : collectSearchFiles(start, rel)
+        files = st.isFile()
+          ? [{ rel, abs: start, ts: fileTimestamp(path.basename(start)) }]
+          : collectSearchFiles(start, rel)
       } else {
         files = collectSearchFiles(root, "")
       }
@@ -410,7 +470,9 @@ export const memory_search = tool({
       if (timeFiltered) {
         // Time filters only apply to time-anchored files; MEMORY.md etc. carry
         // no single timestamp and are excluded from time-scoped recall.
-        files = files.filter((f) => f.ts !== null && (since === null || f.ts >= since) && (until === null || f.ts <= until))
+        files = files.filter(
+          (f) => f.ts !== null && (since === null || f.ts >= since) && (until === null || f.ts <= until),
+        )
         files.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
       }
       const rangeLabel = timeFiltered ? ` in ${args.since ?? "..."}..${args.until ?? "..."}` : ""
@@ -434,8 +496,7 @@ export const memory_search = tool({
           let content = ""
           try {
             content = readRegularFileNoFollow(f.abs).content.toString("utf8")
-          } catch {
-          }
+          } catch {}
           return `${new Date(f.ts!).toISOString()} ${f.rel} — ${firstContentLine(content)}`
         })
         if (files.length === 0) return { output: `No time-anchored memory files${rangeLabel}.` }

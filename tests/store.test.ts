@@ -19,8 +19,7 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
 })
 
 function sessions(...ids: string[]) {
@@ -111,7 +110,14 @@ describe("MemoryStore stage1", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
     const token = claimOne(store, "s1")
-    store.markStage1Succeeded("s1", token, { session_id: "s1", source_updated_at: 1000, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1000 })
+    store.markStage1Succeeded("s1", token, {
+      session_id: "s1",
+      source_updated_at: 1000,
+      raw_memory: "r",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1000,
+    })
     expect(store.claimStage1Jobs([{ id: "s1", updated_at: 1000 }])).toEqual([])
     expect(claimedIds(store.claimStage1Jobs([{ id: "s1", updated_at: 2000 }]))).toEqual(["s1"])
   })
@@ -143,7 +149,10 @@ describe("MemoryStore stage1", () => {
     const { MemoryStore } = require("../src/store.js")
     const { openDb } = require("../src/db.js")
     const store = new MemoryStore()
-    for (const [id, watermark] of [["newer", 2000], ["older", 1000]] as const) {
+    for (const [id, watermark] of [
+      ["newer", 2000],
+      ["older", 1000],
+    ] as const) {
       const token = claimOne(store, id, watermark)
       store.markStage1Succeeded(id, token, {
         session_id: id,
@@ -170,14 +179,28 @@ describe("MemoryStore stage1", () => {
     const newToken = claimOne(store, "s1")
     expect(newToken).not.toBe(staleToken)
     // Zombie worker finishes late: all finalizers must be no-ops.
-    store.markStage1Succeeded("s1", staleToken, { session_id: "s1", source_updated_at: 999, raw_memory: "zombie", rollout_summary: "z", rollout_slug: null, generated_at: 999 })
+    store.markStage1Succeeded("s1", staleToken, {
+      session_id: "s1",
+      source_updated_at: 999,
+      raw_memory: "zombie",
+      rollout_summary: "z",
+      rollout_slug: null,
+      generated_at: 999,
+    })
     expect(store.stage1Outputs().length).toBe(0)
     store.markStage1Failed("s1", staleToken, "zombie boom")
     store.markStage1SucceededNoOutput("s1", staleToken, 999)
     const job = openDb().prepare("SELECT status FROM memory_jobs WHERE job_key='s1'").get() as { status: string }
     expect(job.status).toBe("running")
     // The rightful owner can still finalize.
-    store.markStage1Succeeded("s1", newToken, { session_id: "s1", source_updated_at: 1000, raw_memory: "real", rollout_summary: "r", rollout_slug: null, generated_at: 1000 })
+    store.markStage1Succeeded("s1", newToken, {
+      session_id: "s1",
+      source_updated_at: 1000,
+      raw_memory: "real",
+      rollout_summary: "r",
+      rollout_slug: null,
+      generated_at: 1000,
+    })
     const outs = store.stage1Outputs() as Array<{ raw_memory: string }>
     expect(outs[0].raw_memory).toBe("real")
   })
@@ -186,11 +209,17 @@ describe("MemoryStore stage1", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
     const base = { session_id: "s1", rollout_slug: null, rollout_summary: "s" }
-    expect(store.upsertStage1Output({ ...base, source_updated_at: 2000, raw_memory: "v2", generated_at: 2000 })).toBe(true)
+    expect(store.upsertStage1Output({ ...base, source_updated_at: 2000, raw_memory: "v2", generated_at: 2000 })).toBe(
+      true,
+    )
     // Older watermark loses.
-    expect(store.upsertStage1Output({ ...base, source_updated_at: 1000, raw_memory: "v1", generated_at: 1000 })).toBe(false)
+    expect(store.upsertStage1Output({ ...base, source_updated_at: 1000, raw_memory: "v1", generated_at: 1000 })).toBe(
+      false,
+    )
     // Equal watermark replaces (codex uses >=): re-extraction refreshes content.
-    expect(store.upsertStage1Output({ ...base, source_updated_at: 2000, raw_memory: "v2b", generated_at: 2001 })).toBe(true)
+    expect(store.upsertStage1Output({ ...base, source_updated_at: 2000, raw_memory: "v2b", generated_at: 2001 })).toBe(
+      true,
+    )
     const outs = store.stage1Outputs() as Array<{ raw_memory: string }>
     expect(outs[0].raw_memory).toBe("v2b")
   })
@@ -200,7 +229,14 @@ describe("MemoryStore stage1", () => {
     const store = new MemoryStore()
     const claims = store.claimStage1Jobs(sessions("s1", "s2"))
     for (const c of claims) {
-      store.markStage1Succeeded(c.sessionId, c.ownershipToken, { session_id: c.sessionId, source_updated_at: 1, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+      store.markStage1Succeeded(c.sessionId, c.ownershipToken, {
+        session_id: c.sessionId,
+        source_updated_at: 1,
+        raw_memory: "r",
+        rollout_summary: "s",
+        rollout_slug: null,
+        generated_at: 1,
+      })
     }
     store.recordUsage(["s1", "s1", "s2"])
     const outs = store.stage1Outputs() as Array<{ session_id: string; usage_count: number }>
@@ -211,11 +247,33 @@ describe("MemoryStore stage1", () => {
   it("durably dedupes citation usage by assistant message and cited session", () => {
     const { MemoryStore } = require("../src/store.js") as typeof import("../src/store.js")
     const store = new MemoryStore()
-    store.upsertStage1Output({ session_id: "s1", source_updated_at: 1, raw_memory: "m1", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
-    store.upsertStage1Output({ session_id: "s2", source_updated_at: 1, raw_memory: "m2", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    store.upsertStage1Output({
+      session_id: "s1",
+      source_updated_at: 1,
+      raw_memory: "m1",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1,
+    })
+    store.upsertStage1Output({
+      session_id: "s2",
+      source_updated_at: 1,
+      raw_memory: "m2",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1,
+    })
     expect(store.recordUsageOnce("main", "assistant-1", ["s1", "s1", "s2"])).toEqual(["s1", "s2"])
     expect(store.recordUsageOnce("main", "assistant-1", ["s1", "s2"])).toEqual([])
-    expect(store.stage1Outputs().map((o) => [o.session_id, o.usage_count]).sort()).toEqual([["s1", 1], ["s2", 1]])
+    expect(
+      store
+        .stage1Outputs()
+        .map((o) => [o.session_id, o.usage_count])
+        .sort(),
+    ).toEqual([
+      ["s1", 1],
+      ["s2", 1],
+    ])
   })
 
   it("does not consume citation dedupe before an output exists", () => {
@@ -226,7 +284,14 @@ describe("MemoryStore stage1", () => {
     const ledger = openDb().prepare("SELECT COUNT(*) AS c FROM memory_citation_usage").get() as { c: number }
     expect(ledger.c).toBe(0)
 
-    store.upsertStage1Output({ session_id: "later", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    store.upsertStage1Output({
+      session_id: "later",
+      source_updated_at: 1,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1,
+    })
     expect(store.recordUsageOnce("main", "assistant-1", ["later"])).toEqual(["later"])
     expect(store.stage1Outputs()[0].usage_count).toBe(1)
   })
@@ -238,7 +303,11 @@ describe("MemoryStore stage1", () => {
     store.markStage1Failed("s1", token, "boom")
     const { openDb } = require("../src/db.js")
     const db = openDb()
-    const job = db.prepare("SELECT status, retry_remaining, lease_until FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'").get()
+    const job = db
+      .prepare(
+        "SELECT status, retry_remaining, lease_until FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'",
+      )
+      .get()
     expect(job.status).toBe("pending")
     expect(job.retry_remaining).toBeLessThan(3)
     expect(job.lease_until).toBeNull()
@@ -255,12 +324,12 @@ describe("MemoryStore stage1", () => {
         "SELECT status, retry_remaining, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key='s1'",
       )
       .get() as {
-        status: string
-        retry_remaining: number
-        lease_until: number | null
-        retry_at: number | null
-        last_error: string
-      }
+      status: string
+      retry_remaining: number
+      lease_until: number | null
+      retry_at: number | null
+      last_error: string
+    }
     expect(job.status).toBe("pending")
     expect(job.retry_remaining).toBe(DEFAULT_RETRY_REMAINING)
     expect(job.lease_until).toBeNull()
@@ -435,7 +504,14 @@ describe("MemoryStore stage1", () => {
     const { openDb } = require("../src/db.js")
     const store = new MemoryStore()
     let token = claimOne(store, "s1")
-    store.markStage1Succeeded("s1", token, { session_id: "s1", source_updated_at: 500, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: 500 })
+    store.markStage1Succeeded("s1", token, {
+      session_id: "s1",
+      source_updated_at: 500,
+      raw_memory: "r",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 500,
+    })
     const phase2Claim = store.claimGlobalPhase2Job()
     if (phase2Claim.type !== "claimed") throw new Error("expected phase2 claim")
     store.markPhase2Succeeded(phase2Claim.ownershipToken)
@@ -455,9 +531,7 @@ describe("MemoryStore stage1", () => {
     const store = new MemoryStore()
     const token = claimOne(store, "s1")
     store.markStage1SucceededNoOutput("s1", token, 1000)
-    const phase2 = openDb()
-      .prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_consolidate_global'")
-      .get()
+    const phase2 = openDb().prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_consolidate_global'").get()
     expect(phase2).toBeNull()
   })
 })
@@ -475,7 +549,14 @@ describe("MemoryStore phase2", () => {
   it("re-queues consolidation past a retry backoff when a consumed session is polluted", () => {
     const { MemoryStore } = require("../src/store.js")
     const store = new MemoryStore()
-    const output = { session_id: "ses_sel", source_updated_at: 1000, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1000 }
+    const output = {
+      session_id: "ses_sel",
+      source_updated_at: 1000,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1000,
+    }
     store.upsertStage1Output(output)
     store.upsertStage1Output({ ...output, session_id: "ses_unsel" })
     const first = store.claimGlobalPhase2Job({ bypassCooldown: true })
@@ -508,9 +589,12 @@ describe("MemoryStore phase2", () => {
     const store = new MemoryStore()
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") throw new Error("expected claimed")
-    const setOwner = (workerId: string, leaseUntil: number) => (store as any).db
-      .prepare("UPDATE memory_jobs SET worker_id=?, lease_until=? WHERE kind='memory_consolidate_global' AND job_key='global'")
-      .run(workerId, leaseUntil)
+    const setOwner = (workerId: string, leaseUntil: number) =>
+      (store as any).db
+        .prepare(
+          "UPDATE memory_jobs SET worker_id=?, lease_until=? WHERE kind='memory_consolidate_global' AND job_key='global'",
+        )
+        .run(workerId, leaseUntil)
     const now = Math.floor(Date.now() / 1000)
     // Rewrite the owner to a pid that cannot exist (max pid on macOS/Linux is far lower).
     // A fresh heartbeat may belong to a live owner in another pid namespace.
@@ -535,7 +619,9 @@ describe("MemoryStore phase2", () => {
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") throw new Error("expected claimed")
     ;(store as any).db
-      .prepare("UPDATE memory_jobs SET worker_id=?, lease_until=? WHERE kind='memory_consolidate_global' AND job_key='global'")
+      .prepare(
+        "UPDATE memory_jobs SET worker_id=?, lease_until=? WHERE kind='memory_consolidate_global' AND job_key='global'",
+      )
       .run("pid:2147483000:dead", Math.floor(Date.now() / 1000))
     expect(store.releaseOrphanedPhase2Job()).toBe(true)
   })
@@ -690,9 +776,9 @@ describe("MemoryStore phase2", () => {
     if (claim.type !== "claimed") throw new Error("expected claimed")
     openDb().prepare("UPDATE memory_jobs SET ownership_token = NULL WHERE kind='memory_consolidate_global'").run()
     store.markPhase2Failed("stale-token", "boom")
-    const row = openDb()
-      .prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'")
-      .get() as { status: string }
+    const row = openDb().prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'").get() as {
+      status: string
+    }
     expect(row.status).toBe("failed")
   })
 
@@ -703,9 +789,9 @@ describe("MemoryStore phase2", () => {
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") throw new Error("expected claimed")
     store.markPhase2Failed("stale-token", "boom")
-    const row = openDb()
-      .prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'")
-      .get() as { status: string }
+    const row = openDb().prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'").get() as {
+      status: string
+    }
     expect(row.status).toBe("running")
   })
 
@@ -728,7 +814,9 @@ describe("MemoryStore phase2", () => {
     const fresh = store.claimGlobalPhase2Job()
     expect(fresh.type).toBe("claimed")
     store.markPhase2Succeeded(stale.ownershipToken)
-    const job = openDb().prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'").get() as { status: string }
+    const job = openDb().prepare("SELECT status FROM memory_jobs WHERE kind='memory_consolidate_global'").get() as {
+      status: string
+    }
     expect(job.status).toBe("running")
   })
 })
@@ -738,7 +826,14 @@ describe("MemoryStore phase2 input selection", () => {
 
   function seed(store: any, id: string, sourceUpdatedAt: number) {
     const claims = store.claimStage1Jobs([{ id, updated_at: sourceUpdatedAt }])
-    store.markStage1Succeeded(id, claims[0].ownershipToken, { session_id: id, source_updated_at: sourceUpdatedAt, raw_memory: "r", rollout_summary: "s", rollout_slug: null, generated_at: sourceUpdatedAt })
+    store.markStage1Succeeded(id, claims[0].ownershipToken, {
+      session_id: id,
+      source_updated_at: sourceUpdatedAt,
+      raw_memory: "r",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: sourceUpdatedAt,
+    })
   }
 
   it("keeps old memories that are still in use and drops old unused ones", () => {
@@ -749,7 +844,9 @@ describe("MemoryStore phase2 input selection", () => {
     seed(store, "fresh", now - 1 * DAY)
     seed(store, "old-used", now - 60 * DAY)
     seed(store, "old-unused", now - 60 * DAY)
-    openDb().prepare("UPDATE memory_stage1_outputs SET last_usage = ? WHERE session_id = 'old-used'").run(now - 1 * DAY)
+    openDb()
+      .prepare("UPDATE memory_stage1_outputs SET last_usage = ? WHERE session_id = 'old-used'")
+      .run(now - 1 * DAY)
     const selected = store.getPhase2InputSelection(50, 30).map((o: any) => o.session_id)
     expect(selected).toContain("fresh")
     expect(selected).toContain("old-used")
@@ -781,7 +878,9 @@ describe("MemoryStore phase2 input selection", () => {
     if (claim.type !== "claimed") throw new Error("expected claimed")
     store.markPhase2Succeeded(claim.ownershipToken, [{ session_id: "kept", source_updated_at: old }])
     // Completion watermark = max consumed source_updated_at (codex semantics).
-    const job = openDb().prepare("SELECT last_success_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'").get() as { last_success_watermark: number }
+    const job = openDb()
+      .prepare("SELECT last_success_watermark FROM memory_jobs WHERE kind='memory_consolidate_global'")
+      .get() as { last_success_watermark: number }
     expect(job.last_success_watermark).toBe(old)
     expect(store.pruneStage1Outputs(30)).toBe(1)
     expect(store.stage1Outputs().map((o: any) => o.session_id)).toEqual(["kept"])
@@ -813,9 +912,7 @@ describe("MemoryStore phase2 input selection", () => {
     seed(store, "selected", sourceUpdatedAt)
     const claim = store.claimGlobalPhase2Job()
     if (claim.type !== "claimed") throw new Error("expected claimed")
-    store.markPhase2Succeeded(claim.ownershipToken, [
-      { session_id: "selected", source_updated_at: sourceUpdatedAt },
-    ])
+    store.markPhase2Succeeded(claim.ownershipToken, [{ session_id: "selected", source_updated_at: sourceUpdatedAt }])
 
     expect(store.deleteSessionMemory("selected")).toBe(true)
     expect(store.stage1Outputs()).toEqual([])
@@ -854,7 +951,9 @@ describe("MemoryStore phase2 input selection", () => {
     seed(store, "fresh", now - 1 * DAY)
     seed(store, "old-used", now - 60 * DAY)
     seed(store, "old-unused", now - 60 * DAY)
-    openDb().prepare("UPDATE memory_stage1_outputs SET last_usage = ? WHERE session_id = 'old-used'").run(now - 1 * DAY)
+    openDb()
+      .prepare("UPDATE memory_stage1_outputs SET last_usage = ? WHERE session_id = 'old-used'")
+      .run(now - 1 * DAY)
     const deleted = store.pruneStage1Outputs(30)
     expect(deleted).toBe(1)
     const remaining = store.stage1Outputs().map((o: any) => o.session_id)
@@ -906,23 +1005,26 @@ describe("MemoryStore session meta", () => {
     // codex clear_memory_data preserves memory modes: disabled stays disabled.
     expect(store.getMemoryMode("s2")).toBe("disabled")
     // Stage-1 job rows are gone; only the post-wipe phase-2 cooldown marker remains.
-    const stage1Left = openDb()
-      .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1'")
-      .get() as { c: number }
+    const stage1Left = openDb().prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1'").get() as {
+      c: number
+    }
     expect(stage1Left.c).toBe(0)
-    const ledgerLeft = openDb()
-      .prepare("SELECT COUNT(*) AS c FROM memory_citation_usage")
-      .get() as { c: number }
+    const ledgerLeft = openDb().prepare("SELECT COUNT(*) AS c FROM memory_citation_usage").get() as { c: number }
     expect(ledgerLeft.c).toBe(0)
-    store.upsertStage1Output({ session_id: "s1", source_updated_at: 2, raw_memory: "m2", rollout_summary: "s2", rollout_slug: null, generated_at: 2 })
+    store.upsertStage1Output({
+      session_id: "s1",
+      source_updated_at: 2,
+      raw_memory: "m2",
+      rollout_summary: "s2",
+      rollout_slug: null,
+      generated_at: 2,
+    })
     expect(store.recordUsageOnce("main", "assistant-reset", ["s1"])).toEqual(["s1"])
     // Without this marker, idle hooks first-run-claim phase 2 and ensureLayout
     // re-seeds the wiped memory root (live e2e reset race).
     expect(store.claimGlobalPhase2Job().type).toBe("skipped_cooldown")
     const marker = openDb()
-      .prepare(
-        "SELECT status, last_error, finished_at FROM memory_jobs WHERE kind='memory_consolidate_global'",
-      )
+      .prepare("SELECT status, last_error, finished_at FROM memory_jobs WHERE kind='memory_consolidate_global'")
       .get() as { status: string; last_error: string | null; finished_at: number }
     expect(marker.status).toBe("done")
     expect(marker.last_error).toBeNull()
@@ -965,15 +1067,16 @@ describe("versioned job DB", () => {
     expect(memoryDbPath()).toBe(path.join(TEST_ROOT, "memory_v2.db"))
     expect(fs.existsSync(path.join(TEST_ROOT, "memory_v2.db"))).toBe(true)
     expect(fs.existsSync(path.join(TEST_ROOT, "memories"))).toBe(false)
-    expect(openDb().prepare("SELECT job_key FROM memory_jobs WHERE kind='memory_stage1'").all())
-      .toEqual([{ job_key: "ses_v2" }])
+    expect(openDb().prepare("SELECT job_key FROM memory_jobs WHERE kind='memory_stage1'").all()).toEqual([
+      { job_key: "ses_v2" },
+    ])
 
     applyPluginOptions({ version: "v1" })
     closeDb()
     const v1b = new MemoryStore()
     expect(v1b.getMemoryMode("ses_shared")).toBe("disabled")
-    expect(
-      openDb().prepare("SELECT job_key FROM memory_jobs WHERE kind='memory_stage1'").all(),
-    ).toEqual([{ job_key: "ses_v1" }])
+    expect(openDb().prepare("SELECT job_key FROM memory_jobs WHERE kind='memory_stage1'").all()).toEqual([
+      { job_key: "ses_v1" },
+    ])
   })
 })

@@ -9,10 +9,15 @@ import { withMemoryVersion } from "./memory-version.js"
 export function sessionMemoryVersion(sessionId?: string): MemoryVersion {
   if (!sessionId) return pluginOptions.version
   const db = openSessionMetaDb()
-  db.prepare("INSERT OR IGNORE INTO memory_session_versions (session_id, version) VALUES (?, ?)")
-    .run(sessionId, pluginOptions.version)
-  return (db.prepare("SELECT version FROM memory_session_versions WHERE session_id = ?")
-    .get(sessionId) as { version: MemoryVersion }).version
+  db.prepare("INSERT OR IGNORE INTO memory_session_versions (session_id, version) VALUES (?, ?)").run(
+    sessionId,
+    pluginOptions.version,
+  )
+  return (
+    db.prepare("SELECT version FROM memory_session_versions WHERE session_id = ?").get(sessionId) as {
+      version: MemoryVersion
+    }
+  ).version
 }
 
 export function withSessionMemoryVersion<T>(sessionId: string | undefined, run: () => T): T {
@@ -22,7 +27,8 @@ export function withSessionMemoryVersion<T>(sessionId: string | undefined, run: 
 /** Status reporting must not freeze a session before its first real use. */
 export function peekSessionMemoryVersion(sessionId?: string | null): MemoryVersion {
   if (!sessionId) return pluginOptions.version
-  const row = openSessionMetaDb().prepare("SELECT version FROM memory_session_versions WHERE session_id = ?")
+  const row = openSessionMetaDb()
+    .prepare("SELECT version FROM memory_session_versions WHERE session_id = ?")
     .get(sessionId) as { version: MemoryVersion } | null
   return row?.version ?? pluginOptions.version
 }

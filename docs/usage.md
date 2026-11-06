@@ -80,15 +80,15 @@ cooldown ends; the next activity or idle event can then start another run.
 
 The panel is fully keyboard-accessible:
 
-| Key | Action |
-|---|---|
-| `Tab` / `Shift+Tab`, or `←` / `→` | Switch Overview and Controls |
-| `↑` / `↓` | Scroll Overview or select a control |
-| `Enter` / `Space` | Toggle the selected setting or run the selected action |
-| `Home` / `End` | Jump to the first or last control, or the top or bottom of Overview |
-| `PgUp` / `PgDn` | Scroll a page |
-| `r` | Refresh status or retry a failed connection |
-| `Esc` | Close the panel and return to the prompt |
+| Key                               | Action                                                              |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `Tab` / `Shift+Tab`, or `←` / `→` | Switch Overview and Controls                                        |
+| `↑` / `↓`                         | Scroll Overview or select a control                                 |
+| `Enter` / `Space`                 | Toggle the selected setting or run the selected action              |
+| `Home` / `End`                    | Jump to the first or last control, or the top or bottom of Overview |
+| `PgUp` / `PgDn`                   | Scroll a page                                                       |
+| `r`                               | Refresh status or retry a failed connection                         |
+| `Esc`                             | Close the panel and return to the prompt                            |
 
 Tabs and controls also respond to left-clicks. Long content scrolls; the tabs
 and keyboard hints stay visible in smaller terminals. While a change is being
@@ -112,13 +112,13 @@ If the panel shows **Unavailable**, see [Troubleshooting](troubleshooting.md).
 
 Learning from a conversation and using existing memory are separate controls:
 
-| Goal | Control |
-|---|---|
-| Exclude this conversation from future extraction | Ask the agent to use `memory_mode` with `mode: "disabled"`. On OpenCode 2, turn off **Learn from this session**. |
-| Allow this conversation to be learned again | Use `memory_mode` with `mode: "enabled"`, or turn **Learn from this session** back on. Re-enabling a session excluded for external context needs your approval (OpenCode 1.x) or the panel toggle (OpenCode 2). |
-| Pause background learning globally | Set the plugin option `generate_memories: false`. OpenCode 2 also has a runtime **Learn from sessions** toggle. |
-| Stop injecting and looking up existing memory | Set `use_memories: false`. OpenCode 2 also has a runtime **Use memories** toggle. |
-| Stop both learning and recall | Set both `generate_memories` and `use_memories` to `false`. |
+| Goal                                             | Control                                                                                                                                                                                                         |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exclude this conversation from future extraction | Ask the agent to use `memory_mode` with `mode: "disabled"`. On OpenCode 2, turn off **Learn from this session**.                                                                                                |
+| Allow this conversation to be learned again      | Use `memory_mode` with `mode: "enabled"`, or turn **Learn from this session** back on. Re-enabling a session excluded for external context needs your approval (OpenCode 1.x) or the panel toggle (OpenCode 2). |
+| Pause background learning globally               | Set the plugin option `generate_memories: false`. OpenCode 2 also has a runtime **Learn from sessions** toggle.                                                                                                 |
+| Stop injecting and looking up existing memory    | Set `use_memories: false`. OpenCode 2 also has a runtime **Use memories** toggle.                                                                                                                               |
+| Stop both learning and recall                    | Set both `generate_memories` and `use_memories` to `false`.                                                                                                                                                     |
 
 The two global panel toggles last until the server restarts. Use the
 [configuration file](configuration.md) for persistent settings. Per-session
@@ -132,15 +132,15 @@ For data removal, see [Editing, deleting, and resetting](storage-and-privacy.md#
 
 You normally describe what you want rather than calling tools yourself.
 
-| Tool | Purpose |
-|---|---|
-| `memory_read` | Read a file in the selected memory workspace |
-| `memory_search` | Search memory text, including time-scoped session recall |
-| `memory_list` | List files and directories in memory |
-| `memory_add_note` | Record something you explicitly asked to remember |
-| `memory_inspect` | Inspect status, configuration, and errors without changing memory |
-| `memory_mode` | Set a session's learning eligibility (`enabled`, `disabled`, or `polluted`) |
-| `memory_reset` | Clear learned memory in both versions after you approve it (OpenCode 1.x; on OpenCode 2 use **Reset memory** in the panel) |
+| Tool              | Purpose                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `memory_read`     | Read a file in the selected memory workspace                                                                               |
+| `memory_search`   | Search memory text, including time-scoped session recall                                                                   |
+| `memory_list`     | List files and directories in memory                                                                                       |
+| `memory_add_note` | Record something you explicitly asked to remember                                                                          |
+| `memory_inspect`  | Inspect status, configuration, and errors without changing memory                                                          |
+| `memory_mode`     | Set a session's learning eligibility (`enabled`, `disabled`, or `polluted`)                                                |
+| `memory_reset`    | Clear learned memory in both versions after you approve it (OpenCode 1.x; on OpenCode 2 use **Reset memory** in the panel) |
 
 The first four depend on `use_memories` and `dedicated_tools`; the maintenance
 tools remain available. See [File-based access](configuration.md#file-based-access)

@@ -28,7 +28,11 @@ export interface AgentHealthSnapshot {
   agents: Record<AgentName, AgentHealthEntry>
 }
 
-const initialEntry = (): AgentHealthEntry => ({ source: "missing", healthy: false, issues: ["config hook has not run"] })
+const initialEntry = (): AgentHealthEntry => ({
+  source: "missing",
+  healthy: false,
+  issues: ["config hook has not run"],
+})
 
 let snapshot: AgentHealthSnapshot = {
   observed: false,
@@ -129,11 +133,7 @@ export function recordAgentConfig(
   for (const name of AGENT_NAMES) {
     const definition = configured?.[name]
     const source =
-      definition === undefined
-        ? "missing"
-        : definitionsEqual(shipped[name], definition)
-          ? "shipped"
-          : "user_override"
+      definition === undefined ? "missing" : definitionsEqual(shipped[name], definition) ? "shipped" : "user_override"
     agents[name] = inspectAgent(name, definition, source)
     if (!generationEnabled && definition === undefined) {
       agents[name] = { source: "missing", healthy: true, issues: ["generation disabled; agent not injected"] }
@@ -148,7 +148,10 @@ export function getAgentHealth(): AgentHealthSnapshot {
     generationEnabled: snapshot.generationEnabled,
     agents: {
       memorize: { ...snapshot.agents.memorize, issues: [...snapshot.agents.memorize.issues] },
-      "memorize-extract": { ...snapshot.agents["memorize-extract"], issues: [...snapshot.agents["memorize-extract"].issues] },
+      "memorize-extract": {
+        ...snapshot.agents["memorize-extract"],
+        issues: [...snapshot.agents["memorize-extract"].issues],
+      },
     },
   }
 }

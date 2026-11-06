@@ -24,7 +24,10 @@ beforeEach(() => {
   resetRateLimitForTest()
   root = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-v2-consolidation-"))
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = root
-  setV2ServiceDependenciesForTest({ service: { discover: async () => undefined, headers: () => undefined }, make: () => ({ session: {} }) })
+  setV2ServiceDependenciesForTest({
+    service: { discover: async () => undefined, headers: () => undefined },
+    make: () => ({ session: {} }),
+  })
 })
 afterEach(() => {
   closeDb()
@@ -43,76 +46,106 @@ describe("V2 host consolidation outcome", () => {
     // Unchanged artifacts alone cannot distinguish failed execution
     // from a legitimate no-op. Use the host's turn outcome, as Codex does.
     for (const outcome of ["noop", "partial", "tool-continuation", "interrupted", "failed-after-reply"] as const) {
-      it(`${version}: ${outcome} uses completion state rather than artifact changes`, async () => withMemoryVersion(version, async () => {
-        const reply = {
-          id: "msg_reply", type: "assistant",
-          time: outcome === "partial" ? {} : { completed: 2 },
-          finish: outcome === "tool-continuation" ? "tool-calls" : "stop",
-          content: [{ type: "text", text: "No reusable updates needed." }],
-        }
-        setV2Context({ session: {
-          create: async () => ({ id: "ses_helper" }),
-          switchAgent: async () => {},
-          prompt: async () => ({ id: "msg_prompt" }),
-          wait: async () => {},
-          interrupt: async () => {},
-          context: async () => [
-            { id: "msg_prompt", type: "user", text: "consolidate" },
-            reply,
-            { type: "idle", outcome: outcome === "interrupted" ? "interrupted"
-              : outcome === "failed-after-reply" ? "failed" : "succeeded" },
-          ],
-        } } as any)
+      it(`${version}: ${outcome} uses completion state rather than artifact changes`, async () =>
+        withMemoryVersion(version, async () => {
+          const reply = {
+            id: "msg_reply",
+            type: "assistant",
+            time: outcome === "partial" ? {} : { completed: 2 },
+            finish: outcome === "tool-continuation" ? "tool-calls" : "stop",
+            content: [{ type: "text", text: "No reusable updates needed." }],
+          }
+          setV2Context({
+            session: {
+              create: async () => ({ id: "ses_helper" }),
+              switchAgent: async () => {},
+              prompt: async () => ({ id: "msg_prompt" }),
+              wait: async () => {},
+              interrupt: async () => {},
+              context: async () => [
+                { id: "msg_prompt", type: "user", text: "consolidate" },
+                reply,
+                {
+                  type: "idle",
+                  outcome:
+                    outcome === "interrupted"
+                      ? "interrupted"
+                      : outcome === "failed-after-reply"
+                        ? "failed"
+                        : "succeeded",
+                },
+              ],
+            },
+          } as any)
+          setPluginInput({ client: buildV1ClientShim() } as any)
+          ensureLayout()
+          const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
+          fs.writeFileSync(path.join(memoryRoot(), "memory_summary.md"), summary)
+          expect(await ensureBaseline()).toBe(true)
+          const store = new MemoryStore()
+          const ts = Date.now()
+          store.upsertStage1Output({
+            session_id: "ses_input",
+            source_updated_at: ts,
+            generated_at: ts,
+            raw_memory: version === "v1" ? "Already represented information." : "",
+            rollout_summary: "Already represented information.",
+            rollout_slug: "already-known",
+            cwd: "/p",
+          })
+          const success = outcome === "noop"
+          expect((await runPhase2(store)).status).toBe(success ? "succeeded" : "failed")
+          expect(store.phase2JobSnapshot()?.status).toBe(success ? "done" : "failed")
+          expect(
+            (await captureWorkspaceDiff()).changes.some((change) => change.path.startsWith("rollout_summaries/")),
+          ).toBe(!success)
+          expect(fs.readFileSync(path.join(memoryRoot(), "memory_summary.md"), "utf8")).toBe(summary)
+          if (!success) expect(store.phase2JobSnapshot()?.last_success_watermark).toBeNull()
+        }))
+    }
+
+    it(`${version} preserves pending notes and retries after a failed host turn`, async () =>
+      withMemoryVersion(version, async () => {
+        const calls: string[] = []
+        setV2Context({
+          session: {
+            create: async () => ({ id: "ses_helper" }),
+            switchAgent: async () => {},
+            prompt: async () => ({ id: "msg_prompt" }),
+            wait: async () => {
+              calls.push("wait")
+            },
+            interrupt: async () => {
+              calls.push("interrupt")
+            },
+            context: async () => [
+              { id: "msg_prompt", type: "user", text: "consolidate" },
+              {
+                id: "msg_reply",
+                type: "assistant",
+                time: { completed: 2 },
+                finish: "error",
+                error: { type: "provider.rate-limit", message: "capacity", status: 429 },
+              },
+              { type: "idle", outcome: "failed" },
+            ],
+          },
+        } as any)
         setPluginInput({ client: buildV1ClientShim() } as any)
         ensureLayout()
         const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
         fs.writeFileSync(path.join(memoryRoot(), "memory_summary.md"), summary)
         expect(await ensureBaseline()).toBe(true)
+        const note = "extensions/ad_hoc/notes/pending.md"
+        fs.writeFileSync(path.join(memoryRoot(), note), "Remember the new deployment command.")
         const store = new MemoryStore()
-        const ts = Date.now()
-        store.upsertStage1Output({
-          session_id: "ses_input", source_updated_at: ts, generated_at: ts,
-          raw_memory: version === "v1" ? "Already represented information." : "",
-          rollout_summary: "Already represented information.", rollout_slug: "already-known", cwd: "/p",
-        })
-        const success = outcome === "noop"
-        expect((await runPhase2(store)).status).toBe(success ? "succeeded" : "failed")
-        expect(store.phase2JobSnapshot()?.status).toBe(success ? "done" : "failed")
-        expect((await captureWorkspaceDiff()).changes.some((change) => change.path.startsWith("rollout_summaries/"))).toBe(!success)
+        expect(await runPhase2(store)).toEqual({ status: "failed" })
+        expect(store.phase2JobSnapshot()).toMatchObject({ status: "failed", last_success_watermark: null })
+        expect(store.phase2JobSnapshot()?.last_error).toContain("HTTP 429")
+        expect(isProviderCapacityBlocked("phase2")).toBe(true)
+        expect((await captureWorkspaceDiff()).changes.some((change) => change.path === note)).toBe(true)
         expect(fs.readFileSync(path.join(memoryRoot(), "memory_summary.md"), "utf8")).toBe(summary)
-        if (!success) expect(store.phase2JobSnapshot()?.last_success_watermark).toBeNull()
+        expect(calls).toContain("interrupt")
       }))
-    }
-
-    it(`${version} preserves pending notes and retries after a failed host turn`, async () => withMemoryVersion(version, async () => {
-      const calls: string[] = []
-      setV2Context({ session: {
-        create: async () => ({ id: "ses_helper" }),
-        switchAgent: async () => {},
-        prompt: async () => ({ id: "msg_prompt" }),
-        wait: async () => { calls.push("wait") },
-        interrupt: async () => { calls.push("interrupt") },
-        context: async () => [
-          { id: "msg_prompt", type: "user", text: "consolidate" },
-          { id: "msg_reply", type: "assistant", time: { completed: 2 }, finish: "error", error: { type: "provider.rate-limit", message: "capacity", status: 429 } },
-          { type: "idle", outcome: "failed" },
-        ],
-      } } as any)
-      setPluginInput({ client: buildV1ClientShim() } as any)
-      ensureLayout()
-      const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
-      fs.writeFileSync(path.join(memoryRoot(), "memory_summary.md"), summary)
-      expect(await ensureBaseline()).toBe(true)
-      const note = "extensions/ad_hoc/notes/pending.md"
-      fs.writeFileSync(path.join(memoryRoot(), note), "Remember the new deployment command.")
-      const store = new MemoryStore()
-      expect(await runPhase2(store)).toEqual({ status: "failed" })
-      expect(store.phase2JobSnapshot()).toMatchObject({ status: "failed", last_success_watermark: null })
-      expect(store.phase2JobSnapshot()?.last_error).toContain("HTTP 429")
-      expect(isProviderCapacityBlocked("phase2")).toBe(true)
-      expect((await captureWorkspaceDiff()).changes.some((change) => change.path === note)).toBe(true)
-      expect(fs.readFileSync(path.join(memoryRoot(), "memory_summary.md"), "utf8")).toBe(summary)
-      expect(calls).toContain("interrupt")
-    }))
   }
 })

@@ -32,7 +32,10 @@ interface V2ToolDefinition {
    * `memory` namespace, miss, and skip memory.
    */
   options: { codemode: false }
-  execute: (input: any, ctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal }) => Promise<{ content: string | unknown[]; metadata?: unknown }>
+  execute: (
+    input: any,
+    ctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal },
+  ) => Promise<{ content: string | unknown[]; metadata?: unknown }>
 }
 
 function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
@@ -52,7 +55,9 @@ function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
         metadata: () => {},
         // OpenCode 2 gives plugin tools no approval request; fail closed.
         ask: async () => {
-          throw new Error("User approval is unavailable to plugin tools on OpenCode 2. Use /memory-inspect → Controls instead.")
+          throw new Error(
+            "User approval is unavailable to plugin tools on OpenCode 2. Use /memory-inspect → Controls instead.",
+          )
         },
       }
       const res = await v1.execute(input, v1ctx)
@@ -99,7 +104,5 @@ const CONTROL_ONLY = new Set(["memory_inspect", "memory_mode"])
  */
 export function buildV2Tools(): V2ToolDefinition[] {
   const full = pluginOptions.use_memories && pluginOptions.dedicated_tools
-  return ALL_MEMORY_TOOLS.filter(([name]) => full || CONTROL_ONLY.has(name)).map(([name, v1]) =>
-    adaptTool(name, v1),
-  )
+  return ALL_MEMORY_TOOLS.filter(([name]) => full || CONTROL_ONLY.has(name)).map(([name, v1]) => adaptTool(name, v1))
 }

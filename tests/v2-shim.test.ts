@@ -197,23 +197,35 @@ describe("catalog/mcp adapters", () => {
     expect(catalogVariantKeys(catalog, "acme", "unknown")).toBeUndefined()
   })
 
-  it.each([false, true])("selects nearest extraction effort using current model API (legacy also present: %s)", async (legacy) => {
-    const { ctx, calls } = fakeCtx()
-    if (!legacy) delete ctx.catalog
-    ctx.model = { list: async () => [
-      { providerID: "acme", id: "alias", modelID: "wire-name", variants: [{ id: "medium" }, { id: "high" }] },
-    ] }
-    setV2Context(ctx)
-    setPluginInput({ client: buildV1ClientShim() } as any)
-    try {
-      await withMemoryVersion("v1", () => extractViaSubagent("ses_source", "transcript", {
-        model: "acme/alias", signal: new AbortController().signal,
-      }))
-      expect((calls.find((c) => c.name === "generate")?.args as any).model).toEqual({ providerID: "acme", id: "alias", variant: "medium" })
-    } finally {
-      setPluginInput({ client: undefined } as any)
-    }
-  })
+  it.each([false, true])(
+    "selects nearest extraction effort using current model API (legacy also present: %s)",
+    async (legacy) => {
+      const { ctx, calls } = fakeCtx()
+      if (!legacy) delete ctx.catalog
+      ctx.model = {
+        list: async () => [
+          { providerID: "acme", id: "alias", modelID: "wire-name", variants: [{ id: "medium" }, { id: "high" }] },
+        ],
+      }
+      setV2Context(ctx)
+      setPluginInput({ client: buildV1ClientShim() } as any)
+      try {
+        await withMemoryVersion("v1", () =>
+          extractViaSubagent("ses_source", "transcript", {
+            model: "acme/alias",
+            signal: new AbortController().signal,
+          }),
+        )
+        expect((calls.find((c) => c.name === "generate")?.args as any).model).toEqual({
+          providerID: "acme",
+          id: "alias",
+          variant: "medium",
+        })
+      } finally {
+        setPluginInput({ client: undefined } as any)
+      }
+    },
+  )
 
   it("retains the legacy model catalog on older hosts", async () => {
     setV2Context(fakeCtx().ctx)
@@ -222,7 +234,9 @@ describe("catalog/mcp adapters", () => {
   })
 
   it("adapts provider catalog for variant mapping", () => {
-    const v1 = adaptProviderCatalog({ data: [{ providerID: "acme", modelID: "m1", variants: [{ id: "low" }, { id: "high" }] }] })
+    const v1 = adaptProviderCatalog({
+      data: [{ providerID: "acme", modelID: "m1", variants: [{ id: "low" }, { id: "high" }] }],
+    })
     expect(catalogVariantKeys(v1, "acme", "m1")?.sort()).toEqual(["high", "low"])
     expect(catalogVariantKeys(v1, "nope", "m1")).toBeUndefined()
   })
@@ -239,17 +253,21 @@ describe("V1 client shim", () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx)
     const client = buildV1ClientShim() as any
-    await Promise.all((["v1", "v2"] as const).map((version) => withMemoryVersion(version, () =>
-      client.session.create({ body: { title: "codex-memory-consolidate", metadata: { version } } }),
-    )))
+    await Promise.all(
+      (["v1", "v2"] as const).map((version) =>
+        withMemoryVersion(version, () =>
+          client.session.create({ body: { title: "codex-memory-consolidate", metadata: { version } } }),
+        ),
+      ),
+    )
     const rules = calls.filter((call) => call.name === "create").map((call) => call.args as any)
     expect(rules).toHaveLength(2)
     for (const version of ["v1", "v2"] as const) {
       const permissions = rules.find((row) => row.metadata.version === version).permissions
       expect(permissions[0]).toEqual({ action: "*", resource: "*", effect: "deny" })
-      expect(permissions.filter((rule: any) => rule.action === "external_directory").map((rule: any) => rule.resource)).toEqual([
-        memoryRoot(version), path.join(memoryRoot(version), "*"),
-      ])
+      expect(
+        permissions.filter((rule: any) => rule.action === "external_directory").map((rule: any) => rule.resource),
+      ).toEqual([memoryRoot(version), path.join(memoryRoot(version), "*")])
       expect(permissions.find((rule: any) => rule.action === "grep")).toMatchObject({ resource: "*", effect: "allow" })
     }
   })
@@ -267,25 +285,37 @@ describe("V1 client shim", () => {
     const created = calls.find((call) => call.name === "create")?.args as any
     expect(created.location).toEqual({ directory: sessionDir })
     const rel = path.basename(root)
-    expect(created.permissions.filter((rule: any) => rule.action === "edit").map((rule: any) => rule.resource)).toEqual([
-      rel, `${rel}/*`, root, path.join(root, "*"),
-    ])
+    expect(created.permissions.filter((rule: any) => rule.action === "edit").map((rule: any) => rule.resource)).toEqual(
+      [rel, `${rel}/*`, root, path.join(root, "*")],
+    )
     expect(created.permissions.some((rule: any) => rule.action === "edit" && rule.resource === "*")).toBe(false)
   })
 
   it("accepts only the registered service owned by this host process", async () => {
     const calls: string[] = []
-    const endpoint = { url: "http://127.0.0.1:4096", auth: { type: "basic" as const, username: "opencode", password: "secret" } }
+    const endpoint = {
+      url: "http://127.0.0.1:4096",
+      auth: { type: "basic" as const, username: "opencode", password: "secret" },
+    }
     const client = {
       session: {},
       health: { get: async () => ({ healthy: true, version: "2.0.3", pid: process.pid }) },
     }
     const found = await discoverOwnService({
       service: {
-        discover: async () => { calls.push("discover"); return endpoint },
-        headers: () => { calls.push("headers"); return { authorization: "Basic test" } },
+        discover: async () => {
+          calls.push("discover")
+          return endpoint
+        },
+        headers: () => {
+          calls.push("headers")
+          return { authorization: "Basic test" }
+        },
       },
-      make: (options) => { calls.push(`make:${options.baseUrl}`); return client },
+      make: (options) => {
+        calls.push(`make:${options.baseUrl}`)
+        return client
+      },
     })
     expect(found?.client).toBe(client)
     expect(found?.endpoint).toBe(endpoint)
@@ -365,10 +395,12 @@ describe("V1 client shim", () => {
   })
 
   it("builds Basic auth headers via the bundled client", () => {
-    expect(serviceHeaders({
-      url: "http://127.0.0.1:4096",
-      auth: { type: "basic", username: "opencode", password: "secret" },
-    })).toEqual({
+    expect(
+      serviceHeaders({
+        url: "http://127.0.0.1:4096",
+        auth: { type: "basic", username: "opencode", password: "secret" },
+      }),
+    ).toEqual({
       authorization: `Basic ${Buffer.from("opencode:secret").toString("base64")}`,
     })
   })
@@ -386,10 +418,11 @@ describe("V1 client shim", () => {
   it("records the real discovery error when a non-loopback registered PID is not this process", async () => {
     setV2ServiceDependenciesForTest({
       service: { discover: async () => ({ url: "http://192.0.2.1:4096" }), headers: () => undefined },
-      make: () => ({
-        health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid + 1 }) },
-        session: {},
-      }) as any,
+      make: () =>
+        ({
+          health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid + 1 }) },
+          session: {},
+        }) as any,
     })
     expect(await ownServiceClient()).toBeNull()
     expect(lastServiceFailure()).toMatch(/PID/i)
@@ -417,14 +450,21 @@ describe("V1 client shim", () => {
       discoverOwnService(
         {
           service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
-          make: () => ({
-            health: {
-              get: async (options?: { signal?: AbortSignal }) => {
-                options?.signal?.addEventListener("abort", () => { aborted = true }, { once: true })
-                return never
+          make: () =>
+            ({
+              health: {
+                get: async (options?: { signal?: AbortSignal }) => {
+                  options?.signal?.addEventListener(
+                    "abort",
+                    () => {
+                      aborted = true
+                    },
+                    { once: true },
+                  )
+                  return never
+                },
               },
-            },
-          }) as any,
+            }) as any,
         },
         10,
       ),
@@ -438,7 +478,10 @@ describe("V1 client shim", () => {
       { id: "ses_a", title: "codex-memory-x", directory: "/p", time: { created: 1, updated: 2 }, parentID: null },
     ]
     const client = buildV1ClientShim() as any
-    const res = await client._client.get({ url: "/experimental/session", query: { roots: true, limit: 10, directory: "" } })
+    const res = await client._client.get({
+      url: "/experimental/session",
+      query: { roots: true, limit: 10, directory: "" },
+    })
     expect(Array.isArray(res.data)).toBe(true)
     expect(res.data).toHaveLength(2)
     expect(res.data[0].time.updated).toBeGreaterThanOrEqual(res.data[1].time.updated)
@@ -446,18 +489,31 @@ describe("V1 client shim", () => {
   })
 
   it.each([
-    Object.assign(new Error("Transport"), { reason: "Transport", cause: Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }) }),
+    Object.assign(new Error("Transport"), {
+      reason: "Transport",
+      cause: Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }),
+    }),
     { error: { type: "UnauthorizedError", message: "unauthorized", status: 401 } },
   ])("rediscovers the service after a connection or auth failure", async (failure) => {
     let port = 4096
     let discoveries = 0
     setV2ServiceDependenciesForTest({
-      service: { discover: async () => { discoveries++; return { url: `http://127.0.0.1:${port}` } }, headers: () => undefined },
+      service: {
+        discover: async () => {
+          discoveries++
+          return { url: `http://127.0.0.1:${port}` }
+        },
+        headers: () => undefined,
+      },
       probe: async () => ({ version: "2.0.12", pid: process.pid }),
-      make: ({ baseUrl }) => ({ session: { list: async () => {
-        if (!baseUrl.endsWith(String(port))) throw failure
-        return { data: [{ id: "ses_live" }] }
-      } } }),
+      make: ({ baseUrl }) => ({
+        session: {
+          list: async () => {
+            if (!baseUrl.endsWith(String(port))) throw failure
+            return { data: [{ id: "ses_live" }] }
+          },
+        },
+      }),
     })
     const client = buildV1ClientShim() as any
     const list = () => client._client.get({ url: "/experimental/session" })
@@ -472,9 +528,16 @@ describe("V1 client shim", () => {
     const client = (await ownServiceClient())!
     for (const error of [
       { _tag: "SessionNotFoundError", status: 404 },
-      Object.assign(new Error("Transport"), { reason: "Transport", cause: new DOMException("cancelled", "AbortError") }),
+      Object.assign(new Error("Transport"), {
+        reason: "Transport",
+        cause: new DOMException("cancelled", "AbortError"),
+      }),
     ]) {
-      await expect(serviceRequest(client, async () => { throw error })).rejects.toEqual(error)
+      await expect(
+        serviceRequest(client, async () => {
+          throw error
+        }),
+      ).rejects.toEqual(error)
       expect(await ownServiceClient()).toBe(client)
     }
   })
@@ -487,10 +550,11 @@ describe("V1 client shim", () => {
     })
     const first = (await ownServiceClient())!
     let mutations = 0
-    const fail = () => serviceRequest(first, async () => {
-      mutations++
-      throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" })
-    })
+    const fail = () =>
+      serviceRequest(first, async () => {
+        mutations++
+        throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" })
+      })
     await expect(fail()).rejects.toThrow("connection reset")
     expect(mutations).toBe(1)
     const next = (await ownServiceClient())!
@@ -515,7 +579,13 @@ describe("V1 client shim", () => {
 
   it("preserves cleanup search/cursor semantics and maps V2 locations", async () => {
     serviceRows = [
-      { id: "ses_old", title: "codex-memory-consolidate", location: { directory: "/memory/project" }, time: { updated: 1 }, parentID: null },
+      {
+        id: "ses_old",
+        title: "codex-memory-consolidate",
+        location: { directory: "/memory/project" },
+        time: { updated: 1 },
+        parentID: null,
+      },
       { id: "ses_new", title: "ordinary", location: { directory: "/other" }, time: { updated: 3 }, parentID: null },
     ]
     const client = buildV1ClientShim() as any
@@ -523,9 +593,7 @@ describe("V1 client shim", () => {
       url: "/experimental/session",
       query: { roots: true, limit: 10, cursor: 2, search: "codex-memory-", directory: "" },
     })
-    expect(res.data).toEqual([
-      expect.objectContaining({ id: "ses_old", directory: "/memory/project" }),
-    ])
+    expect(res.data).toEqual([expect.objectContaining({ id: "ses_old", directory: "/memory/project" })])
     expect(serviceListInputs[0]).toEqual({ limit: 10, order: "desc", parentID: null, search: "codex-memory-" })
   })
 
@@ -572,7 +640,8 @@ describe("V1 client shim", () => {
         service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
         make: () => ({
           health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid }) },
-          session: {}, generate: { text: generate },
+          session: {},
+          generate: { text: generate },
         }),
       })
     } else ctx.generate.text = generate
@@ -580,8 +649,11 @@ describe("V1 client shim", () => {
     const response = await (buildV1ClientShim() as any).session.prompt({
       path: { id: EXTRACT_STUB_SESSION_ID },
       body: {
-        agent: "memorize-extract", model: { providerID: "acme", modelID: "m1" }, variant: "low",
-        format: { type: "json_schema" }, parts: [{ type: "text", text: "TRANSCRIPT" }],
+        agent: "memorize-extract",
+        model: { providerID: "acme", modelID: "m1" },
+        variant: "low",
+        format: { type: "json_schema" },
+        parts: [{ type: "text", text: "TRANSCRIPT" }],
       },
     })
     expect(payloads).toHaveLength(2)
@@ -594,42 +666,50 @@ describe("V1 client shim", () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
-    await client.session.prompt({ path: { id: "ses_extract" }, body: {
-      agent: "memorize-extract", variant: "low", format: { type: "json_schema" },
-      parts: [{ type: "text", text: "TRANSCRIPT" }],
-    } })
+    await client.session.prompt({
+      path: { id: "ses_extract" },
+      body: {
+        agent: "memorize-extract",
+        variant: "low",
+        format: { type: "json_schema" },
+        parts: [{ type: "text", text: "TRANSCRIPT" }],
+      },
+    })
     expect((calls[0].args as any).model).toBeUndefined()
   })
 
-  it.each(["v1", "v2"] as const)("keeps the %s extraction schema after historical conversation instructions", async (version) => {
-    const { ctx, calls } = fakeCtx()
-    setV2Context(ctx)
-    setPluginInput({ client: buildV1ClientShim() } as any)
-    const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-v2-extract-schema-"))
-    process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = root
-    const transcript = "### user\nCheck my plugin versions. Do not edit anything before I confirm."
-    try {
-      await withMemoryVersion(version, () => extractViaSubagent("ses_schema", transcript, { model: "acme/m1" }))
-    } finally {
-      setPluginInput({ client: undefined } as any)
-      if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
-      else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
-      fs.rmSync(root, { recursive: true, force: true })
-    }
-    const payload = calls.find((call) => call.name === "generate")!.args as { prompt: string }
-    expect(payload.prompt).toContain(transcript)
-    const footer = payload.prompt.slice(payload.prompt.lastIndexOf("END OF HISTORICAL SESSION DATA."))
-    expect(footer).toContain("Your current task is memory extraction")
-    expect(footer).toContain("Return exactly one JSON object")
-    expect(footer).not.toContain(transcript)
-    const schema = JSON.parse(footer.split("JSON schema:\n")[1]!)
-    expect(schema.required).toEqual(version === "v1"
-      ? ["raw_memory", "rollout_summary", "rollout_slug"]
-      : ["rollout_summary", "rollout_slug"])
-    expect(schema.additionalProperties).toBe(false)
-    expect(payload.prompt.indexOf(transcript)).toBeLessThan(payload.prompt.lastIndexOf(footer))
-  })
+  it.each(["v1", "v2"] as const)(
+    "keeps the %s extraction schema after historical conversation instructions",
+    async (version) => {
+      const { ctx, calls } = fakeCtx()
+      setV2Context(ctx)
+      setPluginInput({ client: buildV1ClientShim() } as any)
+      const previousRoot = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-v2-extract-schema-"))
+      process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = root
+      const transcript = "### user\nCheck my plugin versions. Do not edit anything before I confirm."
+      try {
+        await withMemoryVersion(version, () => extractViaSubagent("ses_schema", transcript, { model: "acme/m1" }))
+      } finally {
+        setPluginInput({ client: undefined } as any)
+        if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+        else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousRoot
+        fs.rmSync(root, { recursive: true, force: true })
+      }
+      const payload = calls.find((call) => call.name === "generate")!.args as { prompt: string }
+      expect(payload.prompt).toContain(transcript)
+      const footer = payload.prompt.slice(payload.prompt.lastIndexOf("END OF HISTORICAL SESSION DATA."))
+      expect(footer).toContain("Your current task is memory extraction")
+      expect(footer).toContain("Return exactly one JSON object")
+      expect(footer).not.toContain(transcript)
+      const schema = JSON.parse(footer.split("JSON schema:\n")[1]!)
+      expect(schema.required).toEqual(
+        version === "v1" ? ["raw_memory", "rollout_summary", "rollout_slug"] : ["rollout_summary", "rollout_slug"],
+      )
+      expect(schema.additionalProperties).toBe(false)
+      expect(payload.prompt.indexOf(transcript)).toBeLessThan(payload.prompt.lastIndexOf(footer))
+    },
+  )
 
   it("adapts public config documents for the V1 model resolver", async () => {
     setV2Context(fakeCtx().ctx as any)
@@ -671,25 +751,33 @@ describe("V1 client shim", () => {
   it("cancels structured extraction via public generate.text request options when available", async () => {
     const seen: unknown[][] = []
     let started!: () => void
-    const startedP = new Promise<void>((resolve) => { started = resolve })
+    const startedP = new Promise<void>((resolve) => {
+      started = resolve
+    })
     const { ctx } = fakeCtx()
     setV2Context(ctx as any)
     setV2ServiceDependenciesForTest({
       service: { discover: async () => ({ url: "http://127.0.0.1:4096" }), headers: () => undefined },
-      make: () => ({
-        health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid }) },
-        session: { list: async () => ({ data: [] }), get: async () => ({ id: "x" }), remove: async () => {}, interrupt: async () => {} },
-        generate: {
-          text: async (...args: unknown[]) => {
-            seen.push(args)
-            const opts = args[1] as { signal?: AbortSignal } | undefined
-            await new Promise((_, reject) => {
-              opts?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
-              started()
-            })
+      make: () =>
+        ({
+          health: { get: async () => ({ healthy: true, version: "2.0.5", pid: process.pid }) },
+          session: {
+            list: async () => ({ data: [] }),
+            get: async () => ({ id: "x" }),
+            remove: async () => {},
+            interrupt: async () => {},
           },
-        },
-      }) as any,
+          generate: {
+            text: async (...args: unknown[]) => {
+              seen.push(args)
+              const opts = args[1] as { signal?: AbortSignal } | undefined
+              await new Promise((_, reject) => {
+                opts?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+                started()
+              })
+            },
+          },
+        }) as any,
     })
     const client = buildV1ClientShim() as any
     const controller = new AbortController()
@@ -713,7 +801,9 @@ describe("V1 client shim", () => {
   it("cancels structured extraction by racing AbortSignal, not request options", async () => {
     const seen: unknown[][] = []
     let started!: () => void
-    const startedP = new Promise<void>((resolve) => { started = resolve })
+    const startedP = new Promise<void>((resolve) => {
+      started = resolve
+    })
     const { ctx } = fakeCtx()
     ctx.generate.text = async (...args: unknown[]) => {
       seen.push(args)
@@ -743,7 +833,10 @@ describe("V1 client shim", () => {
     let resolveWait!: () => void
     let cleanupDone = false
     const { ctx } = fakeCtx()
-    ctx.session.wait = async () => new Promise<void>((resolve) => { resolveWait = resolve })
+    ctx.session.wait = async () =>
+      new Promise<void>((resolve) => {
+        resolveWait = resolve
+      })
     ctx.session.interrupt = async () => {
       setTimeout(() => {
         cleanupDone = true
@@ -769,11 +862,21 @@ describe("V1 client shim", () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
-    messagePageResponses = [{ data: [
-      { id: "msg_1", type: "user" },
-      { id: "msg_2", type: "assistant", time: { completed: 2 }, finish: "stop", content: [{ type: "text", text: "done" }] },
-      { type: "idle", outcome: "succeeded" },
-    ] }]
+    messagePageResponses = [
+      {
+        data: [
+          { id: "msg_1", type: "user" },
+          {
+            id: "msg_2",
+            type: "assistant",
+            time: { completed: 2 },
+            finish: "stop",
+            content: [{ type: "text", text: "done" }],
+          },
+          { type: "idle", outcome: "succeeded" },
+        ],
+      },
+    ]
     const result = await client.session.prompt({
       path: { id: "ses_y" },
       body: { agent: "memorize", model: { providerID: "acme", modelID: "m1" }, parts: [{ type: "text", text: "DO" }] },
@@ -785,10 +888,36 @@ describe("V1 client shim", () => {
 
   it.each([
     ["missing prompt", [{ type: "assistant", time: { completed: 2 }, finish: "stop" }]],
-    ["stale reply", [{ type: "assistant", time: { completed: 2 }, finish: "stop" }, { id: "msg_1", type: "user" }]],
-    ["partial turn", [{ id: "msg_1", type: "user" }, { type: "assistant", time: { completed: 2 }, finish: "tool-calls" }]],
-    ["interrupted turn", [{ id: "msg_1", type: "user" }, { type: "assistant", time: { completed: 2 }, finish: "stop" }, { type: "idle", outcome: "interrupted" }]],
-    ["unrelated reply", [{ id: "msg_1", type: "user" }, { id: "msg_other", type: "user" }, { type: "assistant", time: { completed: 2 }, finish: "stop" }]],
+    [
+      "stale reply",
+      [
+        { type: "assistant", time: { completed: 2 }, finish: "stop" },
+        { id: "msg_1", type: "user" },
+      ],
+    ],
+    [
+      "partial turn",
+      [
+        { id: "msg_1", type: "user" },
+        { type: "assistant", time: { completed: 2 }, finish: "tool-calls" },
+      ],
+    ],
+    [
+      "interrupted turn",
+      [
+        { id: "msg_1", type: "user" },
+        { type: "assistant", time: { completed: 2 }, finish: "stop" },
+        { type: "idle", outcome: "interrupted" },
+      ],
+    ],
+    [
+      "unrelated reply",
+      [
+        { id: "msg_1", type: "user" },
+        { id: "msg_other", type: "user" },
+        { type: "assistant", time: { completed: 2 }, finish: "stop" },
+      ],
+    ],
   ])("rejects %s after a successful wait", async (_name, rows) => {
     setV2Context(fakeCtx().ctx)
     messagePageResponses = [{ data: rows }]
@@ -802,19 +931,29 @@ describe("V1 client shim", () => {
     setV2Context(fakeCtx().ctx)
     messagePageResponses = [
       { data: [{ id: "msg_1", type: "user" }], cursor: { next: "reply" } },
-      { data: [
-        { type: "assistant", error: { type: "provider.rate-limit", message: "capacity", status: 429 } },
-        { type: "idle", outcome: "failed" },
-      ] },
+      {
+        data: [
+          { type: "assistant", error: { type: "provider.rate-limit", message: "capacity", status: 429 } },
+          { type: "idle", outcome: "failed" },
+        ],
+      },
     ]
-    const result = await (buildV1ClientShim() as any).session.prompt({ path: { id: "ses_y" }, body: { agent: "memorize", parts: [] } })
-    expect(result.data.info.error).toEqual({ name: "provider.rate-limit", data: { message: "capacity", statusCode: 429 } })
+    const result = await (buildV1ClientShim() as any).session.prompt({
+      path: { id: "ses_y" },
+      body: { agent: "memorize", parts: [] },
+    })
+    expect(result.data.info.error).toEqual({
+      name: "provider.rate-limit",
+      data: { message: "capacity", statusCode: 429 },
+    })
   })
 
   it("releases sessionless extraction handles without calling host session APIs", async () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx as any)
-    serviceRemove = async () => { throw new Error("must not remove a synthetic session") }
+    serviceRemove = async () => {
+      throw new Error("must not remove a synthetic session")
+    }
     const client = buildV1ClientShim() as any
     const create = () => client.session.create({ body: { title: "codex-memory-extract-test" } })
     expect((await create()).data.id).toBe(EXTRACT_STUB_SESSION_ID)
@@ -858,12 +997,18 @@ describe("V1 client shim", () => {
 
   it("keeps the HTTP status of failed prompts for the capacity breaker", async () => {
     const { ctx } = fakeCtx()
-    ctx.generate.text = async () => { throw Object.assign(new Error("UnexpectedStatus"), { cause: { status: 429 } }) }
+    ctx.generate.text = async () => {
+      throw Object.assign(new Error("UnexpectedStatus"), { cause: { status: 429 } })
+    }
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
     const res = await client.session.prompt({
       path: { id: "ses_x" },
-      body: { agent: "memorize-extract", format: { type: "json_schema", schema: {} }, parts: [{ type: "text", text: "t" }] },
+      body: {
+        agent: "memorize-extract",
+        format: { type: "json_schema", schema: {} },
+        parts: [{ type: "text", text: "t" }],
+      },
     })
     expect(res.error).toEqual({ message: "UnexpectedStatus", statusCode: 429 })
     const { isProviderCapacityError } = require("../src/ratelimit.js")
@@ -880,18 +1025,23 @@ describe("V1 client shim", () => {
       calls.push({ name: "generate", args: a })
       // Observed OpenCode 2.1 error for an exhausted Copilot plan.
       throw Object.assign(new Error("You have exceeded your monthly quota"), {
-        _tag: "ServiceUnavailableError", service: "github-copilot",
+        _tag: "ServiceUnavailableError",
+        service: "github-copilot",
       })
     }
     setV2Context(ctx)
     setPluginInput({ client: buildV1ClientShim() } as any)
     try {
-      const result = await withMemoryVersion("v1", () => extractViaSubagent("ses_fallback", "transcript", {
-        model: "github-copilot/auto, acme/m1",
-      }))
+      const result = await withMemoryVersion("v1", () =>
+        extractViaSubagent("ses_fallback", "transcript", {
+          model: "github-copilot/auto, acme/m1",
+        }),
+      )
       expect(result?.raw_memory).toBe("m")
-      expect(calls.filter((c) => c.name === "generate").map((c) => (c.args as any).model.providerID))
-        .toEqual(["github-copilot", "acme"])
+      expect(calls.filter((c) => c.name === "generate").map((c) => (c.args as any).model.providerID)).toEqual([
+        "github-copilot",
+        "acme",
+      ])
       expect(isProviderCapacityBlocked("phase1", "github-copilot/auto")).toBe(true)
     } finally {
       setPluginInput({ client: undefined } as any)
@@ -901,11 +1051,15 @@ describe("V1 client shim", () => {
 
   it("interrupts the local helper before removing it through the service", async () => {
     const { ctx, calls } = fakeCtx()
-    serviceRemove = async () => { calls.push({ name: "service.remove", args: null }) }
+    serviceRemove = async () => {
+      calls.push({ name: "service.remove", args: null })
+    }
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
     await expect(client.session.delete({ path: { id: "ses_gone" } })).resolves.toEqual({})
-    const order = calls.map((call) => call.name).filter((name) => ["interrupt", "wait", "service.remove"].includes(name))
+    const order = calls
+      .map((call) => call.name)
+      .filter((name) => ["interrupt", "wait", "service.remove"].includes(name))
     expect(order).toEqual(["interrupt", "wait", "service.remove"])
 
     calls.length = 0
@@ -915,7 +1069,9 @@ describe("V1 client shim", () => {
 
   it("does not treat interrupt as delete success while the session still exists", async () => {
     const { ctx, calls } = fakeCtx()
-    serviceRemove = async () => { throw new Error("service unavailable") }
+    serviceRemove = async () => {
+      throw new Error("service unavailable")
+    }
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
     const stillThere = await client.session.delete({ path: { id: "ses_fallback" } })
@@ -925,7 +1081,9 @@ describe("V1 client shim", () => {
     const live = await client.session.get({ path: { id: "ses_fallback" } })
     expect(live.data?.id).toBe("ses_fallback")
 
-    ctx.session.interrupt = async () => { throw new Error("local interrupt failed") }
+    ctx.session.interrupt = async () => {
+      throw new Error("local interrupt failed")
+    }
     const failed = await client.session.delete({ path: { id: "ses_still-running" } })
     expect(failed.error?.message).toMatch(/service unavailable|local interrupt failed/i)
     const stillLive = await client.session.get({ path: { id: "ses_still-running" } })
@@ -934,7 +1092,9 @@ describe("V1 client shim", () => {
 
   it("accepts interrupt+wait as delete only after a confirmed 404", async () => {
     const { ctx, calls } = fakeCtx()
-    serviceRemove = async () => { throw new Error("service unavailable") }
+    serviceRemove = async () => {
+      throw new Error("service unavailable")
+    }
     setV2Context(ctx as any)
     const client = buildV1ClientShim() as any
     await expect(client.session.delete({ path: { id: "ses_gone" } })).resolves.toEqual({})
@@ -964,7 +1124,10 @@ describe("V1 client shim", () => {
     const client = buildV1ClientShim() as any
     const res = await client.session.messages({ path: { id: "ses_compacted" } })
     expect(res.data).toEqual([
-      { info: { role: "compaction" }, parts: [{ type: "text", text: "[Summary of earlier conversation]\nUser chose Postgres over SQLite." }] },
+      {
+        info: { role: "compaction" },
+        parts: [{ type: "text", text: "[Summary of earlier conversation]\nUser chose Postgres over SQLite." }],
+      },
       { info: { role: "user" }, parts: [{ type: "text", text: "continue" }] },
     ])
   })

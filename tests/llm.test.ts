@@ -109,9 +109,8 @@ describe("sub-agent model resolution", () => {
     setPluginInput({
       client: {
         config: {
-          get: async () => ++calls === 1
-            ? { error: { message: "temporary" } }
-            : { data: { small_model: "healthy/model" } },
+          get: async () =>
+            ++calls === 1 ? { error: { message: "temporary" } } : { data: { small_model: "healthy/model" } },
         },
       },
     } as any)
@@ -145,7 +144,9 @@ describe("sub-agent model resolution", () => {
         config: {
           get: async () => {
             oldCalls++
-            return new Promise((resolve) => { resolveOld = resolve })
+            return new Promise((resolve) => {
+              resolveOld = resolve
+            })
           },
         },
       },
@@ -566,10 +567,10 @@ describe("reasoning variant fallback", () => {
   })
 
   it("omits the pin when the model lists no effort variants", async () => {
-    const cap = stubWithProviders(
-      [{ id: "mistral", models: { "codestral-latest": { variants: {} } } }],
-      { extract: true, model: "mistral/codestral-latest" },
-    )
+    const cap = stubWithProviders([{ id: "mistral", models: { "codestral-latest": { variants: {} } } }], {
+      extract: true,
+      model: "mistral/codestral-latest",
+    })
     await extractViaSubagent("ses_v", "transcript", { model: cap.model })
     expect(cap.variant()).toBeUndefined()
   })
@@ -640,19 +641,20 @@ describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finis
 
   it("refreshes configured model defaults when the plugin client changes", async () => {
     const seen: string[] = []
-    const install = (smallModel: string) => setPluginInput({
-      client: {
-        session: {
-          create: async () => ({ data: { id: `sub-${smallModel}` } }),
-          prompt: async (req: any) => {
-            seen.push(`${req.body.model.providerID}/${req.body.model.modelID}`)
-            return { data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" } } } }
+    const install = (smallModel: string) =>
+      setPluginInput({
+        client: {
+          session: {
+            create: async () => ({ data: { id: `sub-${smallModel}` } }),
+            prompt: async (req: any) => {
+              seen.push(`${req.body.model.providerID}/${req.body.model.modelID}`)
+              return { data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "" } } } }
+            },
+            delete: async () => ({ data: {} }),
           },
-          delete: async () => ({ data: {} }),
+          config: { get: async () => ({ data: { small_model: smallModel } }) },
         },
-        config: { get: async () => ({ data: { small_model: smallModel } }) },
-      },
-    } as any)
+      } as any)
 
     install("provider/first")
     await extractViaSubagent("ses_first", "transcript")
@@ -720,7 +722,9 @@ describe("consolidateViaSubagent shutdown (codex phase2.rs shutdown-before-finis
 })
 
 describe("model fallback chain", () => {
-  const QUOTA = { data: { info: { error: { name: "APIError", data: { message: "You have exceeded your monthly quota" } } } } }
+  const QUOTA = {
+    data: { info: { error: { name: "APIError", data: { message: "You have exceeded your monthly quota" } } } },
+  }
   const AUTH = { data: { info: { error: { name: "ProviderAuthError", data: { message: "expired key" } } } } }
   const EXTRACTED = { data: { info: { structured: { raw_memory: "rm", rollout_summary: "rs", rollout_slug: "s" } } } }
   const CONSOLIDATED = { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
@@ -787,7 +791,10 @@ describe("model fallback chain", () => {
     const calls = stubChain({ "a/one": AUTH, "b/two": EXTRACTED })
     await extractViaSubagent("ses_auth", "transcript", { model: "a/one,b/two" })
     expect(calls.filter((c) => c.startsWith("create") || c.startsWith("prompt"))).toEqual([
-      "create:sub-0", "prompt:sub-0:a/one", "create:sub-1", "prompt:sub-1:b/two",
+      "create:sub-0",
+      "prompt:sub-0:a/one",
+      "create:sub-1",
+      "prompt:sub-1:b/two",
     ])
     expect(isProviderCapacityBlocked("phase1", "a/one")).toBe(false)
   })
@@ -851,8 +858,12 @@ describe("model fallback chain", () => {
     const calls = stubChain({ "a/one": QUOTA, "b/two": CONSOLIDATED })
     await consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", "a/one, b/two")
     expect(calls).toEqual([
-      "create:sub-0", "prompt:sub-0:a/one", "delete:sub-0",
-      "create:sub-1", "prompt:sub-1:b/two", "delete:sub-1",
+      "create:sub-0",
+      "prompt:sub-0:a/one",
+      "delete:sub-0",
+      "create:sub-1",
+      "prompt:sub-1:b/two",
+      "delete:sub-1",
     ])
     expect(isProviderCapacityBlocked("phase2", "a/one")).toBe(true)
     expect(getRecentDiagnostics().at(-1)?.kind).toBe("phase2")
@@ -860,9 +871,9 @@ describe("model fallback chain", () => {
 
   it("never starts a second consolidator while the first may still be alive", async () => {
     const calls = stubChain({ "a/one": AUTH, "b/two": CONSOLIDATED }, { deleteFails: true })
-    await expect(
-      consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", "a/one, b/two"),
-    ).rejects.toBeInstanceOf(SubagentShutdownError)
+    await expect(consolidateViaSubagent("/tmp/x", "phase2_workspace_diff.md", "a/one, b/two")).rejects.toBeInstanceOf(
+      SubagentShutdownError,
+    )
     expect(calls.some((c) => c.includes("b/two"))).toBe(false)
   })
 })
@@ -879,15 +890,17 @@ function cleanupListClient(
 ) {
   return {
     _client: {
-      get: extras?.list ?? (extras?.hangList
-        ? async () => new Promise(() => {})
-        : async (opts: { url?: string; query?: unknown }) => {
-            if (extras?.seen) {
-              extras.seen.url = opts.url
-              extras.seen.query = opts.query
-            }
-            return { data: sessions }
-          }),
+      get:
+        extras?.list ??
+        (extras?.hangList
+          ? async () => new Promise(() => {})
+          : async (opts: { url?: string; query?: unknown }) => {
+              if (extras?.seen) {
+                extras.seen.url = opts.url
+                extras.seen.query = opts.query
+              }
+              return { data: sessions }
+            }),
     },
     session: {
       delete: extras?.delete ?? (async () => ({ data: {} })),
@@ -909,8 +922,18 @@ describe("cleanupOldSubSessions", () => {
     setPluginInput({
       client: cleanupListClient(
         [
-          { id: "sub-live", title: "codex-memory-consolidate", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() } },
-          { id: "sub-old", title: "codex-memory-extract-ses_old123", metadata: { "opencode-codex-memory": true }, time: { created: Date.now() - 120 * 60 * 1000 } },
+          {
+            id: "sub-live",
+            title: "codex-memory-consolidate",
+            metadata: { "opencode-codex-memory": true },
+            time: { created: Date.now() },
+          },
+          {
+            id: "sub-old",
+            title: "codex-memory-extract-ses_old123",
+            metadata: { "opencode-codex-memory": true },
+            time: { created: Date.now() - 120 * 60 * 1000 },
+          },
           { id: "user-ses", title: "normal chat", time: { created: Date.now() } },
         ],
         { seen },
@@ -1103,10 +1126,10 @@ describe("cleanupOldSubSessions", () => {
             data: [
               ...firstPage,
               {
-                  id: "paged-old",
-                  title: "codex-memory-consolidate",
-                  metadata: { "opencode-codex-memory": true },
-                  time: { created: now - 120 * 60 * 1000, updated: 1 },
+                id: "paged-old",
+                title: "codex-memory-consolidate",
+                metadata: { "opencode-codex-memory": true },
+                time: { created: now - 120 * 60 * 1000, updated: 1 },
               },
             ],
           }

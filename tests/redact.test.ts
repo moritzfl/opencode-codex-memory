@@ -20,16 +20,10 @@ describe("redact", () => {
   })
 
   it("redacts Bearer tokens", () => {
-    expect(redact("Authorization: Bearer abc123" + "x".repeat(30))).toBe(
-      "Authorization: Bearer [REDACTED]",
-    )
+    expect(redact("Authorization: Bearer abc123" + "x".repeat(30))).toBe("Authorization: Bearer [REDACTED]")
     expect(redact("Bearer abcde+fghijklmnopqrstuvwxyz012345")).toBe("Bearer [REDACTED]")
-    expect(redact("Bearer AbcdefghijklMN09._~+/-==; echo done")).toBe(
-      "Bearer [REDACTED]; echo done",
-    )
-    expect(redact("authorization: bEaReR\tabcdefghijklmnop")).toBe(
-      "authorization: Bearer [REDACTED]",
-    )
+    expect(redact("Bearer AbcdefghijklMN09._~+/-==; echo done")).toBe("Bearer [REDACTED]; echo done")
+    expect(redact("authorization: bEaReR\tabcdefghijklmnop")).toBe("authorization: Bearer [REDACTED]")
   })
 
   it("avoids Bearer false positives like codex", () => {
@@ -80,17 +74,13 @@ describe("redact", () => {
   it("keeps YAML structure after redacting an unquoted value", () => {
     expect(redact("password: 123456\nsafe: ok")).toBe('password: "[REDACTED]"\nsafe: ok')
     expect(redact("password: abcdef;ghijkl")).toBe('password: "[REDACTED]"')
-    expect(redact("password: abc def ghi # keep this comment")).toBe(
-      'password: "[REDACTED]" # keep this comment',
-    )
+    expect(redact("password: abc def ghi # keep this comment")).toBe('password: "[REDACTED]" # keep this comment')
     expect(redact("password:\nsafe: ok")).toBe("password:\nsafe: ok")
     // Codex's `\s*` separator crosses the newline for 8+ char values.
     expect(redact("password:\n  hunter2abcdef\nsafe: ok")).toBe("password:\n  [REDACTED]\nsafe: ok")
     expect(redact('token =\r\n"abcdefgh12"')).toBe('token =\r\n"[REDACTED]"')
     expect(redact("{password: hunter2, safe: ok}")).toBe('{password: "[REDACTED]", safe: ok}')
-    expect(redact("{\n  password: hunter2,\n  safe: ok\n}")).toBe(
-      '{\n  password: "[REDACTED]",\n  safe: ok\n}',
-    )
+    expect(redact("{\n  password: hunter2,\n  safe: ok\n}")).toBe('{\n  password: "[REDACTED]",\n  safe: ok\n}')
     expect(redact("{ broken\npassword: abc,def")).toBe('{ broken\npassword: "[REDACTED]"')
     expect(redact("[ broken\npassword:\nsafe: ok")).toBe("[ broken\npassword:\nsafe: ok")
   })
@@ -118,9 +108,7 @@ describe("redact", () => {
   })
 
   it("tracks YAML single quotes while scanning nested flow values", () => {
-    expect(redact("{password: {value: 'abc}def'}, safe: ok}")).toBe(
-      '{password: "[REDACTED]", safe: ok}',
-    )
+    expect(redact("{password: {value: 'abc}def'}, safe: ok}")).toBe('{password: "[REDACTED]", safe: ok}')
   })
 
   it("preserves embedded tool payload structure around a nested secret", () => {

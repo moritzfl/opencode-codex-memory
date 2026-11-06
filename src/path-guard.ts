@@ -90,11 +90,7 @@ function sameFile(a: fs.Stats, b: fs.Stats): boolean {
  * after open is a fallback for platforms without O_NOFOLLOW and also verifies
  * that a path-swap race did not give us a different inode.
  */
-export function withRegularFileNoFollow<T>(
-  file: string,
-  flags: number,
-  fn: (fd: number, stat: fs.Stats) => T,
-): T {
+export function withRegularFileNoFollow<T>(file: string, flags: number, fn: (fd: number, stat: fs.Stats) => T): T {
   const noFollow = fs.constants.O_NOFOLLOW ?? 0
   const nonBlock = fs.constants.O_NONBLOCK ?? 0
   let fd: number
@@ -133,11 +129,7 @@ export function writeRegularFileNoFollow(
 ): void {
   const noFollow = fs.constants.O_NOFOLLOW ?? 0
   const create = () => {
-    const fd = fs.openSync(
-      file,
-      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow,
-      0o666,
-    )
+    const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow, 0o666)
     try {
       const opened = fs.fstatSync(fd)
       const current = fs.lstatSync(file)

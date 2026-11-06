@@ -32,13 +32,12 @@ describe("hook wiring", () => {
       resolveList = resolve
     })
     let settled = false
-    const serverPromise = plugin.server(
-      { client: { _client: { get: () => listResult } } } as any,
-      undefined,
-    ).then((hooks) => {
-      settled = true
-      return hooks
-    })
+    const serverPromise = plugin
+      .server({ client: { _client: { get: () => listResult } } } as any, undefined)
+      .then((hooks) => {
+        settled = true
+        return hooks
+      })
 
     await Promise.resolve()
     expect(settled).toBe(false)
@@ -67,10 +66,7 @@ describe("hook wiring", () => {
     try {
       require("../src/db.js").closeDb()
       process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testRoot
-      const hooks = (await plugin.server(
-        { client: {} } as any,
-        { disable_on_external_context: true } as any,
-      )) as any
+      const hooks = (await plugin.server({ client: {} } as any, { disable_on_external_context: true } as any)) as any
       expect(hooks["tool.execute.after"]).toBeUndefined()
       // Only the before hook fires — the tool then "throws".
       await hooks["tool.execute.before"]({ tool: "webfetch", sessionID: "ses_failed_fetch", callID: "c1" })
@@ -324,7 +320,9 @@ describe("session deletion lifecycle", () => {
           return true
         },
       },
-      () => { scheduled++ },
+      () => {
+        scheduled++
+      },
     )
     expect(deleted).toEqual(["s1"])
     expect(scheduled).toBe(1)
@@ -332,11 +330,9 @@ describe("session deletion lifecycle", () => {
 
   it("does not schedule phase 2 for an unconsolidated deletion", () => {
     let scheduled = 0
-    handleSessionDeleted(
-      "s1",
-      { deleteSessionMemory: () => false },
-      () => { scheduled++ },
-    )
+    handleSessionDeleted("s1", { deleteSessionMemory: () => false }, () => {
+      scheduled++
+    })
     expect(scheduled).toBe(0)
   })
 })

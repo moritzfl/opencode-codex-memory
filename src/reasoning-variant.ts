@@ -27,7 +27,12 @@ export function enabledVariantKeys(variants: unknown): string[] {
   if (!variants || typeof variants !== "object" || Array.isArray(variants)) return []
   const out: string[] = []
   for (const [name, value] of Object.entries(variants as Record<string, unknown>)) {
-    if (value && typeof value === "object" && !Array.isArray(value) && (value as { disabled?: unknown }).disabled === true) {
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      (value as { disabled?: unknown }).disabled === true
+    ) {
       continue
     }
     out.push(name)
@@ -40,9 +45,9 @@ export function catalogVariantKeys(data: unknown, providerID: string, modelID: s
   const root = data as { all?: unknown; providers?: unknown }
   const all = Array.isArray(root.all) ? root.all : Array.isArray(root.providers) ? root.providers : undefined
   if (!all) return undefined
-  const provider = all.find((item) => item && typeof item === "object" && (item as { id?: unknown }).id === providerID) as
-    | { models?: Record<string, unknown> }
-    | undefined
+  const provider = all.find(
+    (item) => item && typeof item === "object" && (item as { id?: unknown }).id === providerID,
+  ) as { models?: Record<string, unknown> } | undefined
   if (!provider?.models || typeof provider.models !== "object") return undefined
   const model = provider.models[modelID]
   if (!model || typeof model !== "object" || Array.isArray(model)) return undefined

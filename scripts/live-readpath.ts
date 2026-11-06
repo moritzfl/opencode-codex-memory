@@ -25,11 +25,12 @@ import {
 
 async function main() {
   const models = requireModels()
-  const memoryVersion = process.argv.includes("--version") && process.argv[process.argv.indexOf("--version") + 1] === "v2"
-    ? "v2"
-    : process.env.OPENCODE_LIVE_MEMORY_VERSION === "v2"
+  const memoryVersion =
+    process.argv.includes("--version") && process.argv[process.argv.indexOf("--version") + 1] === "v2"
       ? "v2"
-      : "v1"
+      : process.env.OPENCODE_LIVE_MEMORY_VERSION === "v2"
+        ? "v2"
+        : "v1"
   const sandbox = createSandbox({
     keep: process.argv.includes("--keep"),
     model: models.model,
@@ -61,7 +62,10 @@ async function main() {
 
     const combined = `${out.stdout}\n${out.stderr}`
     if (out.code !== 0 && !combined.includes(MARKER)) {
-      fail("read", `opencode run exited ${out.code}\nstdout: ${out.stdout.slice(0, 1500)}\nstderr: ${out.stderr.slice(0, 1500)}`)
+      fail(
+        "read",
+        `opencode run exited ${out.code}\nstdout: ${out.stdout.slice(0, 1500)}\nstderr: ${out.stderr.slice(0, 1500)}`,
+      )
     }
     if (!combined.includes(MARKER)) {
       fail(

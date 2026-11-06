@@ -43,8 +43,7 @@ function remaining(time: number | null | undefined, now: number): string {
  */
 function registerSlot(context: TuiContext, name: string, render: (input: any) => unknown): () => void {
   const slot = context.ui.slot as unknown as (...args: unknown[]) => unknown
-  const claim =
-    slot.length <= 1 ? { append: name, render } : undefined
+  const claim = slot.length <= 1 ? { append: name, render } : undefined
   const dispose = claim ? slot(claim) : (slot as (n: string, r: unknown) => unknown)(name, render)
   return typeof dispose === "function" ? (dispose as () => void) : () => {}
 }
@@ -74,13 +73,36 @@ function themeColor(theme: unknown, ...paths: readonly (readonly string[])[]): a
 
 function colors(context: TuiContext) {
   return {
-    get text() { return themeColor(context.theme, ["text", "base"], ["text", "default"], ["text"]) },
-    get muted() { return themeColor(context.theme, ["text", "muted"], ["text", "subdued"], ["textMuted"]) },
-    get ok() { return themeColor(context.theme, ["text", "feedback", "success"], ["success"]) },
-    get warn() { return themeColor(context.theme, ["text", "feedback", "warning"], ["warning"]) },
-    get error() { return themeColor(context.theme, ["text", "feedback", "error"], ["error"]) },
-    get selectedText() { return themeColor(context.theme, ["text", "action", "primary", "focused"], ["text", "action", "primary", "$focused"], ["text", "action", "primary"]) },
-    get selectedBg() { return themeColor(context.theme, ["background", "action", "primary", "focused"], ["background", "action", "primary", "$focused"]) },
+    get text() {
+      return themeColor(context.theme, ["text", "base"], ["text", "default"], ["text"])
+    },
+    get muted() {
+      return themeColor(context.theme, ["text", "muted"], ["text", "subdued"], ["textMuted"])
+    },
+    get ok() {
+      return themeColor(context.theme, ["text", "feedback", "success"], ["success"])
+    },
+    get warn() {
+      return themeColor(context.theme, ["text", "feedback", "warning"], ["warning"])
+    },
+    get error() {
+      return themeColor(context.theme, ["text", "feedback", "error"], ["error"])
+    },
+    get selectedText() {
+      return themeColor(
+        context.theme,
+        ["text", "action", "primary", "focused"],
+        ["text", "action", "primary", "$focused"],
+        ["text", "action", "primary"],
+      )
+    },
+    get selectedBg() {
+      return themeColor(
+        context.theme,
+        ["background", "action", "primary", "focused"],
+        ["background", "action", "primary", "$focused"],
+      )
+    },
   }
 }
 
@@ -90,14 +112,16 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-async function fetchStatus(rpc: RpcClient, context: TuiContext, sessionID?: string, signal?: AbortSignal): Promise<MemoryStatus> {
-  const result = await rpc.status(
-    sessionID ? { sessionID } : {},
-    {
-      location: context.location ?? context.data.location.default(),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000),
-    },
-  )
+async function fetchStatus(
+  rpc: RpcClient,
+  context: TuiContext,
+  sessionID?: string,
+  signal?: AbortSignal,
+): Promise<MemoryStatus> {
+  const result = await rpc.status(sessionID ? { sessionID } : {}, {
+    location: context.location ?? context.data.location.default(),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000),
+  })
   // The RPC client is untyped for plain JSON-schema definitions.
   if (!isMemoryStatus(result)) throw new Error("invalid memory status payload")
   return result
@@ -146,25 +170,40 @@ function pipelineRows(s: MemoryStatus, now: number): Row[] {
     const extractionRetry = pipeline.phase1RetryAt != null && pipeline.phase1RetryAt > now
     const consolidationRetry = pipeline.phase2RetryAt != null && pipeline.phase2RetryAt > now
     const cooldown = pipeline.phase2CooldownUntil != null && pipeline.phase2CooldownUntil > now
-    const consolidation = pipeline.phase2Status === "pending" ? "Queued"
-      : pipeline.phase2Status === "failed" ? "Retry due" : "Idle"
+    const consolidation =
+      pipeline.phase2Status === "pending" ? "Queued" : pipeline.phase2Status === "failed" ? "Retry due" : "Idle"
     return [
       { label: `${version} recaps`, value: `${pipeline.stage1Count} stored`, tone: "muted" },
       {
         label: `${version} extraction`,
-        value: pipeline.extracting ? `Running (${pipeline.extracting})` : paused ? "Paused"
-          : extractionRetry ? `Retry ${remaining(pipeline.phase1RetryAt, now)}` : "Idle",
+        value: pipeline.extracting
+          ? `Running (${pipeline.extracting})`
+          : paused
+            ? "Paused"
+            : extractionRetry
+              ? `Retry ${remaining(pipeline.phase1RetryAt, now)}`
+              : "Idle",
         tone: extractionRetry && !paused ? "warn" : "muted",
       },
       {
         label: `${version} consolidation`,
-        value: pipeline.phase2Status === "running" ? "Running" : paused ? "Paused"
-          : consolidationRetry ? `Retry ${remaining(pipeline.phase2RetryAt, now)}`
-          : cooldown ? `${consolidation} · cooldown ends ${remaining(pipeline.phase2CooldownUntil, now)}`
-          : pipeline.phase2Status === "pending" ? "Queued · next activity" : consolidation,
+        value:
+          pipeline.phase2Status === "running"
+            ? "Running"
+            : paused
+              ? "Paused"
+              : consolidationRetry
+                ? `Retry ${remaining(pipeline.phase2RetryAt, now)}`
+                : cooldown
+                  ? `${consolidation} · cooldown ends ${remaining(pipeline.phase2CooldownUntil, now)}`
+                  : pipeline.phase2Status === "pending"
+                    ? "Queued · next activity"
+                    : consolidation,
         tone: pipeline.lastError ? "warn" : "muted",
       },
-      ...(pipeline.lastError ? [{ label: `${version} last error`, value: pipeline.lastError, tone: "warn" as const }] : []),
+      ...(pipeline.lastError
+        ? [{ label: `${version} last error`, value: pipeline.lastError, tone: "warn" as const }]
+        : []),
     ]
   })
 }
@@ -174,23 +213,45 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
     { label: "Activity", value: labels[s.activity] },
     { label: "Memory version", value: `${s.sessionVersion} (default ${s.version})` },
     { label: "Learning pipelines", value: s.dualWrite ? "v1 + v2" : s.version },
-    { label: "V2 readiness", value: `${s.v2Ready ? "Ready" : "Not ready"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`, tone: s.v2Ready ? "ok" : "muted" },
+    {
+      label: "V2 readiness",
+      value: `${s.v2Ready ? "Ready" : "Not ready"} · ${s.v2ConsolidatedThreads}/${s.minConsolidatedThreads} sessions`,
+      tone: s.v2Ready ? "ok" : "muted",
+    },
     ...(s.v2NotReadyReason ? [{ label: "V2 not ready", value: s.v2NotReadyReason, tone: "muted" as const }] : []),
-    ...(s.v2SummaryBytes !== undefined ? [{
-      label: "V2 summary", value: s.v2SummaryBytes === null ? "Unreadable"
-        : s.v2InjectedSummaryBytes != null
-          ? `${s.v2SummaryBytes} bytes on disk · ${s.v2InjectedSummaryBytes} injected${s.v2SummaryBytes >= 10000 ? " (capped)" : ""}`
-          : `${s.v2SummaryBytes} UTF-8 bytes`,
-      tone: "muted" as const,
-    }] : []),
+    ...(s.v2SummaryBytes !== undefined
+      ? [
+          {
+            label: "V2 summary",
+            value:
+              s.v2SummaryBytes === null
+                ? "Unreadable"
+                : s.v2InjectedSummaryBytes != null
+                  ? `${s.v2SummaryBytes} bytes on disk · ${s.v2InjectedSummaryBytes} injected${s.v2SummaryBytes >= 10000 ? " (capped)" : ""}`
+                  : `${s.v2SummaryBytes} UTF-8 bytes`,
+            tone: "muted" as const,
+          },
+        ]
+      : []),
     ...pipelineRows(s, now),
     { label: "Use memories", value: s.useMemories ? "On" : "Off", tone: s.useMemories ? "ok" : "muted" },
-    { label: "Learn from sessions", value: s.generateMemories ? "On" : "Off", tone: s.generateMemories ? "ok" : "muted" },
+    {
+      label: "Learn from sessions",
+      value: s.generateMemories ? "On" : "Off",
+      tone: s.generateMemories ? "ok" : "muted",
+    },
     ...(s.sessionMode
       ? [
           {
             label: "This session",
-            value: s.sessionMode === "enabled" ? (s.generateMemories ? "Eligible for learning" : "Eligible (learning paused)") : s.sessionMode === "disabled" ? "Not learning" : "Excluded (external context)",
+            value:
+              s.sessionMode === "enabled"
+                ? s.generateMemories
+                  ? "Eligible for learning"
+                  : "Eligible (learning paused)"
+                : s.sessionMode === "disabled"
+                  ? "Not learning"
+                  : "Excluded (external context)",
             tone: (s.sessionMode === "enabled" && s.generateMemories ? "ok" : "muted") as Row["tone"],
           },
         ]
@@ -202,14 +263,17 @@ function statusRows(s: MemoryStatus, now: number): Row[] {
 
 function usageRows(s: MemoryStatus, sessionID?: string): Row[] {
   const inj = s.injected
-  const per = inj.sessionRequests > 0
-    ? Math.round(inj.sessionTokens / inj.sessionRequests)
-    : inj.totalRequests > 0
-      ? Math.round(inj.totalTokens / inj.totalRequests)
-      : 0
+  const per =
+    inj.sessionRequests > 0
+      ? Math.round(inj.sessionTokens / inj.sessionRequests)
+      : inj.totalRequests > 0
+        ? Math.round(inj.totalTokens / inj.totalRequests)
+        : 0
   return [
     { label: "Block size", value: per ? `~${formatTokens(per)} tokens / request` : "—" },
-    ...(sessionID ? [{ label: "This session", value: `~${formatTokens(inj.sessionTokens)} tokens · ${inj.sessionRequests} req` }] : []),
+    ...(sessionID
+      ? [{ label: "This session", value: `~${formatTokens(inj.sessionTokens)} tokens · ${inj.sessionRequests} req` }]
+      : []),
     { label: "Since start", value: `~${formatTokens(inj.totalTokens)} tokens · ${inj.totalRequests} req` },
   ]
 }
@@ -250,7 +314,12 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
   const [armed, setArmed] = createSignal(false)
   let scroll: ScrollBoxRenderable | undefined
 
-  const call = async (id: string, method: "setOption" | "setSessionMode" | "consolidateNow" | "resetMemory", input: Record<string, unknown>, done: string) => {
+  const call = async (
+    id: string,
+    method: "setOption" | "setSessionMode" | "consolidateNow" | "resetMemory",
+    input: Record<string, unknown>,
+    done: string,
+  ) => {
     if (busy() || unavailable()) return
     setBusy(id)
     setNotice(null)
@@ -286,7 +355,13 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
         hint: "Use the summary and memory lookup tools in conversations.",
         on: s.useMemories,
         enabled: true,
-        run: () => void call("read", "setOption", { key: "use_memories", value: !s.useMemories }, s.useMemories ? "Memory recall turned off." : "Memory recall turned on."),
+        run: () =>
+          void call(
+            "read",
+            "setOption",
+            { key: "use_memories", value: !s.useMemories },
+            s.useMemories ? "Memory recall turned off." : "Memory recall turned on.",
+          ),
       },
       {
         id: "learn",
@@ -294,7 +369,13 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
         hint: "Learn from eligible idle conversations in the background.",
         on: s.generateMemories,
         enabled: true,
-        run: () => void call("learn", "setOption", { key: "generate_memories", value: !s.generateMemories }, s.generateMemories ? "Learning paused." : "Learning resumed."),
+        run: () =>
+          void call(
+            "learn",
+            "setOption",
+            { key: "generate_memories", value: !s.generateMemories },
+            s.generateMemories ? "Learning paused." : "Learning resumed.",
+          ),
       },
     ]
     if (sessionID) {
@@ -302,24 +383,38 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
       list.push({
         id: "session",
         title: "Learn from this session",
-        hint: s.sessionMode === "polluted"
-          ? "Auto-excluded after external context. Toggle to allow learning again."
-          : !s.generateMemories
-            ? "Global learning is paused; this session preference is saved."
-            : "Allow future learning from this conversation. Saved across restarts.",
+        hint:
+          s.sessionMode === "polluted"
+            ? "Auto-excluded after external context. Toggle to allow learning again."
+            : !s.generateMemories
+              ? "Global learning is paused; this session preference is saved."
+              : "Allow future learning from this conversation. Saved across restarts.",
         on: learning,
         enabled: true,
-        run: () => void call("session", "setSessionMode", { sessionID, mode: learning ? "disabled" : "enabled" }, learning ? "This session is excluded from future learning." : "This session is eligible when global learning is on."),
+        run: () =>
+          void call(
+            "session",
+            "setSessionMode",
+            { sessionID, mode: learning ? "disabled" : "enabled" },
+            learning
+              ? "This session is excluded from future learning."
+              : "This session is eligible when global learning is on.",
+          ),
       })
     }
-    const running = s.activity === "consolidating" || s.activity === "extracting"
-      || s.pipelines.some((pipeline) => pipeline.extracting > 0 || pipeline.phase2Status === "running")
+    const running =
+      s.activity === "consolidating" ||
+      s.activity === "extracting" ||
+      s.pipelines.some((pipeline) => pipeline.extracting > 0 || pipeline.phase2Status === "running")
     list.push({
       id: "now",
       title: "Consolidate now",
-      hint: running ? "Already running. Progress appears in Overview."
-        : s.activity === "stopping" ? "The memory service is stopping."
-          : s.generateMemories ? "Process eligible sessions now, bypassing the consolidation cooldown."
+      hint: running
+        ? "Already running. Progress appears in Overview."
+        : s.activity === "stopping"
+          ? "The memory service is stopping."
+          : s.generateMemories
+            ? "Process eligible sessions now, bypassing the consolidation cooldown."
             : "Turn on Learn from sessions first.",
       enabled: s.generateMemories && !running && s.activity !== "stopping",
       run: () => void call("now", "consolidateNow", {}, "Background run requested. See Overview for progress."),
@@ -329,7 +424,8 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
       title: armed() ? "Reset memory — press again to confirm" : "Reset memory",
       hint: armed()
         ? "Erases all learned memories, notes, and history. This cannot be undone. Moving the selection cancels."
-        : running ? "Wait for the running extraction or consolidation to finish."
+        : running
+          ? "Wait for the running extraction or consolidation to finish."
           : "Erase all learned memories and notes for every project. Session preferences are kept.",
       enabled: !running,
       run: () => {
@@ -407,24 +503,50 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
       { title: "Move down", bind: "down", run: () => move(1) },
       { title: "First item", bind: "home", run: () => edge(false) },
       { title: "Last item", bind: "end", run: () => edge(true) },
-      { title: "Scroll up", bind: "pageup", run: () => { scroll?.scrollBy(-1, "viewport") } },
-      { title: "Scroll down", bind: "pagedown", run: () => { scroll?.scrollBy(1, "viewport") } },
-      { title: "Refresh memory status", bind: "r", run: () => { void refresh() } },
+      {
+        title: "Scroll up",
+        bind: "pageup",
+        run: () => {
+          scroll?.scrollBy(-1, "viewport")
+        },
+      },
+      {
+        title: "Scroll down",
+        bind: "pagedown",
+        run: () => {
+          scroll?.scrollBy(1, "viewport")
+        },
+      },
+      {
+        title: "Refresh memory status",
+        bind: "r",
+        run: () => {
+          void refresh()
+        },
+      },
       ...["return", "space"].map((bind) => ({
-        title: "Change selected control", bind,
-        run: () => { if (tab() === "Controls") activate(cursor()) },
+        title: "Change selected control",
+        bind,
+        run: () => {
+          if (tab() === "Controls") activate(cursor())
+        },
       })),
     ],
   }))
 
-  const toneColor = (t: Row["tone"]) => (t === "ok" ? color.ok : t === "warn" ? color.warn : t === "muted" ? color.muted : color.text)
+  const toneColor = (t: Row["tone"]) =>
+    t === "ok" ? color.ok : t === "warn" ? color.warn : t === "muted" ? color.muted : color.text
 
   const Rows = (props: { rows: Row[] }) => (
     <For each={props.rows}>
       {(r) => (
         <box flexDirection={dimensions().width < 60 ? "column" : "row"} flexShrink={0}>
-          <text width={dimensions().width < 60 ? undefined : 21} flexShrink={0} fg={color.muted}>{r.label}</text>
-          <text flexGrow={1} flexShrink={1} fg={toneColor(r.tone)} wrapMode="word">{r.value}</text>
+          <text width={dimensions().width < 60 ? undefined : 21} flexShrink={0} fg={color.muted}>
+            {r.label}
+          </text>
+          <text flexGrow={1} flexShrink={1} fg={toneColor(r.tone)} wrapMode="word">
+            {r.value}
+          </text>
         </box>
       )}
     </For>
@@ -439,20 +561,36 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
   )
   const Note = (props: { fg: unknown; children: string }) => (
     <box marginTop={1} flexShrink={0}>
-      <text fg={props.fg as any} wrapMode="word">{props.children}</text>
+      <text fg={props.fg as any} wrapMode="word">
+        {props.children}
+      </text>
     </box>
   )
 
   return (
     <box
-      flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+      paddingBottom={1}
       height={Math.min(tab() === "Overview" ? 34 : sessionID ? 25 : 22, Math.max(8, dimensions().height - 2))}
     >
       <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
-        <text fg={color.text}><b>Memory</b></text>
+        <text fg={color.text}>
+          <b>Memory</b>
+        </text>
         <box flexDirection="row" gap={2}>
-          <text fg={color.muted} onMouseUp={click(() => { void refresh() })}>{refreshing() ? "Refreshing…" : "r refresh"}</text>
-          <text fg={color.muted} onMouseUp={click(() => context.ui.dialog.clear())}>Esc close</text>
+          <text
+            fg={color.muted}
+            onMouseUp={click(() => {
+              void refresh()
+            })}
+          >
+            {refreshing() ? "Refreshing…" : "r refresh"}
+          </text>
+          <text fg={color.muted} onMouseUp={click(() => context.ui.dialog.clear())}>
+            Esc close
+          </text>
         </box>
       </box>
       <box flexDirection="row" gap={2} marginTop={1} flexShrink={0}>
@@ -464,9 +602,7 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
               backgroundColor={tab() === t ? color.selectedBg : undefined}
               onMouseUp={click(() => switchTab(t))}
             >
-              <text fg={tab() === t ? color.selectedText : color.muted}>
-                {tab() === t ? <b>{t}</b> : t}
-              </text>
+              <text fg={tab() === t ? color.selectedText : color.muted}>{tab() === t ? <b>{t}</b> : t}</text>
             </box>
           )}
         </For>
@@ -475,18 +611,30 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
       {unavailable() ? (
         <box marginTop={1} flexShrink={0}>
           <text fg={color.error} wrapMode="word">
-            {status() ? "Offline: last known status. Press r to retry." : "Memory status unavailable. Press r to retry."}
+            {status()
+              ? "Offline: last known status. Press r to retry."
+              : "Memory status unavailable. Press r to retry."}
           </text>
         </box>
-      ) : <box />}
+      ) : (
+        <box />
+      )}
 
       {/* No <Show>: its empty placeholder is a bare text node under <box>. */}
       <scrollbox
-        ref={(value) => { scroll = value }} flexGrow={1} flexShrink={1} minHeight={0} scrollX={false}
-        onSizeChange={() => queueMicrotask(() => {
-          // Wait for resized row geometry before restoring keyboard focus.
-          if (!signal.aborted && tab() === "Controls") select(cursor())
-        })}
+        ref={(value) => {
+          scroll = value
+        }}
+        flexGrow={1}
+        flexShrink={1}
+        minHeight={0}
+        scrollX={false}
+        onSizeChange={() =>
+          queueMicrotask(() => {
+            // Wait for resized row geometry before restoring keyboard focus.
+            if (!signal.aborted && tab() === "Controls") select(cursor())
+          })
+        }
       >
         {status() === null ? (
           <Note fg={color.muted}>{refreshing() ? "Loading memory status…" : "No status received."}</Note>
@@ -500,12 +648,17 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
                 <Section title="Attention" />
                 <For each={status()!.warnings}>{(w) => <text fg={color.warn} wrapMode="word">{`! ${w}`}</text>}</For>
               </box>
-            ) : <box />}
+            ) : (
+              <box />
+            )}
             <Section title="Context usage" />
             <Rows rows={usageRows(status()!, sessionID)} />
             <Section title="Setup" />
             <Rows rows={configRows(status()!)} />
-            <Note fg={color.muted}>Memory is global across projects. Token figures are chars/4 estimates; prompt-cache savings depend on the provider.</Note>
+            <Note fg={color.muted}>
+              Memory is global across projects. Token figures are chars/4 estimates; prompt-cache savings depend on the
+              provider.
+            </Note>
           </box>
         ) : (
           <box flexDirection="column" marginTop={1}>
@@ -513,10 +666,23 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
               {(c, i) => {
                 const selected = () => cursor() === i()
                 const disabled = () => !c.enabled || unavailable() || busy() !== null
-                const fg = () => selected() ? color.selectedText : disabled() ? color.muted : color.text
-                const state = () => busy() === c.id ? (c.id === "now" ? "Starting…" : c.id === "reset" ? "Resetting…" : "Saving…")
-                  : c.id === "reset" && armed() ? "Confirm"
-                  : c.on === undefined ? (c.enabled ? "Run" : "Unavailable") : c.on ? "On" : "Off"
+                const fg = () => (selected() ? color.selectedText : disabled() ? color.muted : color.text)
+                const state = () =>
+                  busy() === c.id
+                    ? c.id === "now"
+                      ? "Starting…"
+                      : c.id === "reset"
+                        ? "Resetting…"
+                        : "Saving…"
+                    : c.id === "reset" && armed()
+                      ? "Confirm"
+                      : c.on === undefined
+                        ? c.enabled
+                          ? "Run"
+                          : "Unavailable"
+                        : c.on
+                          ? "On"
+                          : "Off"
                 return (
                   <box
                     id={`memory-control-${c.id}`}
@@ -531,33 +697,62 @@ function MemoryDialog(context: TuiContext, sessionID?: string) {
                     })}
                   >
                     <box flexDirection="row" gap={1}>
-                      <text fg={fg()} flexShrink={0}>{selected() ? "›" : " "}</text>
+                      <text fg={fg()} flexShrink={0}>
+                        {selected() ? "›" : " "}
+                      </text>
                       <text fg={fg()} flexGrow={1} flexShrink={1} wrapMode="word">
                         {selected() ? <b>{c.title}</b> : c.title}
                       </text>
-                      <text fg={selected() ? color.selectedText : c.on && !disabled() ? color.ok : color.muted} flexShrink={0}>{state()}</text>
+                      <text
+                        fg={selected() ? color.selectedText : c.on && !disabled() ? color.ok : color.muted}
+                        flexShrink={0}
+                      >
+                        {state()}
+                      </text>
                     </box>
                     <box paddingLeft={2}>
-                      <text fg={selected() ? color.selectedText : color.muted} wrapMode="word">{c.hint}</text>
+                      <text fg={selected() ? color.selectedText : color.muted} wrapMode="word">
+                        {c.hint}
+                      </text>
                     </box>
                   </box>
                 )
               }}
             </For>
-            <Note fg={color.muted}>The first two toggles affect all projects until the server restarts. Set plugin options in opencode.json(c) to keep them.</Note>
+            <Note fg={color.muted}>
+              The first two toggles affect all projects until the server restarts. Set plugin options in
+              opencode.json(c) to keep them.
+            </Note>
           </box>
         )}
       </scrollbox>
 
       {!unavailable() && (busy() || notice()) ? (
         <box marginTop={1} flexShrink={0}>
-          <text fg={busy() ? color.muted : notice()?.tone === "error" ? color.error : notice()?.tone === "warn" ? color.warn : color.ok} wrapMode="word">
-            {busy() ? "Applying change…" : notice()?.tone === "error"
-              ? tab() === "Overview" ? "Change failed. Details above." : "Change failed. See Overview for details."
-              : notice()!.message}
+          <text
+            fg={
+              busy()
+                ? color.muted
+                : notice()?.tone === "error"
+                  ? color.error
+                  : notice()?.tone === "warn"
+                    ? color.warn
+                    : color.ok
+            }
+            wrapMode="word"
+          >
+            {busy()
+              ? "Applying change…"
+              : notice()?.tone === "error"
+                ? tab() === "Overview"
+                  ? "Change failed. Details above."
+                  : "Change failed. See Overview for details."
+                : notice()!.message}
           </text>
         </box>
-      ) : <box />}
+      ) : (
+        <box />
+      )}
       <box flexDirection="column" marginTop={1} flexShrink={0}>
         <text fg={color.muted}>←→/Tab tabs · ↑↓ {tab() === "Controls" ? "select" : "scroll"}</text>
         <text fg={color.muted}>{tab() === "Controls" ? "Enter/Space change" : "PgUp/PgDn page · Home/End ends"}</text>

@@ -55,8 +55,7 @@ function stopChild(child: ChildProcess): Promise<void> {
     const t = setTimeout(() => {
       try {
         child.kill("SIGKILL")
-      } catch {
-      }
+      } catch {}
     }, 8_000)
     child.on("close", () => {
       clearTimeout(t)
@@ -80,8 +79,7 @@ async function waitHealth(baseUrl: string, sandbox: Sandbox, deadline: number): 
         let json: any = null
         try {
           json = JSON.parse(text)
-        } catch {
-        }
+        } catch {}
         if (p === "/global/health" && (json?.healthy === true || typeof json?.version === "string")) return
         if (p === "/api/status" && typeof json?.pid === "number" && typeof json?.version === "string") return
         if (res.ok && json) return
@@ -156,11 +154,15 @@ async function probeV1(bin: string): Promise<void> {
   const port = await freePort()
   const logPath = path.join(sandbox.root, "serve.log")
   const logFd = fs.openSync(logPath, "w")
-  const child = spawn(bin, ["serve", "--hostname", "127.0.0.1", "--port", String(port), "--print-logs", "--log-level", "DEBUG"], {
-    cwd: sandbox.project,
-    env: sandbox.env,
-    stdio: ["ignore", logFd, logFd],
-  })
+  const child = spawn(
+    bin,
+    ["serve", "--hostname", "127.0.0.1", "--port", String(port), "--print-logs", "--log-level", "DEBUG"],
+    {
+      cwd: sandbox.project,
+      env: sandbox.env,
+      stdio: ["ignore", logFd, logFd],
+    },
+  )
   fs.closeSync(logFd)
   const baseUrl = `http://127.0.0.1:${port}`
   try {

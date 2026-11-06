@@ -16,18 +16,18 @@ nothing durable to retain can produce no output.
 
 In `memory_inspect`, check:
 
-| Field | What it tells you |
-|---|---|
-| `read_version`, `memory_root` | Which memory version and workspace this conversation uses |
-| `pipeline_v1`, `pipeline_v2` | Progress for each memory store present |
-| `stage1_outputs`, `stage1_jobs` | How much extraction has completed and whether jobs are waiting or failing |
-| `phase2_status`, `phase2_last_error` | Whether consolidation has run, is waiting, or failed |
-| `pipeline_v1_phase2_last_error`, `pipeline_v2_phase2_last_error` and corresponding `phase2_retry_at` fields | Each writer's consolidation failure and retry time, including the shadow writer |
-| `v2_not_ready_reason`, `v2_summary_bytes` | Why Memory V2 is not ready, and its summary size in UTF-8 bytes, regardless of the selected read version |
-| `discovery` | Whether the plugin could find past conversations |
-| `v2_discovery_source`, `v2_discovery_warning` | OpenCode 2 listing source: `service`/`context` for global discovery, `observed` for a limited fallback, or `not_checked`; the warning includes the failure reason |
-| `config_warnings`, effective options | What configuration actually took effect |
-| `agent_config` and agent health | Whether memory helpers have the required setup and permissions |
+| Field                                                                                                       | What it tells you                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_version`, `memory_root`                                                                               | Which memory version and workspace this conversation uses                                                                                                         |
+| `pipeline_v1`, `pipeline_v2`                                                                                | Progress for each memory store present                                                                                                                            |
+| `stage1_outputs`, `stage1_jobs`                                                                             | How much extraction has completed and whether jobs are waiting or failing                                                                                         |
+| `phase2_status`, `phase2_last_error`                                                                        | Whether consolidation has run, is waiting, or failed                                                                                                              |
+| `pipeline_v1_phase2_last_error`, `pipeline_v2_phase2_last_error` and corresponding `phase2_retry_at` fields | Each writer's consolidation failure and retry time, including the shadow writer                                                                                   |
+| `v2_not_ready_reason`, `v2_summary_bytes`                                                                   | Why Memory V2 is not ready, and its summary size in UTF-8 bytes, regardless of the selected read version                                                          |
+| `discovery`                                                                                                 | Whether the plugin could find past conversations                                                                                                                  |
+| `v2_discovery_source`, `v2_discovery_warning`                                                               | OpenCode 2 listing source: `service`/`context` for global discovery, `observed` for a limited fallback, or `not_checked`; the warning includes the failure reason |
+| `config_warnings`, effective options                                                                        | What configuration actually took effect                                                                                                                           |
+| `agent_config` and agent health                                                                             | Whether memory helpers have the required setup and permissions                                                                                                    |
 
 To try a shorter wait, set the plugin option `min_rollout_idle_hours: 1`
 (the minimum) and restart the server. On OpenCode 2, **Consolidate now** skips
@@ -35,19 +35,19 @@ the consolidation cooldown but still respects session eligibility.
 
 ## Common symptoms
 
-| Symptom | Check or action |
-|---|---|
-| Config changed, but behavior did not | Verify the options are inside the plugin entry and restart the server, including a shared or IDE-managed server. Inspect effective values and warnings. |
-| Switched to Memory V2, but still see Memory V1 | Start a new conversation. Existing sessions keep the memory version selected on their first memory use, even across restarts. |
-| No `MEMORY.md` in `memories_v2/` | Expected: Memory V2 uses a summary and recaps, without a handbook. |
-| Memory V2 summary starts with `v1` | That first line is the summary **file-format marker**, not the selected memory behavior. Check `read_version` instead. |
-| `v2_ready` stays false | Read `v2_not_ready_reason` and `v2_summary_bytes`. Memory V2 needs a readable, valid summary and one successful consolidation consuming at least 20 distinct sessions by default. See [readiness](memory-versions.md#2-check-readiness-and-the-new-summary). |
-| `discovery` failed or the panel says **Unavailable** | Check OpenCode's server as described below. Existing memory can still be recalled. |
-| `discovery` says `ok`, but `v2_discovery_source` is `observed` | Only this process's observed sessions were listed. Check `v2_discovery_warning` for the global discovery failure; the memory panel also reports it. |
-| Extraction errors mention rate limits or usage limits | Check `provider_capacity_backoff` and retry times. Capacity errors retry after about an hour when quota returns; `other_exhausted` indicates other exhausted failures. On OpenCode 2, add [backup models](configuration.md#backup-models) to keep learning while one model is out of quota. |
-| Consolidation never completes | Read each writer's `pipeline_v1_phase2_last_error` / `pipeline_v2_phase2_last_error` and agent health. Failed artifacts leave workspace changes for a later retry. |
-| Codex sharing uses the wrong store | Exchange follows `$CODEX_HOME/config.toml` `memories.version`, not a `--profile` file, project config, or `codex -c` override. See [Integrations](integrations.md). |
-| Retrieval tools are missing, or the agent says they are not in this runtime | Check `use_memories` and `dedicated_tools`. On OpenCode 2 they are normal tools, not tools inside `execute`. Maintenance tools remain available. Restart the server after upgrading the plugin. |
+| Symptom                                                                     | Check or action                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Config changed, but behavior did not                                        | Verify the options are inside the plugin entry and restart the server, including a shared or IDE-managed server. Inspect effective values and warnings.                                                                                                                                     |
+| Switched to Memory V2, but still see Memory V1                              | Start a new conversation. Existing sessions keep the memory version selected on their first memory use, even across restarts.                                                                                                                                                               |
+| No `MEMORY.md` in `memories_v2/`                                            | Expected: Memory V2 uses a summary and recaps, without a handbook.                                                                                                                                                                                                                          |
+| Memory V2 summary starts with `v1`                                          | That first line is the summary **file-format marker**, not the selected memory behavior. Check `read_version` instead.                                                                                                                                                                      |
+| `v2_ready` stays false                                                      | Read `v2_not_ready_reason` and `v2_summary_bytes`. Memory V2 needs a readable, valid summary and one successful consolidation consuming at least 20 distinct sessions by default. See [readiness](memory-versions.md#2-check-readiness-and-the-new-summary).                                |
+| `discovery` failed or the panel says **Unavailable**                        | Check OpenCode's server as described below. Existing memory can still be recalled.                                                                                                                                                                                                          |
+| `discovery` says `ok`, but `v2_discovery_source` is `observed`              | Only this process's observed sessions were listed. Check `v2_discovery_warning` for the global discovery failure; the memory panel also reports it.                                                                                                                                         |
+| Extraction errors mention rate limits or usage limits                       | Check `provider_capacity_backoff` and retry times. Capacity errors retry after about an hour when quota returns; `other_exhausted` indicates other exhausted failures. On OpenCode 2, add [backup models](configuration.md#backup-models) to keep learning while one model is out of quota. |
+| Consolidation never completes                                               | Read each writer's `pipeline_v1_phase2_last_error` / `pipeline_v2_phase2_last_error` and agent health. Failed artifacts leave workspace changes for a later retry.                                                                                                                          |
+| Codex sharing uses the wrong store                                          | Exchange follows `$CODEX_HOME/config.toml` `memories.version`, not a `--profile` file, project config, or `codex -c` override. See [Integrations](integrations.md).                                                                                                                         |
+| Retrieval tools are missing, or the agent says they are not in this runtime | Check `use_memories` and `dedicated_tools`. On OpenCode 2 they are normal tools, not tools inside `execute`. Maintenance tools remain available. Restart the server after upgrading the plugin.                                                                                             |
 
 ## Check OpenCode's server
 

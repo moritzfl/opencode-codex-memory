@@ -31,24 +31,36 @@ describe("withHostTimeout", () => {
 describe("hostSessionLiveness", () => {
   it("treats 404 as gone and other outcomes as live or unknown", async () => {
     expect(
-      await hostSessionLiveness({
-        session: { get: async () => ({ response: { status: 404 } }) },
-      } as never, "ses_gone"),
+      await hostSessionLiveness(
+        {
+          session: { get: async () => ({ response: { status: 404 } }) },
+        } as never,
+        "ses_gone",
+      ),
     ).toBe("gone")
     expect(
-      await hostSessionLiveness({
-        session: { get: async () => ({ error: { name: "NotFoundError" } }) },
-      } as never, "ses_gone_name"),
+      await hostSessionLiveness(
+        {
+          session: { get: async () => ({ error: { name: "NotFoundError" } }) },
+        } as never,
+        "ses_gone_name",
+      ),
     ).toBe("gone")
     expect(
-      await hostSessionLiveness({
-        session: { get: async () => ({ data: { id: "ses_live" }, response: { status: 200 } }) },
-      } as never, "ses_live"),
+      await hostSessionLiveness(
+        {
+          session: { get: async () => ({ data: { id: "ses_live" }, response: { status: 200 } }) },
+        } as never,
+        "ses_live",
+      ),
     ).toBe("live")
     expect(
-      await hostSessionLiveness({
-        session: { get: async () => ({ error: { status: 500 } }) },
-      } as never, "ses_err"),
+      await hostSessionLiveness(
+        {
+          session: { get: async () => ({ error: { status: 500 } }) },
+        } as never,
+        "ses_err",
+      ),
     ).toBe("unknown")
     expect(await hostSessionLiveness({ session: {} } as never, "ses_none")).toBe("unknown")
   })

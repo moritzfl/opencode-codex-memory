@@ -51,7 +51,10 @@ describe("fake-subagent write pipeline", () => {
           messages: async () => ({
             data: [
               { info: { role: "user" }, parts: [{ type: "text", text: "Use the durable CSV parser convention." }] },
-              { info: { role: "assistant" }, parts: [{ type: "text", text: "Implemented the parser with strict typed rows." }] },
+              {
+                info: { role: "assistant" },
+                parts: [{ type: "text", text: "Implemented the parser with strict typed rows." }],
+              },
             ],
           }),
           create: async (request: { body: { title?: string } }) => {
@@ -93,11 +96,15 @@ describe("fake-subagent write pipeline", () => {
     } as any)
 
     const store = new MemoryStore()
-    await runPhase1(store, {
-      ...DEFAULT_PHASE1_OPTIONS,
-      maxClaimed: 1,
-      extractModel: "test/extractor",
-    }, async () => ({ ok: true }))
+    await runPhase1(
+      store,
+      {
+        ...DEFAULT_PHASE1_OPTIONS,
+        maxClaimed: 1,
+        extractModel: "test/extractor",
+      },
+      async () => ({ ok: true }),
+    )
 
     expect(store.stage1Outputs()).toMatchObject([
       {

@@ -15,8 +15,7 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
 })
 
 const OUTPUT = {
@@ -195,24 +194,29 @@ describe("V2 summary validation diagnostics", () => {
       expect(isValidV2Summary(summary)).toBe(false)
     }
     expect(validateV2Summary("\uFEFF" + valid)).toMatchObject({
-      ok: false, reason: "summary must start with the exact line 'v1' (UTF-8 BOM detected)",
+      ok: false,
+      reason: "summary must start with the exact line 'v1' (UTF-8 BOM detected)",
     })
   })
 
   it("rejects missing exact headings but accepts oversized structurally valid summaries", () => {
     const { validateV2Summary, isValidV2Summary } = require("../src/workspace.js")
     expect(validateV2Summary(valid.replace("## General Tips", "## General tips"))).toMatchObject({
-      ok: false, reason: "missing required headings: ## General Tips",
+      ok: false,
+      reason: "missing required headings: ## General Tips",
     })
     expect(validateV2Summary(valid.padEnd(9999, "x"))).toMatchObject({ ok: true, bytes: 9999, reason: null })
     for (const summary of [valid.padEnd(10000, "x"), valid + "ö".repeat(5000)]) {
       const bytes = Buffer.byteLength(summary)
       expect(validateV2Summary(summary)).toEqual({
-        ok: true, bytes, reason: null,
+        ok: true,
+        bytes,
+        reason: null,
       })
       expect(isValidV2Summary(summary)).toBe(true)
       expect(validateV2Summary(summary.replace("## General Tips", "## General tips"))).toMatchObject({
-        ok: false, reason: "missing required headings: ## General Tips",
+        ok: false,
+        reason: "missing required headings: ## General Tips",
       })
     }
   })
@@ -286,9 +290,10 @@ describe("validateConsolidationArtifacts", () => {
     fs.writeFileSync(path.join(root, "memory_summary.md"), "v1\n\n## User Profile\n")
     const invalid = validateConsolidationArtifactsForVersion(root, "v2")
     expect(invalid.ok).toBe(false)
-    if (!invalid.ok) expect(invalid.reason).toBe(
-      "invalid v2 memory summary: missing required headings: ## User preferences, ## General Tips, ## What's in Memory",
-    )
+    if (!invalid.ok)
+      expect(invalid.reason).toBe(
+        "invalid v2 memory summary: missing required headings: ## User preferences, ## General Tips, ## What's in Memory",
+      )
   })
 
   it("rejects a directory named MEMORY.md", () => {

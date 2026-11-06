@@ -69,7 +69,14 @@ export const pluginOptions: PluginOptionsState = {
 
 /** Splits an extract_model / consolidation_model value into its fallback chain. */
 export function modelList(value?: string): string[] {
-  return [...new Set((value ?? "").split(",").map((model) => model.trim()).filter(Boolean))]
+  return [
+    ...new Set(
+      (value ?? "")
+        .split(",")
+        .map((model) => model.trim())
+        .filter(Boolean),
+    ),
+  ]
 }
 
 export function resetPluginOptions(): void {

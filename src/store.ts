@@ -53,13 +53,11 @@ function clearJobTables(db: Database): void {
     db.run("DELETE FROM memory_jobs")
     db.run("DELETE FROM memory_citation_usage")
     db.run("UPDATE consolidation_progress SET max_thread_count = 0")
-    db
-      .prepare(
-        `INSERT INTO memory_jobs
+    db.prepare(
+      `INSERT INTO memory_jobs
           (kind, job_key, status, finished_at, last_error, retry_remaining, last_success_watermark)
          VALUES ('memory_consolidate_global', 'global', 'done', ?, NULL, ?, 0)`,
-      )
-      .run(nowSec(), DEFAULT_RETRY_REMAINING)
+    ).run(nowSec(), DEFAULT_RETRY_REMAINING)
   }).immediate()
 }
 
@@ -78,8 +76,9 @@ export function clearAllVersionMemoryData(): void {
 
 /** Include inactive existing stores for deletion, reset guards and diagnostics. */
 export function existingMemoryStores(): MemoryStore[] {
-  return MEMORY_VERSIONS.filter((version) => version === "v1" || fs.existsSync(memoryDbPath(version)))
-    .map((version) => withMemoryVersion(version, () => new MemoryStore()))
+  return MEMORY_VERSIONS.filter((version) => version === "v1" || fs.existsSync(memoryDbPath(version))).map((version) =>
+    withMemoryVersion(version, () => new MemoryStore()),
+  )
 }
 
 function newId(): string {
@@ -138,9 +137,7 @@ export class MemoryStore {
   }
 
   hasStage1Output(sessionId: string): boolean {
-    return this.db
-      .prepare("SELECT 1 FROM memory_stage1_outputs WHERE session_id = ?")
-      .get(sessionId) !== null
+    return this.db.prepare("SELECT 1 FROM memory_stage1_outputs WHERE session_id = ?").get(sessionId) !== null
   }
 
   /**
@@ -190,7 +187,15 @@ export class MemoryStore {
            cwd = excluded.cwd,
            generated_at = excluded.generated_at`,
       )
-      .run(out.session_id, out.source_updated_at, out.raw_memory, out.rollout_summary, out.rollout_slug, out.cwd ?? null, out.generated_at)
+      .run(
+        out.session_id,
+        out.source_updated_at,
+        out.raw_memory,
+        out.rollout_summary,
+        out.rollout_slug,
+        out.cwd ?? null,
+        out.generated_at,
+      )
     return true
   }
 
@@ -204,9 +209,11 @@ export class MemoryStore {
     const stmt = this.db.prepare(
       "UPDATE memory_stage1_outputs SET usage_count = usage_count + 1, last_usage = ? WHERE session_id = ?",
     )
-    this.db.transaction(() => {
-      for (const id of sessionIds) stmt.run(ts, id)
-    }).immediate()
+    this.db
+      .transaction(() => {
+        for (const id of sessionIds) stmt.run(ts, id)
+      })
+      .immediate()
   }
 
   /**
@@ -227,20 +234,24 @@ export class MemoryStore {
       "UPDATE memory_stage1_outputs SET usage_count = usage_count + 1, last_usage = ? WHERE session_id = ?",
     )
     const ts = now()
-    this.db.transaction(() => {
-      for (const citedSessionId of ids) {
-        const result = insert.run(sessionId, assistantMessageId, citedSessionId, ts)
-        if (result.changes === 0) continue
-        const updated = update.run(ts, citedSessionId)
-        if (updated.changes > 0) {
-          fresh.push(citedSessionId)
-        } else {
-          this.db
-            .prepare("DELETE FROM memory_citation_usage WHERE session_id = ? AND assistant_message_id = ? AND cited_session_id = ?")
-            .run(sessionId, assistantMessageId, citedSessionId)
+    this.db
+      .transaction(() => {
+        for (const citedSessionId of ids) {
+          const result = insert.run(sessionId, assistantMessageId, citedSessionId, ts)
+          if (result.changes === 0) continue
+          const updated = update.run(ts, citedSessionId)
+          if (updated.changes > 0) {
+            fresh.push(citedSessionId)
+          } else {
+            this.db
+              .prepare(
+                "DELETE FROM memory_citation_usage WHERE session_id = ? AND assistant_message_id = ? AND cited_session_id = ?",
+              )
+              .run(sessionId, assistantMessageId, citedSessionId)
+          }
         }
-      }
-    }).immediate()
+      })
+      .immediate()
     return fresh
   }
 
@@ -254,7 +265,9 @@ export class MemoryStore {
     const claimed: Stage1Claim[] = []
     const claimOne = this.db.transaction((s: ClaimableSession, ownershipToken: string, lease: number): boolean => {
       const activeRow = this.db
-        .prepare("SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' AND status='running' AND (lease_until IS NULL OR lease_until > ?)")
+        .prepare(
+          "SELECT COUNT(*) AS c FROM memory_jobs WHERE kind='memory_stage1' AND status='running' AND (lease_until IS NULL OR lease_until > ?)",
+        )
         .get(nowSec()) as { c: number }
       if (activeRow.c >= claimCap) return false
       // Mirrors codex try_claim_stage1_job: a newer input watermark (session
@@ -305,38 +318,46 @@ export class MemoryStore {
     return claimed
   }
 
-  markStage1Succeeded(sessionId: string, ownershipToken: string, out: Omit<Stage1Output, "usage_count" | "last_usage">): void {
-    this.db.transaction(() => {
-      const res = this.db
-        .prepare(
-          `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
+  markStage1Succeeded(
+    sessionId: string,
+    ownershipToken: string,
+    out: Omit<Stage1Output, "usage_count" | "last_usage">,
+  ): void {
+    this.db
+      .transaction(() => {
+        const res = this.db
+          .prepare(
+            `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
             last_success_watermark=?, retry_at=NULL
            WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
-        )
-        .run(nowSec(), out.source_updated_at, sessionId, ownershipToken)
-      // Ownership lost (lease expired, job re-claimed): do not clobber the new
-      // owner's output. Mirrors codex mark_stage1_job_succeeded.
-      if (res.changes > 0) {
-        this.upsertStage1Output(out)
-        this.enqueueGlobalConsolidation(out.source_updated_at)
-      }
-    }).immediate()
+          )
+          .run(nowSec(), out.source_updated_at, sessionId, ownershipToken)
+        // Ownership lost (lease expired, job re-claimed): do not clobber the new
+        // owner's output. Mirrors codex mark_stage1_job_succeeded.
+        if (res.changes > 0) {
+          this.upsertStage1Output(out)
+          this.enqueueGlobalConsolidation(out.source_updated_at)
+        }
+      })
+      .immediate()
   }
 
   /** Extraction succeeded but produced nothing worth keeping: finish the job and drop any stale output. */
   markStage1SucceededNoOutput(sessionId: string, ownershipToken: string, sourceUpdatedAt: number): void {
-    this.db.transaction(() => {
-      const res = this.db
-        .prepare(
-          `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
+    this.db
+      .transaction(() => {
+        const res = this.db
+          .prepare(
+            `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL,
             last_success_watermark=?, retry_at=NULL
            WHERE kind='memory_stage1' AND job_key=? AND status='running' AND ownership_token=?`,
-        )
-        .run(nowSec(), sourceUpdatedAt, sessionId, ownershipToken)
-      if (res.changes === 0) return
-      const deleted = this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
-      if (deleted.changes > 0) this.enqueueGlobalConsolidation(sourceUpdatedAt)
-    }).immediate()
+          )
+          .run(nowSec(), sourceUpdatedAt, sessionId, ownershipToken)
+        if (res.changes === 0) return
+        const deleted = this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+        if (deleted.changes > 0) this.enqueueGlobalConsolidation(sourceUpdatedAt)
+      })
+      .immediate()
   }
 
   markStage1Failed(sessionId: string, ownershipToken: string, error: unknown): void {
@@ -393,12 +414,14 @@ export class MemoryStore {
       `UPDATE memory_jobs SET status='pending', retry_remaining=?
        WHERE kind='memory_stage1' AND job_key=? AND status='failed'`,
     )
-    this.db.transaction(() => {
-      for (const row of rows) {
-        if (!isProviderCapacityError(row.last_error)) continue
-        n += stmt.run(DEFAULT_RETRY_REMAINING, row.job_key).changes
-      }
-    }).immediate()
+    this.db
+      .transaction(() => {
+        for (const row of rows) {
+          if (!isProviderCapacityError(row.last_error)) continue
+          n += stmt.run(DEFAULT_RETRY_REMAINING, row.job_key).changes
+        }
+      })
+      .immediate()
     return n
   }
 
@@ -459,15 +482,13 @@ export class MemoryStore {
       .transaction((): Phase2ClaimResult => {
         const row = this.db
           .prepare("SELECT * FROM memory_jobs WHERE kind='memory_consolidate_global' AND job_key='global'")
-          .get() as
-          | {
-              status: string
-              lease_until: number | null
-              retry_at: number | null
-              finished_at: number | null
-              last_error: string | null
-            }
-          | null
+          .get() as {
+          status: string
+          lease_until: number | null
+          retry_at: number | null
+          finished_at: number | null
+          last_error: string | null
+        } | null
         if (!row) {
           this.db
             .prepare(
@@ -530,7 +551,10 @@ export class MemoryStore {
    * run consumed (selected_for_phase2), so pruning cannot delete inputs that
    * still back the consolidated artifacts.
    */
-  markPhase2Succeeded(ownershipToken: string, selected: Pick<Stage1Output, "session_id" | "source_updated_at">[] = []): void {
+  markPhase2Succeeded(
+    ownershipToken: string,
+    selected: Pick<Stage1Output, "session_id" | "source_updated_at">[] = [],
+  ): void {
     // codex stores the completion watermark = max source_updated_at consumed;
     // the 6h cooldown is keyed on finished_at, not on this value.
     const watermark = selected.reduce((max, s) => Math.max(max, s.source_updated_at), 0)
@@ -538,31 +562,39 @@ export class MemoryStore {
     // mark_global_phase2_job_succeeded does the same): a crash between them
     // must not leave a done job whose retention flags still describe the
     // previous run — pruning could then delete inputs backing the artifacts.
-    this.db.transaction(() => {
-      const res = this.db
-        .prepare(
-          `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL, retry_remaining=?,
+    this.db
+      .transaction(() => {
+        const res = this.db
+          .prepare(
+            `UPDATE memory_jobs SET status='done', finished_at=?, lease_until=NULL, last_error=NULL, retry_remaining=?,
              last_success_watermark=MAX(COALESCE(last_success_watermark, 0), ?), retry_at=NULL
            WHERE kind='memory_consolidate_global' AND job_key='global' AND ownership_token=? AND status='running'`,
+          )
+          .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
+        if (res.changes === 0) return
+        this.db
+          .prepare("UPDATE consolidation_progress SET max_thread_count = MAX(max_thread_count, ?)")
+          .run(new Set(selected.map((s) => s.session_id)).size)
+        this.db.run(
+          "UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL",
         )
-        .run(nowSec(), DEFAULT_RETRY_REMAINING, watermark, ownershipToken)
-      if (res.changes === 0) return
-      this.db.prepare("UPDATE consolidation_progress SET max_thread_count = MAX(max_thread_count, ?)")
-        .run(new Set(selected.map((s) => s.session_id)).size)
-      this.db.run("UPDATE memory_stage1_outputs SET selected_for_phase2 = 0, selected_for_phase2_source_updated_at = NULL")
-      const mark = this.db.prepare(
-        `UPDATE memory_stage1_outputs
+        const mark = this.db.prepare(
+          `UPDATE memory_stage1_outputs
          SET selected_for_phase2 = 1, selected_for_phase2_source_updated_at = ?
          WHERE session_id = ? AND source_updated_at = ?`,
-      )
-      for (const s of selected) mark.run(s.source_updated_at, s.session_id, s.source_updated_at)
-    }).immediate()
+        )
+        for (const s of selected) mark.run(s.source_updated_at, s.session_id, s.source_updated_at)
+      })
+      .immediate()
   }
 
   /** High-water mark of distinct sessions consumed by one successful run. */
   maxConsolidatedThreadCount(): number {
-    return (this.db.prepare("SELECT max_thread_count FROM consolidation_progress WHERE singleton = 1")
-      .get() as { max_thread_count: number }).max_thread_count
+    return (
+      this.db.prepare("SELECT max_thread_count FROM consolidation_progress WHERE singleton = 1").get() as {
+        max_thread_count: number
+      }
+    ).max_thread_count
   }
 
   /**
@@ -588,19 +620,17 @@ export class MemoryStore {
          WHERE kind='memory_consolidate_global' AND job_key='global'`,
       )
       .get() as {
-        status: string
-        started_at: number | null
-        finished_at: number | null
-        last_error: string | null
-        retry_at: number | null
-        lease_until: number | null
-        last_success_watermark: number | null
-      } | null
+      status: string
+      started_at: number | null
+      finished_at: number | null
+      last_error: string | null
+      retry_at: number | null
+      lease_until: number | null
+      last_success_watermark: number | null
+    } | null
     if (!row) return null
     const cleanSuccess =
-      row.last_error === null &&
-      row.finished_at !== null &&
-      (row.status === "done" || row.status === "pending")
+      row.last_error === null && row.finished_at !== null && (row.status === "done" || row.status === "pending")
     // Codex initializes pending global jobs with watermark 0, so zero proves a
     // success only while the row itself is a clean completed attempt.
     const watermark =
@@ -761,17 +791,18 @@ export class MemoryStore {
    * job, then enqueue forgetting if phase 2 had consumed that output.
    */
   deleteSessionMemory(sessionId: string): boolean {
-    return this.db.transaction((): boolean => {
-      const existing = this.db
-        .prepare("SELECT selected_for_phase2 FROM memory_stage1_outputs WHERE session_id = ?")
-        .get(sessionId) as { selected_for_phase2: number } | null
-      const deleted = this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
-      this.db.prepare("DELETE FROM memory_jobs WHERE kind='memory_stage1' AND job_key = ?").run(sessionId)
-      const shouldConsolidate =
-        deleted.changes > 0 && existing !== null && existing.selected_for_phase2 !== 0
-      if (shouldConsolidate) this.enqueueGlobalConsolidation(now())
-      return shouldConsolidate
-    }).immediate()
+    return this.db
+      .transaction((): boolean => {
+        const existing = this.db
+          .prepare("SELECT selected_for_phase2 FROM memory_stage1_outputs WHERE session_id = ?")
+          .get(sessionId) as { selected_for_phase2: number } | null
+        const deleted = this.db.prepare("DELETE FROM memory_stage1_outputs WHERE session_id = ?").run(sessionId)
+        this.db.prepare("DELETE FROM memory_jobs WHERE kind='memory_stage1' AND job_key = ?").run(sessionId)
+        const shouldConsolidate = deleted.changes > 0 && existing !== null && existing.selected_for_phase2 !== 0
+        if (shouldConsolidate) this.enqueueGlobalConsolidation(now())
+        return shouldConsolidate
+      })
+      .immediate()
   }
 
   /**
@@ -878,13 +909,13 @@ export class MemoryStore {
          ORDER BY COALESCE(finished_at, started_at, 0) DESC`,
       )
       .all() as {
-        session_id: string
-        last_error: string
-        retry_at: number | null
-        status: string
-        retry_remaining: number
-        finished_at: number | null
-      }[]
+      session_id: string
+      last_error: string
+      retry_at: number | null
+      status: string
+      retry_remaining: number
+      finished_at: number | null
+    }[]
     const by_failure_class = { backoff: 0, provider_capacity: 0, other_exhausted: 0, due: 0 }
     const live: Stage1RecentError[] = []
     let stale_exhausted = 0

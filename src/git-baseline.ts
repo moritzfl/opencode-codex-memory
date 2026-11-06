@@ -61,8 +61,7 @@ function workdirHash(dir: string, filepath: string): string | null {
 function removeDiffArtifact(dir: string): void {
   try {
     fs.unlinkSync(path.join(dir, DIFF_ARTIFACT))
-  } catch {
-  }
+  } catch {}
 }
 
 function baselineVersionPath(dir: string): string {
@@ -223,8 +222,7 @@ function collectOversizedPaths(dir: string): string[] {
       } else if (entry.isFile()) {
         try {
           if (fs.lstatSync(full).size > MAX_BASELINE_FILE_BYTES) out.push(rel)
-        } catch {
-        }
+        } catch {}
       }
     }
   }
@@ -259,9 +257,7 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
     await initEmptyBaseline(dir)
     matrix = await statusMatrix(dir)
   }
-  const changedRows = matrix.filter(
-    ([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT,
-  )
+  const changedRows = matrix.filter(([filepath, head, workdir]) => head !== workdir && filepath !== DIFF_ARTIFACT)
   const changes: WorkspaceChange[] = changedRows.map(([filepath, head, workdir]) => {
     if (head === 0) return { status: "A", path: filepath }
     if (workdir === 0) return { status: "D", path: filepath }

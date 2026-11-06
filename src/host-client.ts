@@ -204,9 +204,19 @@ export async function hostSessionLiveness(
   id: string,
   timeoutMs = SESSION_LIVE_TIMEOUT_MS,
 ): Promise<SessionLiveness> {
-  const session = (client as {
-    session?: { get?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<{ response?: { status?: number }; error?: unknown }> }
-  } | null | undefined)?.session
+  const session = (
+    client as
+      | {
+          session?: {
+            get?: (opts: {
+              path: { id: string }
+              signal?: AbortSignal
+            }) => Promise<{ response?: { status?: number }; error?: unknown }>
+          }
+        }
+      | null
+      | undefined
+  )?.session
   if (typeof session?.get !== "function") return "unknown"
   const controller = new AbortController()
   try {

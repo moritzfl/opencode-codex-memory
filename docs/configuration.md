@@ -23,10 +23,10 @@ Options go inside the plugin object's `options` field:
     {
       "package": "opencode-codex-memory@0.10.1",
       "options": {
-        "min_rollout_idle_hours": 2
-      }
-    }
-  ]
+        "min_rollout_idle_hours": 2,
+      },
+    },
+  ],
 }
 ```
 
@@ -37,9 +37,7 @@ Options are the second element of a `[package, options]` pair:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    ["opencode-codex-memory@0.10.1", { "min_rollout_idle_hours": 2 }]
-  ]
+  "plugin": [["opencode-codex-memory@0.10.1", { "min_rollout_idle_hours": 2 }]]
 }
 ```
 
@@ -118,12 +116,12 @@ a second independent learning pipeline and therefore additional model calls.
 
 ## Learning and recall
 
-| Option | Default | Effect |
-|---|---|---|
-| `generate_memories` | `true` | Run background extraction and consolidation. Set to `false` to pause learning while keeping existing memory available. |
-| `use_memories` | `true` | Inject the summary and make memory retrieval/note tools available. Setting this to `false` does not stop background learning. |
-| `dedicated_tools` | `true` | Expose `memory_read`, `memory_search`, `memory_list`, and `memory_add_note` as normal tools. On OpenCode 2 they stay off the Code Mode `execute` list. See [File-based access](#file-based-access). |
-| `disable_on_external_context` | `false` | Exclude sessions that used web search, fetch, or MCP tools from learning. |
+| Option                        | Default | Effect                                                                                                                                                                                              |
+| ----------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generate_memories`           | `true`  | Run background extraction and consolidation. Set to `false` to pause learning while keeping existing memory available.                                                                              |
+| `use_memories`                | `true`  | Inject the summary and make memory retrieval/note tools available. Setting this to `false` does not stop background learning.                                                                       |
+| `dedicated_tools`             | `true`  | Expose `memory_read`, `memory_search`, `memory_list`, and `memory_add_note` as normal tools. On OpenCode 2 they stay off the Code Mode `execute` list. See [File-based access](#file-based-access). |
+| `disable_on_external_context` | `false` | Exclude sessions that used web search, fetch, or MCP tools from learning.                                                                                                                           |
 
 To stop both learning and recall, set both `generate_memories` and
 `use_memories` to `false`. To exclude just one conversation from future
@@ -135,23 +133,23 @@ These select **Memory V1/V2**, independently of your OpenCode host version.
 See [Memory V1 and Memory V2](memory-versions.md) for the comparison and
 switching walkthrough.
 
-| Option | Default | Effect |
-|---|---|---|
-| `version` | `"v1"` | Memory version for new sessions; also the only writer when `dual_write` is off. Accepts `"v1"` or `"v2"`. Existing sessions retain their selected memory version. |
-| `dual_write` | `false` | Run both memory learning pipelines independently while sessions read their selected version. Useful for trying Memory V2 with a current Memory V1 fallback. |
+| Option       | Default | Effect                                                                                                                                                            |
+| ------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`    | `"v1"`  | Memory version for new sessions; also the only writer when `dual_write` is off. Accepts `"v1"` or `"v2"`. Existing sessions retain their selected memory version. |
+| `dual_write` | `false` | Run both memory learning pipelines independently while sessions read their selected version. Useful for trying Memory V2 with a current Memory V1 fallback.       |
 
 ## Frequency and retention
 
 “Rollout” in option names means a past conversation or session. Numeric
 options are clamped to the following integer ranges.
 
-| Option | Default | Range | Effect |
-|---|---|---|---|
-| `min_rollout_idle_hours` | `6` | 1–48 | Minimum inactivity before a session is eligible for extraction. |
-| `max_rollout_age_days` | `10` | 0–90 | Ignore sessions older than this during extraction. |
-| `max_rollouts_per_startup` | `2` | 1–128 | Maximum sessions extracted per pass, per active memory writer. |
-| `max_raw_memories_for_consolidation` | `256` | 1–4096 | Maximum extracted session records selected for one consolidation pass. Applies to both memory versions. |
-| `max_unused_days` | `30` | 0–365 | Retention horizon for unused extracted session records. |
+| Option                               | Default | Range  | Effect                                                                                                  |
+| ------------------------------------ | ------- | ------ | ------------------------------------------------------------------------------------------------------- |
+| `min_rollout_idle_hours`             | `6`     | 1–48   | Minimum inactivity before a session is eligible for extraction.                                         |
+| `max_rollout_age_days`               | `10`    | 0–90   | Ignore sessions older than this during extraction.                                                      |
+| `max_rollouts_per_startup`           | `2`     | 1–128  | Maximum sessions extracted per pass, per active memory writer.                                          |
+| `max_raw_memories_for_consolidation` | `256`   | 1–4096 | Maximum extracted session records selected for one consolidation pass. Applies to both memory versions. |
+| `max_unused_days`                    | `30`    | 0–365  | Retention horizon for unused extracted session records.                                                 |
 
 Consolidation normally has a six-hour cooldown. OpenCode 2's
 [Consolidate now control](usage.md#memory-panel) can skip that
@@ -159,11 +157,11 @@ cooldown; sessions must still meet extraction eligibility rules.
 
 ## Storage and integrations
 
-| Option | Default | Details |
-|---|---|---|
-| `home` | OpenCode data directory | Absolute directory for all plugin databases and memory workspaces. See [Relocating memory](storage-and-privacy.md#relocating-memory). |
+| Option          | Default                                | Details                                                                                                                                                                                                                                                                           |
+| --------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `home`          | OpenCode data directory                | Absolute directory for all plugin databases and memory workspaces. See [Relocating memory](storage-and-privacy.md#relocating-memory).                                                                                                                                             |
 | `codex_interop` | `{ "import": false, "export": false }` | Exchange consolidated memory with Codex CLI. Runs for each active writer. Reads `$CODEX_HOME/config.toml` `memories.version` (`memories/` or `memories_v2/`; unset follows Codex's directory signal). See [Codex CLI sharing](integrations.md#sharing-memory-with-the-codex-cli). |
-| `claude_import` | `{ "enabled": false }` | Import Claude Code project memories. See [Claude Code import](integrations.md#importing-memory-from-claude-code). |
+| `claude_import` | `{ "enabled": false }`                 | Import Claude Code project memories. See [Claude Code import](integrations.md#importing-memory-from-claude-code).                                                                                                                                                                 |
 
 ## File-based access
 

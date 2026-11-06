@@ -83,12 +83,16 @@ export function ensureLayout(): void {
   removeMemorySymlinks(root)
   const v1 = currentMemoryVersion() === "v1"
   // Codex V2 consolidates into memory_summary.md only; it has no skills/.
-  for (const dir of v1 ? [ROLLOUT_DIR, SKILLS_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR] : [ROLLOUT_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]) {
+  for (const dir of v1
+    ? [ROLLOUT_DIR, SKILLS_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]
+    : [ROLLOUT_DIR, EXTENSIONS_DIR, ADHOC_NOTES_DIR]) {
     fs.mkdirSync(safeResolveMemoryPath(dir), { recursive: true })
   }
   if (!v1) {
     // Older releases created an empty one; never remove content.
-    try { fs.rmdirSync(safeResolveMemoryPath(SKILLS_DIR)) } catch {}
+    try {
+      fs.rmdirSync(safeResolveMemoryPath(SKILLS_DIR))
+    } catch {}
   }
   if (v1) {
     const memoryMd = safeResolveMemoryPath("MEMORY.md")
@@ -106,7 +110,12 @@ export function ensureLayout(): void {
  * a regular file and memory_summary.md must start with the exact line `v1`.
  * Invalid artifacts force a consolidator re-run and block baseline reset.
  */
-const V2_SUMMARY_HEADINGS = ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"] as const
+const V2_SUMMARY_HEADINGS = [
+  "## User Profile",
+  "## User preferences",
+  "## General Tips",
+  "## What's in Memory",
+] as const
 
 /** Codex format checks with content-free diagnostics; V2 size is bounded at injection. */
 export function validateV2Summary(summary: string): { ok: boolean; bytes: number; reason: string | null } {
@@ -126,7 +135,9 @@ export function isValidV2Summary(summary: string): boolean {
   return validateV2Summary(summary).ok
 }
 
-export function validateConsolidationArtifacts(root: string = memoryRoot()): { ok: true } | { ok: false; reason: string } {
+export function validateConsolidationArtifacts(
+  root: string = memoryRoot(),
+): { ok: true } | { ok: false; reason: string } {
   return validateConsolidationArtifactsForVersion(root, "v1")
 }
 
@@ -185,7 +196,9 @@ function truncate(text: string, limit: number): string {
 // Codex-style rollout summary file stem: <timestamp>-<shorthash>-<slug>.
 // The timestamp/hash prefix keeps names unique and chronologically sortable;
 // the slug makes them human-scannable.
-export function rolloutSummaryFileStem(o: Pick<Stage1Output, "session_id" | "source_updated_at" | "rollout_slug">): string {
+export function rolloutSummaryFileStem(
+  o: Pick<Stage1Output, "session_id" | "source_updated_at" | "rollout_slug">,
+): string {
   const ts = new Date(o.source_updated_at)
   const pad = (n: number) => String(n).padStart(2, "0")
   const timestamp = `${ts.getUTCFullYear()}-${pad(ts.getUTCMonth() + 1)}-${pad(ts.getUTCDate())}T${pad(ts.getUTCHours())}-${pad(ts.getUTCMinutes())}-${pad(ts.getUTCSeconds())}`
@@ -227,7 +240,9 @@ export function writeRolloutSummaries(outputs: Stage1Output[]): void {
   const keep = new Set(outputs.map((o) => `${rolloutSummaryFileStem(o)}.md`))
   for (const name of fs.readdirSync(dir)) {
     if (name.endsWith(".md") && !keep.has(name)) {
-      try { fs.unlinkSync(path.join(dir, name)) } catch {}
+      try {
+        fs.unlinkSync(path.join(dir, name))
+      } catch {}
     }
   }
   for (const o of outputs) {
@@ -264,7 +279,11 @@ export function pruneExtensionResources(retentionDays: number): void {
     const extDir = path.join(extensionsDir, extName)
     // lstat: never prune through a symlinked extension dir.
     let extStat
-    try { extStat = fs.lstatSync(extDir) } catch { continue }
+    try {
+      extStat = fs.lstatSync(extDir)
+    } catch {
+      continue
+    }
     if (!extStat.isDirectory()) continue
     if (!fs.existsSync(path.join(extDir, "instructions.md"))) continue
     let resDir: string
@@ -274,7 +293,11 @@ export function pruneExtensionResources(retentionDays: number): void {
       continue
     }
     let names: string[]
-    try { names = fs.readdirSync(resDir) } catch { continue }
+    try {
+      names = fs.readdirSync(resDir)
+    } catch {
+      continue
+    }
     for (const name of names) {
       if (!name.endsWith(".md")) continue
       const ts = resourceTimestamp(name)
@@ -306,8 +329,10 @@ export function writeWorkspaceDiff(diff: WorkspaceDiff): string {
     // multibyte content. Cut on the byte buffer and drop a split trailing char.
     if (Buffer.byteLength(body, "utf8") > WORKSPACE_DIFF_MAX_BYTES) {
       body =
-        Buffer.from(body, "utf8").subarray(0, WORKSPACE_DIFF_MAX_BYTES).toString("utf8").replace(/\uFFFD+$/, "") +
-        `\n[workspace diff truncated at ${WORKSPACE_DIFF_MAX_BYTES} bytes]\n`
+        Buffer.from(body, "utf8")
+          .subarray(0, WORKSPACE_DIFF_MAX_BYTES)
+          .toString("utf8")
+          .replace(/\uFFFD+$/, "") + `\n[workspace diff truncated at ${WORKSPACE_DIFF_MAX_BYTES} bytes]\n`
     }
     rendered += "\n## Diff\n\n```diff\n" + body + (body.endsWith("\n") ? "" : "\n") + "```\n"
   }

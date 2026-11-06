@@ -1,9 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import {
-  catalogVariantKeys,
-  enabledVariantKeys,
-  nearestReasoningVariant,
-} from "../src/reasoning-variant.js"
+import { catalogVariantKeys, enabledVariantKeys, nearestReasoningVariant } from "../src/reasoning-variant.js"
 
 describe("nearestReasoningVariant", () => {
   it("keeps an exact match", () => {
@@ -53,7 +49,7 @@ describe("catalogVariantKeys", () => {
         models: {
           "deepseek-v4-flash": { variants: { high: {}, max: {} } },
           "empty-efforts": { variants: {} },
-          "stripped": { name: "no variants field" },
+          stripped: { name: "no variants field" },
         },
       },
     ],

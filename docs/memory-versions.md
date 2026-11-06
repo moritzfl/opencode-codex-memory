@@ -24,13 +24,13 @@ Both versions learn from past sessions in the background, inject a small
 summary, and keep their data locally. Their difference is how they turn
 individual requests into long-term guidance.
 
-| | Memory V1 — plugin default | Memory V2 — opt-in |
-|---|---|---|
-| Main goal | Anticipate your working style from past tasks | Preserve task history and be more cautious about inferring standing preferences |
-| What the agent reads | A summary that points to a searchable handbook (`MEMORY.md`), recaps, and skills | A summary containing the memory itself, with recaps for additional evidence |
-| Standing preferences | More willing to promote task-level instructions into reusable guidance | Looks for an explicit default or evidence across distinct tasks |
-| Trade-off | Can overgeneralize a one-time request | May need more repetition or clarification; no handbook to search |
-| Workspace | `memories/` | `memories_v2/` |
+|                      | Memory V1 — plugin default                                                       | Memory V2 — opt-in                                                              |
+| -------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Main goal            | Anticipate your working style from past tasks                                    | Preserve task history and be more cautious about inferring standing preferences |
+| What the agent reads | A summary that points to a searchable handbook (`MEMORY.md`), recaps, and skills | A summary containing the memory itself, with recaps for additional evidence     |
+| Standing preferences | More willing to promote task-level instructions into reusable guidance           | Looks for an explicit default or evidence across distinct tasks                 |
+| Trade-off            | Can overgeneralize a one-time request                                            | May need more repetition or clarification; no handbook to search                |
+| Workspace            | `memories/`                                                                      | `memories_v2/`                                                                  |
 
 For example, “show me a plan before editing **this**” can become a broad
 planning preference in Memory V1. Memory V2 aims to retain it as a request
@@ -46,12 +46,12 @@ of the underlying changes, see [the design comparison](how-ai-memory-works.md#tw
 `version` chooses the default for new sessions. `dual_write` chooses whether
 one or both versions learn in the background:
 
-| Plugin options | New sessions read | Background learning writes |
-|---|---|---|
-| `"version": "v1", "dual_write": false` | Memory V1 | Memory V1 |
-| `"version": "v1", "dual_write": true` | Memory V1 | Both versions |
-| `"version": "v2", "dual_write": true` | Memory V2 | Both versions |
-| `"version": "v2", "dual_write": false` | Memory V2 | Memory V2 |
+| Plugin options                         | New sessions read | Background learning writes |
+| -------------------------------------- | ----------------- | -------------------------- |
+| `"version": "v1", "dual_write": false` | Memory V1         | Memory V1                  |
+| `"version": "v1", "dual_write": true`  | Memory V1         | Both versions              |
+| `"version": "v2", "dual_write": true`  | Memory V2         | Both versions              |
+| `"version": "v2", "dual_write": false` | Memory V2         | Memory V2                  |
 
 This table assumes `generate_memories: true`. Each conversation keeps the
 memory version selected on its first memory use, even across server restarts.

@@ -23,7 +23,7 @@ switching instructions, use [Memory V1 and Memory V2](memory-versions.md).
 
 Every conversation with a large language model starts from zero. The model has
 no idea who you are, what you built last week, or that you already told three
-previous sessions *"yes, tests must pass before you commit."* That blank-slate
+previous sessions _"yes, tests must pass before you commit."_ That blank-slate
 freshness is fine for a one-off question. It is miserable for a tool you use
 every day, where half the value is in not having to repeat yourself.
 
@@ -40,7 +40,7 @@ The central design tension is this. A model's context window is the most
 expensive resource in the system: every token you put in front of the model is
 paid for in latency and money, on every turn, forever. Raw history is huge and
 mostly noise. Memory that actually works is therefore not an accumulation
-problem; it is a *compression* problem. You distill far more than you keep,
+problem; it is a _compression_ problem. You distill far more than you keep,
 you keep far less than you saw, and you show the model only the thinnest
 useful slice by default, with a well-marked path to the rest.
 
@@ -78,11 +78,11 @@ The layers, top to bottom:
   to do that are worth repeating step by step.
 - 🟦 **Session recaps** (`rollout_summaries/`) are one-per-conversation
   detailed notes — the reference layer you open when you need the full story
-  of *that one time we debugged the deploy*.
+  of _that one time we debugged the deploy_.
 - 🟠 **Full transcripts** are the raw evidence at the very bottom — complete
   conversation logs. They are not managed by the memory system at all: they
   are owned, written, and stored by the host application (OpenCode here; the
-  Codex CLI in the original design) and are only ever *read* by the learning
+  Codex CLI in the original design) and are only ever _read_ by the learning
   pipeline, never edited. The memory system's responsibility starts one layer
   up, at the session recaps.
 
@@ -110,8 +110,8 @@ per-session records and later consolidates them into memory files, and a read
 path that injects the summary and searches deeper layers on every turn.](memory-pipeline.svg)
 
 1. **Phase 1 — extraction.** After a conversation is finished, one cheap
-   model reads the whole transcript and answers one question: *what here is
-   worth keeping?* One session in, one structured record out.
+   model reads the whole transcript and answers one question: _what here is
+   worth keeping?_ One session in, one structured record out.
 2. **Phase 2 — consolidation.** Every few hours, a second, more capable model
    merges many session records into the shared memory files, resolves
    contradictions, and prunes what went stale.
@@ -130,7 +130,7 @@ can never corrupt or block the global memory.
 ### Where the database fits
 
 Alongside the files sits one small embedded database (SQLite — a single local
-file, no server). It plays a deliberately *supporting* role, and the
+file, no server). It plays a deliberately _supporting_ role, and the
 responsibilities are split by nature of the data:
 
 - **Files hold the published knowledge.** Everything a model or a human
@@ -145,10 +145,10 @@ responsibilities are split by nature of the data:
   loop needs; session-to-file provenance; and the lease that serializes
   consolidation across multiple app windows.
 
-One nuance worth pausing on: the database stores extracted memory *content*,
+One nuance worth pausing on: the database stores extracted memory _content_,
 but it deliberately does **not** act as the retrieval index for it. Nothing is
 queried out of the database when the agent looks something up; search always
-goes through the memory folder. Rows exist to be *selected into* a
+goes through the memory folder. Rows exist to be _selected into_ a
 consolidation pass (by recency and usage), not to serve the read path. That
 separation is what keeps the markdown workspace the single source of truth
 for retrieval.
@@ -168,12 +168,12 @@ These are exactly the things a relational store is good at — atomic claims
 under concurrency, transactional state, ordered selection over time and usage
 — and exactly the things plain files are bad at. Keeping them in one embedded
 file preserves the local-first rule (nothing to run, nothing to configure)
-while keeping the file tree pure: every byte you can *search* is a document
+while keeping the file tree pure: every byte you can _search_ is a document
 you own.
 
 ## Learning Part 1: Extracting Signal from One Session
 
-Learning starts long after the conversation ended. The trigger is *idleness*:
+Learning starts long after the conversation ended. The trigger is _idleness_:
 once a session has been quiet for a configurable time (six hours by default),
 it is treated as done.
 
@@ -211,8 +211,8 @@ filtering and redaction step:
 
 The single most important instruction in the whole extraction step is that
 **doing nothing is a first-class outcome**. Before writing anything, the
-extractor asks: *will a future agent plausibly act better because of what I
-write here?* If the session was a one-off question, a generic status update,
+extractor asks: _will a future agent plausibly act better because of what I
+write here?_ If the session was a one-off question, a generic status update,
 or small talk, the correct output is an empty record — not a polite summary.
 Memory that accumulates filler teaches itself that filler is normal, and every
 downstream layer gets noisier. The gate is what keeps the bottom of the
@@ -220,7 +220,7 @@ pyramid trustworthy.
 
 ### What to keep: evidence over abstraction
 
-When something *is* worth keeping, the extractor follows a strict evidence
+When something _is_ worth keeping, the extractor follows a strict evidence
 hierarchy. User messages outrank tool outputs, which outrank the assistant's
 own words. The reason is subtle but important: an assistant's summary of what
 happened is a claim; a user's correction is a fact. The highest-value signals
@@ -229,8 +229,8 @@ are:
 1. **Stable user preferences** — things the user repeatedly asks for,
    corrects, or interrupts to enforce. If the user had to spend keystrokes on
    something a better agent could have anticipated, that's a durable default
-   worth recording, preserved in near-verbatim wording: *when X, the user
-   said "…" → so future sessions should do Y by default.*
+   worth recording, preserved in near-verbatim wording: _when X, the user
+   said "…" → so future sessions should do Y by default._
 2. **High-leverage procedural knowledge** — hard-won shortcuts, exact
    commands, failure shields (symptom → cause → fix), repo facts that took
    real exploration to discover.
@@ -238,7 +238,7 @@ are:
    and what signal should cause a pivot.
 4. **Durable environment facts** — stable tooling habits and conventions.
 
-Equally important is what is *not* memory: generic advice, one-off impressions,
+Equally important is what is _not_ memory: generic advice, one-off impressions,
 exploratory brainstorming, and assistant proposals that were never adopted.
 Each task in the session is also classified by outcome — success, partial,
 failure, or uncertain — inferred from explicit user feedback and verification
@@ -256,9 +256,9 @@ Each qualifying session produces two artifacts with different jobs:
   routing layer for consolidation later. The rows live in the database;
   before each consolidation pass they are merged into `raw_memories.md`.
 - **A rollout summary**: a much more permissive, detailed recap of the whole
-  session, preserving evidence and epistemic status (*the user said X* vs.
-  *the assistant proposed Y* vs. *this was verified*). If this session is
-  later *published*, that recap becomes one file under `rollout_summaries/`
+  session, preserving evidence and epistemic status (_the user said X_ vs.
+  _the assistant proposed Y_ vs. _this was verified_). If this session is
+  later _published_, that recap becomes one file under `rollout_summaries/`
   — the reference layer of the pyramid.
 
 Both land only in the database at this stage, keyed by session. They are
@@ -271,7 +271,7 @@ another.
 ## Learning Part 2: Consolidating Many Sessions into One Memory
 
 Extraction produces many small, isolated records. Consolidation turns them
-into *a memory*. This is where the real intelligence of the system lives, and
+into _a memory_. This is where the real intelligence of the system lives, and
 it is deliberately given to a more capable model than extraction — cheap model
 for the per-session pass, stronger model for the global synthesis.
 
@@ -294,7 +294,7 @@ first writes a ranked subset into the memory folder:
 2. Write that subset as `rollout_summaries/*.md` and merge their raw memories
    into `raw_memories.md`. Recaps that did not make the cut are removed from
    the folder if they were there from a previous pass.
-3. Only then does the git diff run. The folder now *is* the selected set;
+3. Only then does the git diff run. The folder now _is_ the selected set;
    added, missing, and hand-edited files are the change feed the consolidator
    sees.
 
@@ -310,7 +310,7 @@ Here is the elegant part. The entire memory workspace is a private version
 control repository. After every successful consolidation, the system commits
 a baseline snapshot of all memory files. At the start of the next run, it
 computes the diff from that baseline to the current state of the files — and
-that diff *is* the consolidation input:
+that diff _is_ the consolidation input:
 
 - **Added or modified records and recaps** are the ingestion queue: new
   sessions to integrate.
@@ -351,7 +351,7 @@ in kind:
   sources — and when the truth is genuinely unclear, the uncertainty is
   recorded explicitly instead of being flattened into a false fact.
 - **Preserve wording**. This is a deep principle of the system: memory exists
-  to be *searched later*, and you can only find phrasing that was actually
+  to be _searched later_, and you can only find phrasing that was actually
   kept. Concrete error strings, exact commands, and the user's own words are
   retrieval handles; abstract paraphrase destroys them. The consolidator is
   told to keep original phrasing and only smooth enough to merge duplicates.
@@ -362,7 +362,7 @@ in kind:
 
 Like the extractor, the consolidator itself runs sandboxed: file tools only,
 scoped to the memory folder — no shell, no network, no way to touch the
-user's projects. The safety boundary is what the agent can *do*, and it can
+user's projects. The safety boundary is what the agent can _do_, and it can
 only rewrite the memory itself.
 
 ### The artifacts it maintains
@@ -385,10 +385,10 @@ Consolidation rewrites three kinds of artifacts:
    regenerated wholesale rather than patched, so a format change never strands
    stale structure. Inside, it carries a short user profile, the
    highest-leverage preferences, general tips, and a routing index —
-   organized by project scope and recency — that tells future sessions *what
-   to search for*, not the answers themselves.
+   organized by project scope and recency — that tells future sessions _what
+   to search for_, not the answers themselves.
 
-Note what the summary is *not*: not the full memory, not an executive digest
+Note what the summary is _not_: not the full memory, not an executive digest
 in flowery abstraction, and not static. It is a dense signpost layer whose job
 is to help the model decide, within the size cap, when deeper layers are worth
 opening.
@@ -398,7 +398,7 @@ opening.
 All the learning above is wasted if recall is slow, expensive, or intrusive.
 The read path is designed around a hard constraint: it executes **on every
 turn of every conversation**, so its baseline cost must be tiny and — just as
-important — *stable*.
+important — _stable_.
 
 ### Always-on: the injected summary
 
@@ -411,14 +411,14 @@ verbatim to the model's system prompt. Two properties make this affordable:
   enlarging the injection.
 - **Byte-identical stability.** Every prefix of a model request that stays
   identical can be served from the provider's prompt cache instead of being
-  reprocessed. By appending the *same* string every turn — rather than, say,
+  reprocessed. By appending the _same_ string every turn — rather than, say,
   a freshly rendered summary with timestamps — the memory block becomes its
   own cacheable segment. An update to memory invalidates just that segment and
   leaves the host application's base prompt cache untouched. The
   implementation even watches the file's modification time and re-reads only
   on change, so the steady-state read path is nearly free.
 
-Along with the summary text, the injected block teaches the model the *policy*
+Along with the summary text, the injected block teaches the model the _policy_
 of remembering: when to skip memory entirely (trivial, self-contained
 questions), when to do a quick lookup, and a strict budget — a handful of
 search steps, not an archaeological expedition. It also encodes epistemic
@@ -450,10 +450,10 @@ thing stays local, inspectable, and dependency-free.
 ### Writing from the read path
 
 There is one deliberate write door during conversations: the user can say
-outright *"remember that …"*, and the agent appends the note as a small file
+outright _"remember that …"_, and the agent appends the note as a small file
 under `extensions/ad_hoc/notes/` that the next consolidation picks up through
 the normal diff channel. The
-authority to *integrate* knowledge stays with the consolidator; the
+authority to _integrate_ knowledge stays with the consolidator; the
 read path's writes are suggestions, not edits. This keeps the shared store
 single-writer while still letting users pin facts in real time.
 
@@ -470,7 +470,7 @@ Every extracted session record carries two pieces of bookkeeping that would be
 surprising if you hadn't seen the retrieval loop: a **usage count** and a
 **last-used timestamp**. Periodically, records that have sat untouched beyond
 a configurable horizon — thirty days by default — are pruned. Note the
-criterion: not just *old*, but *unproven*. A six-month-old extraction the
+criterion: not just _old_, but _unproven_. A six-month-old extraction the
 agent still cites survives; a one-week-old note nobody needed does not.
 
 ### Usage-based ranking in selection
@@ -485,7 +485,7 @@ writing, and its retrieval surface reshapes itself accordingly.
 ### Deletion propagation through provenance
 
 Because every entry in the handbook is required to cite the session recaps
-that support it, forgetting can be *surgical* rather than global. When a
+that support it, forgetting can be _surgical_ rather than global. When a
 source file disappears — pruned as stale, deleted by the user, withdrawn by an
 external import channel — the diff surfaces the deletion, and the
 consolidation instructions are explicit: delete only the memory supported by
@@ -512,7 +512,7 @@ archived were never once cited; at the thirty-day mark they vanish from the
 input set, the diff shows their recaps deleted, and the consolidator strips
 their residue from the handbook before it can mislead a future session. The
 summary stays within budget not because someone curates it, but because the
-system continuously re-ranks and discards. The memory *improves* with time
+system continuously re-ranks and discards. The memory _improves_ with time
 instead of merely filling up.
 
 ## The Feedback Loop: Citations Close the Circuit
@@ -533,12 +533,12 @@ On OpenCode 1.x, it removes the markup before the reply is stored. OpenCode
 from subsequent model requests. Both support the same feedback loop; the
 display details do not change which memory implementation you choose.
 
-This is the system's answer to a question most memory designs never ask: *how
-do you know your memories are any good?* Counting what the agent actually used
+This is the system's answer to a question most memory designs never ask: _how
+do you know your memories are any good?_ Counting what the agent actually used
 turns memory quality from vibes into data. Usage feeds the ranking at
 selection time, the ordering in the handbook, and the survival decision at
 pruning time. The citation also builds a habit of attribution into the
-assistant: when it says "I remember you prefer X," the system knows *where* it
+assistant: when it says "I remember you prefer X," the system knows _where_ it
 remembered that from.
 
 ## Safety, Privacy, and Trust
@@ -593,14 +593,14 @@ any memory system designer will face:
   simplest possible write access to their own memory. A version control layer
   in a memory system is unusual — and it's what makes incremental
   consolidation, auditing, and deletion propagation cheap.
-- **Recency *and* recency-with-use.** Neither alone is right: pure recency
+- **Recency _and_ recency-with-use.** Neither alone is right: pure recency
   drowns durable preferences in fresh trivia; pure use-count freezes the
   memory of a past self. Every ranking in the system blends the two, and
-  pruning only kills what is old *and* unproven.
+  pruning only kills what is old _and_ unproven.
 - **One global memory — with soft routing.** Earlier iterations of the
   upstream design had per-project memory stores and deliberately abandoned
-  them. Scoping forces impossible questions (which project does *"prefers
-  table-driven tests"* belong to?) and starves every scope of evidence.
+  them. Scoping forces impossible questions (which project does _"prefers
+  table-driven tests"_ belong to?) and starves every scope of evidence.
   Instead: one store, one consolidation pass, and project awareness pushed
   into content — each memory carries the working directory and scope it came
   from, as routing metadata rather than a hard partition. Your conventions
@@ -611,7 +611,7 @@ any memory system designer will face:
 - **Everything tunable, nothing required.** Idle thresholds, age cutoffs,
   unused-days horizons, batch sizes, model choices per phase — all are knobs
   with conservative defaults, because the right forgetting cadence is a
-  property of how *you* work.
+  property of how _you_ work.
 
 <a id="two-versions-v1-and-v2"></a>
 
@@ -622,7 +622,7 @@ this plugin's default. Codex shipped **Memory V2** as opt-in (`version: "v2"` in
 this plugin) and, on 2026-10-22 (`a390571745`, #56211), made it the default for
 fresh profiles; existing V1 workspaces keep V1. V2 keeps the same outer loop —
 extract after a session, consolidate in the background, inject a small
-summary — and changes the *epistemic* contract: what the system is allowed to
+summary — and changes the _epistemic_ contract: what the system is allowed to
 claim about you.
 
 Memory V1 is built to **anticipate**. Extraction is told to mine a session for things
@@ -632,7 +632,7 @@ takeaways into a searchable handbook (`MEMORY.md`) and a tiny always-on index.
 The dream is that you stop repeating yourself.
 
 Memory V2 is built to **avoid inventing preferences**. A failure mode of Memory V1 is
-over-promotion: "show me the plan before editing *this*" becomes "the user
+over-promotion: "show me the plan before editing _this_" becomes "the user
 prefers plans before edits," and that sentence then sits in every future
 session. v2's own extraction example is the opposite instruction — record the
 request, do not write the personality trait.
@@ -645,7 +645,7 @@ summary as the memory.](memory-v1-v2.svg)
 
 **Extract.** v1 serializes a filtered transcript and requires three fields:
 detailed `raw_memory`, a recap, and a filename slug. v2 spends the same
-limited window on *who spoke*: human messages first, then the assistant's
+limited window on _who spoke_: human messages first, then the assistant's
 final answers, then other agents, harness context, and tools last. Replies to
 OpenCode's question tool stay paired with their questions as human evidence.
 Codex also distinguishes assistant commentary when that provenance is available;
@@ -657,7 +657,7 @@ present, are hints, not labels to trust.
 **Consolidate.** v1 rebuilds a routing inventory (`raw_memories.md`) and asks
 the consolidator to maintain `MEMORY.md` plus `memory_summary.md`. v2 updates
 **only** `memory_summary.md`. The file must start with `v1` (that line is the
-*summary format* version, not the pipeline version), then four headings:
+_summary format_ version, not the pipeline version), then four headings:
 User Profile, User preferences, General Tips, What's in Memory. Consolidation
 aims for at most 9,000 UTF-8 bytes, but an oversized, structurally valid file
 still succeeds. Injection caps the summary at 9,999 UTF-8 bytes, including a
@@ -668,7 +668,7 @@ dated pointer to an exact recap filename and session id.
 
 **Remember.** v1's read path is progressive disclosure: skim the summary,
 search the handbook, open one or two recaps if pointed there. v2's summary
-*is* the context. Open a recap only if extra wording, chronology, or
+_is_ the context. Open a recap only if extra wording, chronology, or
 uncertainty would change the answer — not to rediscover a pointer already in
 the summary. Memory is not proof of current behavior; drift is the model's
 problem again, which is the point.

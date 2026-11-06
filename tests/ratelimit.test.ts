@@ -62,23 +62,34 @@ describe("rate-limit stub semantics", () => {
 
   it("classifies quota and rate-limit errors, not permanent extraction failures", () => {
     expect(isProviderCapacityError("sub-agent prompt failed (APIError): The usage limit has been reached")).toBe(true)
-    expect(isProviderCapacityError({ name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } })).toBe(true)
+    expect(
+      isProviderCapacityError({ name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } }),
+    ).toBe(true)
     expect(isProviderCapacityError("provider capacity exhausted")).toBe(true)
     expect(isProviderCapacityError("rate_limit_exceeded")).toBe(true)
     expect(isProviderCapacityError("HTTP 429 too many requests")).toBe(true)
     expect(isProviderCapacityError("insufficient_quota")).toBe(true)
     expect(isProviderCapacityError("You exceeded your current quota, please check your plan")).toBe(true)
     // GitHub Copilot via OpenCode 2 (observed: ServiceUnavailableError, HTTP 503).
-    expect(isProviderCapacityError({
-      _tag: "ServiceUnavailableError", message: "You have exceeded your monthly quota", service: "github-copilot",
-    })).toBe(true)
+    expect(
+      isProviderCapacityError({
+        _tag: "ServiceUnavailableError",
+        message: "You have exceeded your monthly quota",
+        service: "github-copilot",
+      }),
+    ).toBe(true)
     expect(isProviderCapacityError("boom")).toBe(false)
     // "quota" alone is not a capacity signal (e.g. a transcript about quotas).
     expect(isProviderCapacityError("invalid JSON: memory mentions disk quota settings")).toBe(false)
     // An oversized single request never fits on retry, even as a 429.
-    expect(isProviderCapacityError({
-      data: { statusCode: 429, message: "Request too large for gpt-4o on tokens per min (TPM): Limit 30000, Requested 50000." },
-    })).toBe(false)
+    expect(
+      isProviderCapacityError({
+        data: {
+          statusCode: 429,
+          message: "Request too large for gpt-4o on tokens per min (TPM): Limit 30000, Requested 50000.",
+        },
+      }),
+    ).toBe(false)
     expect(isProviderCapacityError("This model's maximum context length is 128000 tokens")).toBe(false)
     expect(isProviderCapacityError("empty transcript for previously extracted session")).toBe(false)
     expect(isProviderCapacityError("failed_invalid_artifacts: missing MEMORY.md")).toBe(false)
@@ -93,9 +104,7 @@ describe("rate-limit stub semantics", () => {
     expect(consolidation.ok).toBe(false)
     expect((await checkRateLimit("phase1", "healthy/model")).ok).toBe(true)
     expect((await checkRateLimit("phase2", "healthy/model")).ok).toBe(true)
-    expect(activeProviderCapacityBackoffs()).toEqual([
-      expect.objectContaining({ scope: "model:limited/model" }),
-    ])
+    expect(activeProviderCapacityBackoffs()).toEqual([expect.objectContaining({ scope: "model:limited/model" })])
   })
 
   it("blocks a fallback chain only when every model is backed off", async () => {

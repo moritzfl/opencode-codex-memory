@@ -35,11 +35,13 @@ function messagesClient(rows: unknown) {
 
 describe("loadTranscript", () => {
   it("drops compaction summaries like codex drops Compacted items", async () => {
-    setClient(messagesClient([
-      ...API_ROWS,
-      { info: { role: "user" }, parts: [{ type: "compaction", auto: true }] },
-      { info: { role: "assistant", summary: true }, parts: [{ type: "text", text: "summary of the api question" }] },
-    ]))
+    setClient(
+      messagesClient([
+        ...API_ROWS,
+        { info: { role: "user" }, parts: [{ type: "compaction", auto: true }] },
+        { info: { role: "assistant", summary: true }, parts: [{ type: "text", text: "summary of the api question" }] },
+      ]),
+    )
     const { loadTranscript } = require("../src/capture.js")
     const texts = (await loadTranscript("ses_1")).map((m: { text?: string }) => m.text)
     expect(texts).toContain("api answer")
@@ -119,7 +121,13 @@ describe("loadTranscript", () => {
   })
 
   it("throws when the API call itself rejects", async () => {
-    setClient({ session: { messages: async () => { throw new Error("boom") } } })
+    setClient({
+      session: {
+        messages: async () => {
+          throw new Error("boom")
+        },
+      },
+    })
     const { loadTranscript } = require("../src/capture.js")
     expect(loadTranscript("ses_1")).rejects.toThrow("boom")
   })

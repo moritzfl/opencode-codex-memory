@@ -20,8 +20,14 @@ export function isModelSelectionUnavailable(error: unknown, model?: ModelRef): b
   for (let current = error as any; current && !seen.has(current); current = current.cause ?? current.error) {
     seen.add(current)
     const tag = current._tag ?? current.name
-    if (["InvalidRequestError", "Generate.ModelSelectionError"].includes(tag) && current.message === message) return true
-    if (tag === "ServiceUnavailableError" && current.service === "plugin" && current.message === PLUGIN_ACTIVATION_PENDING) return true
+    if (["InvalidRequestError", "Generate.ModelSelectionError"].includes(tag) && current.message === message)
+      return true
+    if (
+      tag === "ServiceUnavailableError" &&
+      current.service === "plugin" &&
+      current.message === PLUGIN_ACTIVATION_PENDING
+    )
+      return true
   }
   return false
 }
@@ -37,7 +43,8 @@ export async function retryModelSelection<T>(
     signal?.throwIfAborted()
     try {
       const result = await request()
-      if (attempt > 0) recordDiagnostic("info", "model-readiness", `${label} available after ${attempt} startup retry(s)`)
+      if (attempt > 0)
+        recordDiagnostic("info", "model-readiness", `${label} available after ${attempt} startup retry(s)`)
       return result
     } catch (error) {
       if (signal?.aborted || !isModelSelectionUnavailable(error, model)) throw error
@@ -46,7 +53,8 @@ export async function retryModelSelection<T>(
         recordDiagnostic("error", "model-readiness", `${label} still unavailable after ${attempt} startup retry(s)`)
         throw error
       }
-      if (attempt === 0) recordDiagnostic("warn", "model-readiness", `${label} not registered yet; waiting for model startup`)
+      if (attempt === 0)
+        recordDiagnostic("warn", "model-readiness", `${label} not registered yet; waiting for model startup`)
       await sleep(delay, undefined, signal ? { signal } : undefined)
     }
   }

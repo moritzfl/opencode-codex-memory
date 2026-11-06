@@ -244,10 +244,7 @@ function extensionRoot(): string {
 }
 
 function projectTargetRoot(projectKey: string): string {
-  return safeResolveUnderRoot(
-    memoryRoot(),
-    path.join("extensions", EXTENSION_NAME, "resources", projectKey),
-  )
+  return safeResolveUnderRoot(memoryRoot(), path.join("extensions", EXTENSION_NAME, "resources", projectKey))
 }
 
 function groupByProject(files: ExternalMemoryFile[]): Map<string, ExternalMemoryFile[]> {
@@ -307,11 +304,7 @@ function collectRelativePaths(root: string, current: string, out: Set<string>): 
   }
 }
 
-function projectNeedsImport(
-  projectKey: string,
-  projectCwd: string,
-  projectFiles: ExternalMemoryFile[],
-): boolean {
+function projectNeedsImport(projectKey: string, projectCwd: string, projectFiles: ExternalMemoryFile[]): boolean {
   const targetRoot = path.join(memoryRoot(), "extensions", EXTENSION_NAME, "resources", projectKey)
   const kind = lstatKind(targetRoot)
   if (kind === "missing") return true
@@ -356,11 +349,7 @@ function projectHasUnscopedTarget(projectKey: string): boolean {
   return kind !== "dir" || lstatKind(path.join(target, PROJECT_SCOPE_FILE)) !== "file"
 }
 
-function replaceProjectResources(
-  projectKey: string,
-  projectCwd: string,
-  projectFiles: ExternalMemoryFile[],
-): void {
+function replaceProjectResources(projectKey: string, projectCwd: string, projectFiles: ExternalMemoryFile[]): void {
   // Read all sources first so a mid-copy failure never leaves a half-empty dir
   // after we deleted the previous resources (codex replace_project_resources).
   const loaded: Array<{ relativePath: string; content: Buffer }> = []
@@ -429,10 +418,7 @@ export function syncClaudeImport(opts: ClaudeImportOptions): ClaudeImportSyncRes
   const byProject = groupByProject(allFiles)
   const sourceKeys = new Set(byProject.keys())
 
-  const allowlist =
-    opts.projects && opts.projects.length > 0
-      ? new Set(opts.projects.filter(isSafeProjectKey))
-      : null
+  const allowlist = opts.projects && opts.projects.length > 0 ? new Set(opts.projects.filter(isSafeProjectKey)) : null
 
   // Desired set: allowlist, or every source project (cwd checked per project).
   const desired = new Set<string>()

@@ -143,11 +143,11 @@ describe("phase 1 dispose mid-pass", () => {
         "SELECT status, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key=?",
       )
       .get(SESSION_ID) as {
-        status: string
-        lease_until: number | null
-        retry_at: number | null
-        last_error: string | null
-      }
+      status: string
+      lease_until: number | null
+      retry_at: number | null
+      last_error: string | null
+    }
     expect(job.status).toBe("pending")
     expect(job.lease_until).toBeNull()
     expect(job.retry_at).toBeNull()
@@ -181,7 +181,10 @@ describe("phase 1 provider capacity", () => {
             data: [{ info: { role: "user" }, parts: [{ type: "text", text: "remember this convention" }] }],
           }),
           create: async () => ({ data: { id: `sub-extract-${created++}` } }),
-          prompt: async (request: { path: { id: string }; body: { model?: { providerID: string; modelID: string } } }) => {
+          prompt: async (request: {
+            path: { id: string }
+            body: { model?: { providerID: string; modelID: string } }
+          }) => {
             const model = request.body.model && `${request.body.model.providerID}/${request.body.model.modelID}`
             prompted.push(model ? `${request.path.id}:${model}` : request.path.id)
             return opts.prompt(request.path.id, model)
@@ -197,9 +200,7 @@ describe("phase 1 provider capacity", () => {
 
   function jobRow(id: string) {
     return openDb()
-      .prepare(
-        "SELECT status, retry_remaining, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key=?",
-      )
+      .prepare("SELECT status, retry_remaining, last_error FROM memory_jobs WHERE kind='memory_stage1' AND job_key=?")
       .get(id) as { status: string; retry_remaining: number; last_error: string | null }
   }
 
@@ -317,10 +318,14 @@ describe("phase 1 provider capacity", () => {
 
   describe("with a fallback chain", () => {
     const CHAIN = "quota/primary, ok/backup"
-    const quota = { data: { info: { error: { name: "APIError", data: { message: "You have exceeded your monthly quota" } } } } }
+    const quota = {
+      data: { info: { error: { name: "APIError", data: { message: "You have exceeded your monthly quota" } } } },
+    }
     const auth = { data: { info: { error: { name: "ProviderAuthError", data: { message: "expired key" } } } } }
     const extracted = {
-      data: { info: { structured: { raw_memory: "backup raw", rollout_summary: "backup summary", rollout_slug: "backup" } } },
+      data: {
+        info: { structured: { raw_memory: "backup raw", rollout_summary: "backup summary", rollout_slug: "backup" } },
+      },
     }
     // Keep the real gate but drop its 30s anti-stampede timer between passes.
     beforeEach(() => {

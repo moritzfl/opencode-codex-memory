@@ -2,10 +2,24 @@ import { describe, expect, it, spyOn } from "bun:test"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { captureMemoryInjections, completedV2Reply, createSandbox, promptSession, repoRoot, type Sandbox, type ServeHandle } from "../scripts/lib/harness.js"
+import {
+  captureMemoryInjections,
+  completedV2Reply,
+  createSandbox,
+  promptSession,
+  repoRoot,
+  type Sandbox,
+  type ServeHandle,
+} from "../scripts/lib/harness.js"
 
 const user = { type: "user", id: "msg_new" }
-const assistant = { type: "assistant", id: "msg_answer", time: { completed: 123 }, finish: "stop", content: [{ type: "text", text: "new answer" }] }
+const assistant = {
+  type: "assistant",
+  id: "msg_answer",
+  time: { completed: 123 },
+  finish: "stop",
+  content: [{ type: "text", text: "new answer" }],
+}
 
 describe("live harness", () => {
   it("rejects stale replies, partial turns, tool continuations, and provider errors", () => {
@@ -15,7 +29,9 @@ describe("live harness", () => {
     for (const change of [{ time: {} }, { finish: "tool-calls" }, { finish: undefined }]) {
       expect(() => completedV2Reply({ data: [{ ...assistant, ...change }, user] }, user.id)).toThrow("incomplete")
     }
-    expect(() => completedV2Reply({ data: [{ ...assistant, error: { message: "quota exceeded" } }, user] }, user.id)).toThrow("quota exceeded")
+    expect(() =>
+      completedV2Reply({ data: [{ ...assistant, error: { message: "quota exceeded" } }, user] }, user.id),
+    ).toThrow("quota exceeded")
   })
 
   it("uses an explicit package directory on both hosts without building and retains failed sandboxes", () => {
@@ -23,8 +39,10 @@ describe("live harness", () => {
     // dist/ exists, and fail immediately if sandbox setup launches a build.
     const existsSync = fs.existsSync
     const entry = path.join(repoRoot(), "dist/src/index.js")
-    const exists = spyOn(fs, "existsSync").mockImplementation((file) => file === entry ? false : existsSync(file))
-    const spawn = spyOn(Bun, "spawnSync").mockImplementation(() => { throw new Error("sandbox setup must not spawn a build") })
+    const exists = spyOn(fs, "existsSync").mockImplementation((file) => (file === entry ? false : existsSync(file)))
+    const spawn = spyOn(Bun, "spawnSync").mockImplementation(() => {
+      throw new Error("sandbox setup must not spawn a build")
+    })
     let sandbox: Sandbox | undefined
     try {
       sandbox = createSandbox()
@@ -70,9 +88,17 @@ describe("live harness", () => {
         throw new Error("messages must not be read before wait resolves")
       },
     })
-    const serve: ServeHandle = { baseUrl: server.url.href, port: server.port!, v2: true, logPath: "", stop: async () => {} }
+    const serve: ServeHandle = {
+      baseUrl: server.url.href,
+      port: server.port!,
+      v2: true,
+      logPath: "",
+      stop: async () => {},
+    }
     try {
-      await expect(promptSession(serve, sandbox, "ses_test", "new prompt", { timeoutMs: 100 })).rejects.toThrow("timed out")
+      await expect(promptSession(serve, sandbox, "ses_test", "new prompt", { timeoutMs: 100 })).rejects.toThrow(
+        "timed out",
+      )
       expect(waiting).toBe(true)
     } finally {
       server.stop(true)
@@ -86,7 +112,9 @@ describe("live harness", () => {
     const entry = path.join(sandbox.root, "fake-plugin.js")
     const summary = "v1\n\nHEAD\nö\nTAIL"
     const prompt = `private instructions\n========= MEMORY_SUMMARY BEGINS =========\n${summary}\n========= MEMORY_SUMMARY ENDS =========`
-    fs.writeFileSync(entry, `export default {
+    fs.writeFileSync(
+      entry,
+      `export default {
       id: "fake-memory",
       async server() { return { "experimental.chat.system.transform": async (_, out) => out.system.push(${JSON.stringify(prompt)}) } },
       async setup(ctx) {
@@ -94,7 +122,8 @@ describe("live harness", () => {
         await ctx.session.hook("context", (event) => event.system.push({ type: "text", text: ${JSON.stringify(prompt)} }))
         return () => { ctx.cleaned = true }
       },
-    }`)
+    }`,
+    )
     try {
       const read = captureMemoryInjections(sandbox, entry)
       expect(read()).toEqual([])
@@ -105,15 +134,25 @@ describe("live harness", () => {
       expect(out.system.at(-1)).toBe(prompt)
       await plugin.setup({}) // V1 can invoke setup without a V2 context.
       const handlers: ((event: any) => void)[] = []
-      const ctx = { location: { directory: sandbox.project }, cleaned: false,
-        session: { hook: async (_: string, handler: (event: any) => void) => { handlers.push(handler) } } }
+      const ctx = {
+        location: { directory: sandbox.project },
+        cleaned: false,
+        session: {
+          hook: async (_: string, handler: (event: any) => void) => {
+            handlers.push(handler)
+          },
+        },
+      }
       const cleanup = await plugin.setup(ctx)
       const event = { sessionID: "ses_v2", system: [{ type: "text", text: "private base prompt" }] }
       for (const handler of handlers) handler(event)
       expect(event.system.at(-1)?.text).toBe(prompt)
       await cleanup()
       expect(ctx.cleaned).toBe(true)
-      expect(read()).toEqual([{ sessionID: "ses_v1", summary }, { sessionID: "ses_v2", summary }])
+      expect(read()).toEqual([
+        { sessionID: "ses_v1", summary },
+        { sessionID: "ses_v2", summary },
+      ])
       expect(fs.readFileSync(path.join(sandbox.root, "memory-injections.jsonl"), "utf8")).not.toContain("private")
     } finally {
       sandbox.keep = false

@@ -1,6 +1,14 @@
 import { describe, it, expect, afterEach } from "bun:test"
 import path from "path"
-import { buildMemorizeAgent, buildMemorizeExtractAgent, consolidationPermissions, ensureV2Agents, toV1AgentDefinition, MEMORIZE_SYSTEM, MEMORIZE_EXTRACT_SYSTEM } from "../src/v2/agents.js"
+import {
+  buildMemorizeAgent,
+  buildMemorizeExtractAgent,
+  consolidationPermissions,
+  ensureV2Agents,
+  toV1AgentDefinition,
+  MEMORIZE_SYSTEM,
+  MEMORIZE_EXTRACT_SYSTEM,
+} from "../src/v2/agents.js"
 import { memoryRoot } from "../src/paths.js"
 import { getAgentHealth, resetAgentHealth } from "../src/agent-health.js"
 import { resetPluginOptions } from "../src/options.js"
@@ -92,7 +100,10 @@ describe("v2 agent definitions", () => {
     expect(edit).not.toContain("*")
     expect(edit).not.toContain("README.md")
     expect(rules.filter((r) => r.action === "read").map((r) => r.resource)).toEqual(edit)
-    expect(rules.filter((r) => r.action === "external_directory").map((r) => r.resource)).toEqual([root, path.join(root, "*")])
+    expect(rules.filter((r) => r.action === "external_directory").map((r) => r.resource)).toEqual([
+      root,
+      path.join(root, "*"),
+    ])
   })
 
   it("grants a specific ../ prefix when the session does not contain the root", () => {
@@ -109,27 +120,44 @@ describe("v2 agent definitions", () => {
     expect(edit).not.toContain("*")
   })
 
-  it.each(["", "rollout_summaries", "skills/nested"])("bounds relative access from a helper inside memory: %s", (suffix) => {
-    const root = path.resolve("/home/user/.local/share/opencode/memories")
-    const directory = path.join(root, suffix)
-    const rules = consolidationPermissions(root, directory)
-    // Host-style anchored wildcard matching; resources have already been normalized.
-    const matches = (pattern: string, value: string) => new RegExp("^" + pattern
-      .replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".") + "$", "s").test(value)
-    const effect = (action: string, resource: string) => rules.filter((r) =>
-      matches(r.action, action) && matches(r.resource.replaceAll("\\", "/"), resource.replaceAll("\\", "/")),
-    ).at(-1)?.effect
-    for (const action of ["read", "edit"]) {
-      expect(effect(action, "local.md")).toBe("allow")
-      expect(effect(action, path.relative(directory, path.join(root, "memory_summary.md")))).toBe("allow")
-      expect(effect(action, path.relative(directory, path.dirname(root)))).toBe("deny")
-      expect(effect(action, path.relative(directory, path.join(path.dirname(root), "memories_v2/file.md")))).toBe("deny")
-      expect(effect(action, "/outside/file.md")).toBe("deny")
-      expect(effect(action, "C:/outside/file.md")).toBe("deny")
-      expect(effect(action, path.join(root, "file.md"))).toBe("allow")
-    }
-    expect(effect("external_directory", "*")).toBe("deny")
-  })
+  it.each(["", "rollout_summaries", "skills/nested"])(
+    "bounds relative access from a helper inside memory: %s",
+    (suffix) => {
+      const root = path.resolve("/home/user/.local/share/opencode/memories")
+      const directory = path.join(root, suffix)
+      const rules = consolidationPermissions(root, directory)
+      // Host-style anchored wildcard matching; resources have already been normalized.
+      const matches = (pattern: string, value: string) =>
+        new RegExp(
+          "^" +
+            pattern
+              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+              .replaceAll("*", ".*")
+              .replaceAll("?", ".") +
+            "$",
+          "s",
+        ).test(value)
+      const effect = (action: string, resource: string) =>
+        rules
+          .filter(
+            (r) =>
+              matches(r.action, action) && matches(r.resource.replaceAll("\\", "/"), resource.replaceAll("\\", "/")),
+          )
+          .at(-1)?.effect
+      for (const action of ["read", "edit"]) {
+        expect(effect(action, "local.md")).toBe("allow")
+        expect(effect(action, path.relative(directory, path.join(root, "memory_summary.md")))).toBe("allow")
+        expect(effect(action, path.relative(directory, path.dirname(root)))).toBe("deny")
+        expect(effect(action, path.relative(directory, path.join(path.dirname(root), "memories_v2/file.md")))).toBe(
+          "deny",
+        )
+        expect(effect(action, "/outside/file.md")).toBe("deny")
+        expect(effect(action, "C:/outside/file.md")).toBe("deny")
+        expect(effect(action, path.join(root, "file.md"))).toBe("allow")
+      }
+      expect(effect("external_directory", "*")).toBe("deny")
+    },
+  )
 
   it("built memorize agent adds the memory-root external_directory grant", () => {
     const def = buildMemorizeAgent()
@@ -148,22 +176,26 @@ describe("v2 agent definitions", () => {
 })
 
 describe("ensureV2Agents", () => {
-  it.each([["v1", false], ["v1", true], ["v2", false], ["v2", true]] as const)(
-    "records healthy shipped agents with version=%s dual_write=%j",
-    async (version, dual_write) => {
-      applyPluginOptions({ version, dual_write })
-      const f = fakeAgentCtx()
-      await ensureV2Agents(f.ctx as any)
-      const grants = f.updates[0].applied.permissions as { action: string; resource: string; effect: string }[]
-      expect(grants.filter((rule) => rule.action === "external_directory" && rule.resource.endsWith("*"))).toEqual(
-        (dual_write ? ["v1", "v2"] as const : [version]).map((writer) => ({
-          action: "external_directory", resource: path.join(memoryRoot(writer), "*"), effect: "allow",
-        })),
-      )
-      expect(getAgentHealth().agents.memorize).toMatchObject({ source: "shipped", healthy: true, issues: [] })
-      expect(getAgentHealth().agents["memorize-extract"]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
-    },
-  )
+  it.each([
+    ["v1", false],
+    ["v1", true],
+    ["v2", false],
+    ["v2", true],
+  ] as const)("records healthy shipped agents with version=%s dual_write=%j", async (version, dual_write) => {
+    applyPluginOptions({ version, dual_write })
+    const f = fakeAgentCtx()
+    await ensureV2Agents(f.ctx as any)
+    const grants = f.updates[0].applied.permissions as { action: string; resource: string; effect: string }[]
+    expect(grants.filter((rule) => rule.action === "external_directory" && rule.resource.endsWith("*"))).toEqual(
+      (dual_write ? (["v1", "v2"] as const) : [version]).map((writer) => ({
+        action: "external_directory",
+        resource: path.join(memoryRoot(writer), "*"),
+        effect: "allow",
+      })),
+    )
+    expect(getAgentHealth().agents.memorize).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+    expect(getAgentHealth().agents["memorize-extract"]).toMatchObject({ source: "shipped", healthy: true, issues: [] })
+  })
 
   it("creates both agents when absent and records shipped health", async () => {
     const f = fakeAgentCtx()
@@ -193,7 +225,12 @@ describe("ensureV2Agents", () => {
   })
 
   it("leaves a user-defined memorize untouched and records override health", async () => {
-    const userDef = { id: "memorize", mode: "subagent", system: "custom", permissions: [{ action: "*", resource: "*", effect: "allow" }] }
+    const userDef = {
+      id: "memorize",
+      mode: "subagent",
+      system: "custom",
+      permissions: [{ action: "*", resource: "*", effect: "allow" }],
+    }
     const f = fakeAgentCtx({ memorize: userDef })
     await ensureV2Agents(f.ctx as any)
     // Only the absent extract agent is created; the override is preserved.

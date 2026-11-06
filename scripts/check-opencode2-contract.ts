@@ -19,7 +19,16 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { $ } from "bun"
-import { api, basicAuth, createSandbox, createSession, startServe, tail, waitFor, type ServeHandle } from "./lib/harness.js"
+import {
+  api,
+  basicAuth,
+  createSandbox,
+  createSession,
+  startServe,
+  tail,
+  waitFor,
+  type ServeHandle,
+} from "./lib/harness.js"
 import { installFilePermissionProbe, probeFilePermissions } from "./lib/v2-file-permission-probe.js"
 import { probeV2ModelReadiness } from "./lib/v2-model-readiness-probe.js"
 import type { MemoryStatus } from "../src/v2/status-rpc.js"
@@ -143,18 +152,28 @@ async function main(): Promise<void> {
         ["edit", path.join(sandbox.project, "source.ts"), "deny"],
         ["shell", "echo forbidden", "deny"],
       ]) {
-        const checked = await api(serve, sandbox, "POST", `/api/session/${id}/permission`, { action, resources: [resource] })
+        const checked = await api(serve, sandbox, "POST", `/api/session/${id}/permission`, {
+          action,
+          resources: [resource],
+        })
         const effect = (checked.json as { data?: { effect?: string } })?.data?.effect
         note(effect === expected, `${version} helper ${action}: ${expected} ${resource}`)
       }
       // FileAccess.resolve asserts this form when the session directory contains
       // the memory root. Absolute-only grants deny it.
       const parent = path.dirname(own)
-      const nested = await api(serve, sandbox, "POST", "/api/session", {
-        title: `contract-memory-nested-${version}`,
-        location: { directory: parent },
-        permissions: consolidationPermissions(own, parent),
-      }, { directory: parent })
+      const nested = await api(
+        serve,
+        sandbox,
+        "POST",
+        "/api/session",
+        {
+          title: `contract-memory-nested-${version}`,
+          location: { directory: parent },
+          permissions: consolidationPermissions(own, parent),
+        },
+        { directory: parent },
+      )
       const nestedId = (nested.json as { data?: { id?: string } })?.data?.id
       if (!nestedId) throw new Error(`nested sandbox session create HTTP ${nested.status}`)
       const relRoot = path.basename(own)
@@ -165,16 +184,31 @@ async function main(): Promise<void> {
         ["edit", "README.md", "deny"],
         ["edit", `${path.basename(other)}/memory_summary.md`, "deny"],
       ] as const) {
-        const checked = await api(serve, sandbox, "POST", `/api/session/${nestedId}/permission`, { action, resources: [resource] }, { directory: parent })
+        const checked = await api(
+          serve,
+          sandbox,
+          "POST",
+          `/api/session/${nestedId}/permission`,
+          { action, resources: [resource] },
+          { directory: parent },
+        )
         const effect = (checked.json as { data?: { effect?: string } })?.data?.effect
         note(effect === expected, `${version} nested helper ${action}: ${expected} ${resource}`)
       }
       for (const directory of [parent, own, path.join(own, "rollout_summaries")]) {
         fs.mkdirSync(directory, { recursive: true })
-        const created = await api(serve, sandbox, "POST", "/api/session", {
-          title: "native-file-permissions", location: { directory },
-          permissions: consolidationPermissions(own, directory),
-        }, { directory })
+        const created = await api(
+          serve,
+          sandbox,
+          "POST",
+          "/api/session",
+          {
+            title: "native-file-permissions",
+            location: { directory },
+            permissions: consolidationPermissions(own, directory),
+          },
+          { directory },
+        )
         const sessionID = (created.json as { data?: { id?: string } })?.data?.id
         if (!sessionID) throw new Error(created.text)
         const target = path.join(own, "probe.md")
@@ -187,8 +221,14 @@ async function main(): Promise<void> {
           { tool: "write", input: { path: outside, content: "forbidden" } },
           { tool: "read", input: { path: outside } },
         ])
-        note(results[0]?.ok === true && results[1]?.ok === true, `native memory write/read from ${directory}: ${JSON.stringify(results)}`)
-        note(results[2]?.ok === false && results[3]?.ok === false && fs.readFileSync(outside, "utf8") === "outside", "native tools deny sibling memory root")
+        note(
+          results[0]?.ok === true && results[1]?.ok === true,
+          `native memory write/read from ${directory}: ${JSON.stringify(results)}`,
+        )
+        note(
+          results[2]?.ok === false && results[3]?.ok === false && fs.readFileSync(outside, "utf8") === "outside",
+          "native tools deny sibling memory root",
+        )
       }
     }
   } catch (e) {
@@ -211,7 +251,10 @@ async function main(): Promise<void> {
 
   // --- native model startup race ---
   const readiness = await probeV2ModelReadiness()
-  note(true, `cold model startup recovers after ${readiness.failures} startup failure(s), exactly ${readiness.inferenceCalls} inference request`)
+  note(
+    true,
+    `cold model startup recovers after ${readiness.failures} startup failure(s), exactly ${readiness.inferenceCalls} inference request`,
+  )
 
   // --- built plugin dual export ---
   const root = path.resolve(import.meta.dirname, "..")
@@ -241,20 +284,37 @@ async function main(): Promise<void> {
     note(typeof v2mod.default?.setup === "function", "./v2 entry exports setup()")
 
     // --- V2 agent shape (D2 allowlist, V2 action names) ---
-    const agents = (await import(path.join(root, "dist", "src", "v2", "agents.js") + `?t=${Date.now()}`)) as typeof import("../src/v2/agents.js")
+    const agents = (await import(
+      path.join(root, "dist", "src", "v2", "agents.js") + `?t=${Date.now()}`
+    )) as typeof import("../src/v2/agents.js")
     const def = agents.buildMemorizeAgent()
     note(def.mode === "subagent", "memorize mode is subagent")
     const rules = def.permissions
     note(rules[0]?.action === "*" && rules[0]?.effect === "deny", "wildcard deny is first")
     const allows = new Set(rules.filter((r) => r.effect === "allow").map((r) => r.action))
     const safeAllows = new Set(["read", "edit", "glob", "grep", "external_directory"])
-    note([...allows].every((a) => safeAllows.has(a)), `allows ⊆ read/edit/glob/grep/external_directory (got ${[...allows].join(",")})`)
+    note(
+      [...allows].every((a) => safeAllows.has(a)),
+      `allows ⊆ read/edit/glob/grep/external_directory (got ${[...allows].join(",")})`,
+    )
     for (const t of ["read", "edit", "glob", "grep"]) note(allows.has(t), `allows ${t}`)
 
     // --- V2 tool sets ---
-    const tools = (await import(path.join(root, "dist", "src", "v2", "tools.js") + `?t=${Date.now()}`)) as typeof import("../src/v2/tools.js")
-    const names = tools.buildV2Tools().map((t) => t.name).sort()
-    for (const t of ["memory_read", "memory_search", "memory_list", "memory_add_note", "memory_inspect", "memory_mode"]) {
+    const tools = (await import(
+      path.join(root, "dist", "src", "v2", "tools.js") + `?t=${Date.now()}`
+    )) as typeof import("../src/v2/tools.js")
+    const names = tools
+      .buildV2Tools()
+      .map((t) => t.name)
+      .sort()
+    for (const t of [
+      "memory_read",
+      "memory_search",
+      "memory_list",
+      "memory_add_note",
+      "memory_inspect",
+      "memory_mode",
+    ]) {
       note(names.includes(t), `v2 tool ${t} registered`)
     }
     // Reset needs user approval, which V2 plugin tools cannot request.
@@ -265,7 +325,10 @@ async function main(): Promise<void> {
       if (rule.action === "glob" || rule.action === "grep") {
         note(rule.resource === "*", `${rule.action} permits search patterns (executor enforces paths)`)
       } else {
-        note([memoryRoot, path.join(memoryRoot, "*")].includes(rule.resource), `${rule.action} is scoped to the memory workspace`)
+        note(
+          [memoryRoot, path.join(memoryRoot, "*")].includes(rule.resource),
+          `${rule.action} is scoped to the memory workspace`,
+        )
       }
     }
 
@@ -293,13 +356,27 @@ async function main(): Promise<void> {
         // spawning npm or a probe throws.
         const v1Install = path.join(testRoot, "v1-consumer")
         fs.mkdirSync(v1Install)
-        const v1 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@types/node"], v1Install)
+        const v1 = await runQuiet(
+          ["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@types/node"],
+          v1Install,
+        )
         note(v1.code === 0, `packed artifact installs for V1${v1.code === 0 ? "" : `: ${v1.stderr.slice(-1000)}`}`)
         if (v1.code === 0) {
-          const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) }).then(() => import('opencode-codex-memory/tui')).then(async (m) => { if (typeof m.default?.tui !== 'function' || typeof m.default?.setup !== 'function' || typeof m.default?.server === 'function') process.exit(1); await m.default.tui() })"], v1Install)
+          const loaded = await runQuiet(
+            [
+              process.execPath,
+              "--input-type=module",
+              "-e",
+              "import('opencode-codex-memory').then((m) => { if (typeof m.default?.server !== 'function') process.exit(1) }).then(() => import('opencode-codex-memory/tui')).then(async (m) => { if (typeof m.default?.tui !== 'function' || typeof m.default?.setup !== 'function' || typeof m.default?.server === 'function') process.exit(1); await m.default.tui() })",
+            ],
+            v1Install,
+          )
           note(loaded.code === 0, "packed V1 artifact loads server+tui without V2 peers")
           const consumer = path.join(v1Install, "consumer.mts")
-          fs.writeFileSync(consumer, 'import plugin from "opencode-codex-memory"\nconst server = plugin.server\nif (typeof server !== "function") throw new Error("missing V1 server export")\n')
+          fs.writeFileSync(
+            consumer,
+            'import plugin from "opencode-codex-memory"\nconst server = plugin.server\nif (typeof server !== "function") throw new Error("missing V1 server export")\n',
+          )
           const typecheck = await runQuiet(
             [
               path.join(root, "node_modules", ".bin", "tsc"),
@@ -317,7 +394,10 @@ async function main(): Promise<void> {
             v1Install,
           )
           const typecheckOutput = typecheck.stderr || typecheck.stdout
-          note(typecheck.code === 0, `packed V1 declarations typecheck without V2 peers${typecheck.code === 0 ? "" : `: ${typecheckOutput.slice(-1000)}`}`)
+          note(
+            typecheck.code === 0,
+            `packed V1 declarations typecheck without V2 peers${typecheck.code === 0 ? "" : `: ${typecheckOutput.slice(-1000)}`}`,
+          )
 
           // The actual cache does not install the V2 SDK peer. Boot that exact
           // package on V2: importing /v2 with a manually installed peer cannot
@@ -327,30 +407,54 @@ async function main(): Promise<void> {
           try {
             const configPath = path.join(packedSandbox.configHome, "opencode", "opencode.json")
             const config = JSON.parse(fs.readFileSync(configPath, "utf8"))
-            config.plugins = [{
-              package: path.join(v1Install, "node_modules", "opencode-codex-memory"),
-              options: { test: true, generate_memories: false },
-            }]
+            config.plugins = [
+              {
+                package: path.join(v1Install, "node_modules", "opencode-codex-memory"),
+                options: { test: true, generate_memories: false },
+              },
+            ]
             fs.writeFileSync(configPath, JSON.stringify(config))
             packedServe = await startServe(packedSandbox, { bin: "opencode2" })
             // RPC itself does not activate a location's plugins on every host.
             await createSession(packedServe, packedSandbox, "packed-plugin-contract")
-            await waitFor("packed plugin activation", async () => {
-              const plugins = await api(packedServe!, packedSandbox, "GET", "/api/plugin", undefined, { "location[directory]": packedSandbox.project })
-              const plugin = (plugins.json as { data?: { id: string; state: { status: string }; features?: { tui?: boolean } }[] })?.data
-                ?.find((plugin) => plugin.id === "opencode-codex-memory" || plugin.state.status === "failed")
-              if (plugin?.state.status === "failed") throw new Error(`packed plugin failed: ${JSON.stringify(plugin)}`)
-              if (plugin?.state.status === "active") note(plugin.features?.tui === true, "packed local TUI entry discovered by V2")
-              return plugin?.state.status === "active"
-            }, { timeoutMs: 30_000, intervalMs: 200 })
-            const status = await api(packedServe, packedSandbox, "POST", "/api/rpc/opencode-codex-memory/status", {
-              input: {},
-            }, { "location[directory]": packedSandbox.project })
+            await waitFor(
+              "packed plugin activation",
+              async () => {
+                const plugins = await api(packedServe!, packedSandbox, "GET", "/api/plugin", undefined, {
+                  "location[directory]": packedSandbox.project,
+                })
+                const plugin = (
+                  plugins.json as { data?: { id: string; state: { status: string }; features?: { tui?: boolean } }[] }
+                )?.data?.find((plugin) => plugin.id === "opencode-codex-memory" || plugin.state.status === "failed")
+                if (plugin?.state.status === "failed")
+                  throw new Error(`packed plugin failed: ${JSON.stringify(plugin)}`)
+                if (plugin?.state.status === "active")
+                  note(plugin.features?.tui === true, "packed local TUI entry discovered by V2")
+                return plugin?.state.status === "active"
+              },
+              { timeoutMs: 30_000, intervalMs: 200 },
+            )
+            const status = await api(
+              packedServe,
+              packedSandbox,
+              "POST",
+              "/api/rpc/opencode-codex-memory/status",
+              {
+                input: {},
+              },
+              { "location[directory]": packedSandbox.project },
+            )
             const state = (status.json as { output?: Partial<MemoryStatus> })?.output
-            note(status.status === 200 && state?.activity === "read_only" && state.memoryRoot === packedSandbox.memories,
-              `packed plugin boots on V2 without SDK peers and serves isolated status${status.status === 200 ? "" : `: ${status.text.slice(-1000)}\n${tail(packedServe.logPath, 20)}`}`)
-            note(state?.v2Ready === false && state.v2SummaryBytes === null && state.v2NotReadyReason?.includes("ENOENT") === true,
-              "packed V2 RPC reports missing-summary readiness diagnostics")
+            note(
+              status.status === 200 && state?.activity === "read_only" && state.memoryRoot === packedSandbox.memories,
+              `packed plugin boots on V2 without SDK peers and serves isolated status${status.status === 200 ? "" : `: ${status.text.slice(-1000)}\n${tail(packedServe.logPath, 20)}`}`,
+            )
+            note(
+              state?.v2Ready === false &&
+                state.v2SummaryBytes === null &&
+                state.v2NotReadyReason?.includes("ENOENT") === true,
+              "packed V2 RPC reports missing-summary readiness diagnostics",
+            )
             const v2Root = path.join(packedSandbox.opencodeData, "memories_v2")
             fs.mkdirSync(v2Root, { recursive: true })
             const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
@@ -359,15 +463,31 @@ async function main(): Promise<void> {
               ["oversized", summary.padEnd(10_000, "x"), "insufficient consolidated threads: 0 < 20"],
             ] as const) {
               fs.writeFileSync(path.join(v2Root, "memory_summary.md"), content)
-              const result = await api(packedServe, packedSandbox, "POST", "/api/rpc/opencode-codex-memory/status", {
-                input: {},
-              }, { "location[directory]": packedSandbox.project })
+              const result = await api(
+                packedServe,
+                packedSandbox,
+                "POST",
+                "/api/rpc/opencode-codex-memory/status",
+                {
+                  input: {},
+                },
+                { "location[directory]": packedSandbox.project },
+              )
               const output = (result.json as { output?: Partial<MemoryStatus> })?.output
-              note(result.status === 200 && output?.v2Ready === false && output.v2SummaryBytes === Buffer.byteLength(content)
-                && output.v2NotReadyReason === reason && output.v2InjectedSummaryBytes != null && output.v2InjectedSummaryBytes < 10000,
-                `packed V2 RPC reports ${label}-summary readiness diagnostics${result.status === 200 ? "" : `: ${result.text.slice(-1000)}`}`)
+              note(
+                result.status === 200 &&
+                  output?.v2Ready === false &&
+                  output.v2SummaryBytes === Buffer.byteLength(content) &&
+                  output.v2NotReadyReason === reason &&
+                  output.v2InjectedSummaryBytes != null &&
+                  output.v2InjectedSummaryBytes < 10000,
+                `packed V2 RPC reports ${label}-summary readiness diagnostics${result.status === 200 ? "" : `: ${result.text.slice(-1000)}`}`,
+              )
             }
-            note(!fs.existsSync(path.join(packedSandbox.opencodeData, "memory_v2.db")), "packed V2 readiness does not create an inactive database")
+            note(
+              !fs.existsSync(path.join(packedSandbox.opencodeData, "memory_v2.db")),
+              "packed V2 readiness does not create an inactive database",
+            )
           } finally {
             await packedServe?.stop()
             packedSandbox.cleanup()
@@ -377,19 +497,46 @@ async function main(): Promise<void> {
 
         const v2Install = path.join(testRoot, "v2-consumer")
         fs.mkdirSync(v2Install)
-        const v2 = await runQuiet(["npm", "install", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball, "@opencode/plugin@2.0.3"], v2Install)
+        const v2 = await runQuiet(
+          [
+            "npm",
+            "install",
+            "--ignore-scripts",
+            "--no-save",
+            "--install-strategy=nested",
+            tarball,
+            "@opencode/plugin@2.0.3",
+          ],
+          v2Install,
+        )
         note(v2.code === 0, `packed artifact installs for V2${v2.code === 0 ? "" : `: ${v2.stderr.slice(-1000)}`}`)
         if (v2.code === 0) {
           // zod is a static import of dist/src/v2/tools.js. Assert it resolves
           // from the plugin's own directory, not via a hoisted copy.
           const reachable = await runQuiet(
-            [process.execPath, "--input-type=module", "-e", "import('zod').then(() => process.exit(0)).catch(() => process.exit(1))"],
+            [
+              process.execPath,
+              "--input-type=module",
+              "-e",
+              "import('zod').then(() => process.exit(0)).catch(() => process.exit(1))",
+            ],
             path.join(v2Install, "node_modules", "opencode-codex-memory"),
           )
           note(reachable.code === 0, "zod resolves from the installed plugin directory (no hoisted peer)")
 
-          const loaded = await runQuiet([process.execPath, "--input-type=module", "-e", "import('opencode-codex-memory/v2').then((m) => { if (typeof m.default?.setup !== 'function') process.exit(1) })"], v2Install)
-          note(loaded.code === 0, `packed V2 artifact loads with the V2 peer${loaded.code === 0 ? "" : `: ${(loaded.stderr || loaded.stdout).slice(-1000)}`}`)
+          const loaded = await runQuiet(
+            [
+              process.execPath,
+              "--input-type=module",
+              "-e",
+              "import('opencode-codex-memory/v2').then((m) => { if (typeof m.default?.setup !== 'function') process.exit(1) })",
+            ],
+            v2Install,
+          )
+          note(
+            loaded.code === 0,
+            `packed V2 artifact loads with the V2 peer${loaded.code === 0 ? "" : `: ${(loaded.stderr || loaded.stdout).slice(-1000)}`}`,
+          )
         }
         fs.rmSync(v2Install, { recursive: true, force: true })
       }

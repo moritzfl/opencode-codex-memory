@@ -71,9 +71,11 @@ async function main(): Promise<number> {
   const tuiEntry = path.resolve(root, tuiPath)
   if (!fs.existsSync(tuiEntry)) fail(`tui entry ${tuiPath} does not exist — run build first`, tempDirs)
   const tuiSrc = fs.readFileSync(tuiEntry, "utf8")
-  if (tuiSrc.includes("@opencode/plugin")) fail("tui entry must not mention @opencode/plugin (1.x has no V2 TUI SDK)", tempDirs)
+  if (tuiSrc.includes("@opencode/plugin"))
+    fail("tui entry must not mention @opencode/plugin (1.x has no V2 TUI SDK)", tempDirs)
   const tui = (await import(tuiEntry)).default
-  if (typeof tui?.tui !== "function") fail("tui export missing tui() — OpenCode 1.18.29+ TUI loader requires it", tempDirs)
+  if (typeof tui?.tui !== "function")
+    fail("tui export missing tui() — OpenCode 1.18.29+ TUI loader requires it", tempDirs)
   if (typeof tui?.setup !== "function") fail("tui export missing setup() — OpenCode 2 TUI loader requires it", tempDirs)
   if (typeof tui?.server === "function") fail("tui export must not also have server() — 1.18.30 forbids both", tempDirs)
   await tui.tui()
@@ -109,7 +111,10 @@ async function main(): Promise<number> {
   // --- Phase 2: real-world install flow ------------------------------------
   // An outer `npm pack --dry-run` exports npm_config_dry_run to prepack.
   // The smoke's temporary artifact and consumer must still be real.
-  const packed = await run(["npm", "pack", "--dry-run=false", "--ignore-scripts", "--json", "--pack-destination", stage], root)
+  const packed = await run(
+    ["npm", "pack", "--dry-run=false", "--ignore-scripts", "--json", "--pack-destination", stage],
+    root,
+  )
   if (packed.code !== 0) fail(`npm pack failed: ${packed.stderr.slice(-500)}`, tempDirs)
   const meta = JSON.parse(packed.stdout) as Array<{ filename?: string }>
   const tarball = path.join(stage, meta[0]?.filename ?? "")
@@ -123,7 +128,10 @@ async function main(): Promise<number> {
     path.join(consumer, "package.json"),
     JSON.stringify({ name: "smoke-consumer", private: true, type: "module" }, null, 2),
   )
-  const install = await run(["npm", "install", "--dry-run=false", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball], consumer)
+  const install = await run(
+    ["npm", "install", "--dry-run=false", "--ignore-scripts", "--no-save", "--install-strategy=nested", tarball],
+    consumer,
+  )
   if (install.code !== 0) fail(`npm install of packed artifact failed: ${install.stderr.slice(-1000)}`, tempDirs)
 
   const pluginDir = path.join(consumer, "node_modules", "opencode-codex-memory")
@@ -199,11 +207,16 @@ async function main(): Promise<number> {
   try {
     result = JSON.parse(line)
   } catch {
-    fail(`installed-artifact probe produced no JSON (stdout: ${probed.stdout.slice(-500)}, stderr: ${probed.stderr.slice(-500)})`, tempDirs)
+    fail(
+      `installed-artifact probe produced no JSON (stdout: ${probed.stdout.slice(-500)}, stderr: ${probed.stderr.slice(-500)})`,
+      tempDirs,
+    )
   }
   if (result.ok !== true) fail(`installed artifact failed to load: ${(result.errors ?? []).join("; ")}`, tempDirs)
 
-  console.log(`smoke: OK — dev entry loads (${tools.length} tools, agents, templates) + packed V1 hooks/assets/tui and V2 schemas/tools work`)
+  console.log(
+    `smoke: OK — dev entry loads (${tools.length} tools, agents, templates) + packed V1 hooks/assets/tui and V2 schemas/tools work`,
+  )
   return 0
 }
 

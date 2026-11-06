@@ -32,8 +32,7 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
   resetPluginOptions()
   setV2ServiceDependenciesForTest(null)
   resetV2ShimStateForTest()
@@ -46,7 +45,8 @@ const TCTX = { sessionID: "ses_test", messageID: "msg_test", agent: "build" }
 // Checking only the executor's content misses invalid UI metadata that strands
 // the call in `running` and leaves the next provider request without a result.
 function expectPersistableResult(result: { content: string | unknown[]; metadata?: unknown }) {
-  const content: readonly unknown[] = typeof result.content === "string" ? [{ type: "text", text: result.content }] : result.content
+  const content: readonly unknown[] =
+    typeof result.content === "string" ? [{ type: "text", text: result.content }] : result.content
   const encoded = Schema.encodeUnknownSync(SessionEvent.Tool.Success.data)({
     sessionID: TCTX.sessionID,
     assistantMessageID: TCTX.messageID,
@@ -71,12 +71,20 @@ describe("buildV2Tools gating", () => {
 
   it("registers only control tools when dedicated_tools is off", () => {
     applyPluginOptions({ dedicated_tools: false })
-    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(["memory_inspect", "memory_mode"])
+    expect(
+      buildV2Tools()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["memory_inspect", "memory_mode"])
   })
 
   it("registers only control tools when use_memories is off", () => {
     applyPluginOptions({ use_memories: false })
-    expect(buildV2Tools().map((t) => t.name).sort()).toEqual(["memory_inspect", "memory_mode"])
+    expect(
+      buildV2Tools()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["memory_inspect", "memory_mode"])
   })
 })
 
@@ -114,7 +122,11 @@ describe("adapted tool execution", () => {
 
   it.each([
     ["unscoped matches", { queries: ["clipboard"] }, "clipboard"],
-    ["scoped matches", { queries: ["clipboard", "paste", "Cachy"], path: "MEMORY.md", context_lines: 2, max_results: 18 }, "clipboard"],
+    [
+      "scoped matches",
+      { queries: ["clipboard", "paste", "Cachy"], path: "MEMORY.md", context_lines: 2, max_results: 18 },
+      "clipboard",
+    ],
     ["window matches", { queries: ["clipboard", "paste"], match_mode: "all_within_lines", line_count: 2 }, "clipboard"],
     ["time-filtered matches", { queries: ["clipboard"], since: "2026-09-26" }, "clipboard"],
     ["time listing", { until: "2026-09-26" }, "clipboard"],

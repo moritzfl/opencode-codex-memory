@@ -31,8 +31,10 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
     return future.length ? Math.min(...future) * 1000 : null
   }
   const pipelines = snapshots.map((pipeline) => {
-    const cooldown = pipeline.phase2?.success_finished_at == null
-      ? null : pipeline.phase2.success_finished_at * 1000 + PHASE2_COOLDOWN_MS
+    const cooldown =
+      pipeline.phase2?.success_finished_at == null
+        ? null
+        : pipeline.phase2.success_finished_at * 1000 + PHASE2_COOLDOWN_MS
     return {
       version: pipeline.version,
       stage1Count: pipeline.stage1Count,
@@ -40,9 +42,11 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
       phase2Status: pipeline.phase2?.status ?? null,
       lastError: pipeline.phase2?.last_error ?? null,
       phase2CooldownUntil: cooldown !== null && cooldown > now ? cooldown : null,
-      phase1RetryAt: nextRetry(pipeline.phase1.recent_errors
-        .filter((error) => error.failure_class === "backoff" || error.failure_class === "provider_capacity")
-        .map((error) => error.retry_at)),
+      phase1RetryAt: nextRetry(
+        pipeline.phase1.recent_errors
+          .filter((error) => error.failure_class === "backoff" || error.failure_class === "provider_capacity")
+          .map((error) => error.retry_at),
+      ),
       phase2RetryAt: nextRetry([pipeline.phase2?.retry_at]),
     }
   })
@@ -52,8 +56,9 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
   const total = injectionTotals()
   const retryAt = nextRetry([
     ...activeProviderCapacityBackoffs().map((backoff) => backoff.retry_at),
-    ...active.flatMap((pipeline) => [pipeline.phase1RetryAt, pipeline.phase2RetryAt]
-      .map((time) => time === null ? null : time / 1000)),
+    ...active.flatMap((pipeline) =>
+      [pipeline.phase1RetryAt, pipeline.phase2RetryAt].map((time) => (time === null ? null : time / 1000)),
+    ),
   ])
   const warnings = [...getConfigWarnings()]
   const discoveryWarning = getV2DiscoveryStatus()?.warning
@@ -65,7 +70,8 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
   }
   if (phase2?.last_error) warnings.push("Consolidation failed; see memory_inspect for details.")
   for (const pipeline of active) {
-    if (pipeline.version !== sessionVersion && pipeline.lastError) warnings.push(`${pipeline.version}: consolidation failed; see memory_inspect.`)
+    if (pipeline.version !== sessionVersion && pipeline.lastError)
+      warnings.push(`${pipeline.version}: consolidation failed; see memory_inspect.`)
   }
   for (const pipeline of snapshots.filter((pipeline) => writeMemoryVersions().includes(pipeline.version))) {
     const phase1 = pipeline.phase1
@@ -73,13 +79,16 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
     if (phase1.by_failure_class.backoff > 0) {
       const error = phase1.recent_errors.find((error) => error.failure_class === "backoff")
       const count = phase1.by_failure_class.backoff
-      warnings.push(`${prefix}Extraction retry (${count} ${count === 1 ? "job" : "jobs"})${error ? `: ${error.last_error.slice(0, 200)}` : "."}`)
+      warnings.push(
+        `${prefix}Extraction retry (${count} ${count === 1 ? "job" : "jobs"})${error ? `: ${error.last_error.slice(0, 200)}` : "."}`,
+      )
     }
     if (phase1.by_failure_class.due > 0) warnings.push(`${prefix}Some extraction jobs are due to retry.`)
     if (phase1.by_failure_class.other_exhausted > phase1.stale_exhausted) {
       warnings.push(`${prefix}Some extraction jobs exhausted their retries.`)
     }
-    if (phase1.by_failure_class.provider_capacity > 0) warnings.push(`${prefix}Some extraction jobs hit provider capacity limits.`)
+    if (phase1.by_failure_class.provider_capacity > 0)
+      warnings.push(`${prefix}Some extraction jobs hit provider capacity limits.`)
   }
   let codexImport = false
   if (options.codex_interop.import) {
@@ -94,10 +103,7 @@ export function readMemoryStatus(sessionID?: string | null, minConsolidatedThrea
   // instance's live job or an orphaned lease (e.g. a server restart killed the
   // owner mid-run). Neither is "consolidating" here; surface it instead.
   const foreignLease =
-    !isPhase2InFlight() &&
-    phase2?.status === "running" &&
-    phase2.lease_until != null &&
-    phase2.lease_until * 1000 > now
+    !isPhase2InFlight() && phase2?.status === "running" && phase2.lease_until != null && phase2.lease_until * 1000 > now
   if (foreignLease) {
     warnings.push(
       `Consolidation lease held by another process until ${new Date(phase2!.lease_until! * 1000).toLocaleTimeString()}.`,

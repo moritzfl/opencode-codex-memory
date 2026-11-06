@@ -60,7 +60,8 @@ const FACTS = [
     fact: "E2E_FACT_CSV: built a TypeScript CSV parser returning typed rows under strict mode",
     prompt:
       "Implement src/csv.ts and tests/csv.test.ts using TypeScript and bun:test. Export parseCsv(text: string): string[][], supporting commas, newlines, quoted fields, doubled quotes, and CRLF. Project decision E2E_FACT_CSV: warehouse identifiers such as 000742 must always remain strings with leading zeroes; never infer numbers, trim fields, or silently repair malformed quotes. Throw on unterminated quotes. Add regression tests and run them. Use file/shell tools for this implementation, but do not call memory tools; background learning handles this conversation.",
-    followup: "For all future CSV changes in this repo, preserving identifier 000742 exactly is mandatory because our warehouse joins use string keys. Confirm the regression passes with bun test tests/csv.test.ts and report the result. No memory tool calls.",
+    followup:
+      "For all future CSV changes in this repo, preserving identifier 000742 exactly is mandatory because our warehouse joins use string keys. Confirm the regression passes with bun test tests/csv.test.ts and report the result. No memory tool calls.",
     artifact: "src/csv.ts",
   },
   {
@@ -68,7 +69,8 @@ const FACTS = [
     fact: "E2E_FACT_RESULT: refactored error handling to a Result type instead of throwing",
     prompt:
       "Implement src/result.ts and tests/result.test.ts using TypeScript and bun:test. Export Result<T,E> = {ok:true,value:T}|{ok:false,error:E} and parseAmount(text:string): Result<number,string>. Project decision E2E_FACT_RESULT: negative amounts return error code LEDGER_NEGATIVE_AMOUNT, malformed amounts return LEDGER_INVALID_AMOUNT, and callers must never catch exceptions. This is our ledger UI's permanent error contract. Add tests for -1, nonsense, and 42; run them. Use file/shell tools, but no memory tool calls.",
-    followup: "Keep LEDGER_NEGATIVE_AMOUNT stable in all future ledger work: our UI translations key off it. Verify parseAmount('-1') returns that error without throwing and run bun test tests/result.test.ts. No memory tool calls.",
+    followup:
+      "Keep LEDGER_NEGATIVE_AMOUNT stable in all future ledger work: our UI translations key off it. Verify parseAmount('-1') returns that error without throwing and run bun test tests/result.test.ts. No memory tool calls.",
     artifact: "src/result.ts",
   },
   {
@@ -76,7 +78,8 @@ const FACTS = [
     fact: "E2E_FACT_README: wrote a README section explaining the two-phase memory plugin",
     prompt:
       "Update README.md with our permanent contribution workflow. Project decision E2E_FACT_README: this repo uses Bun only; run bun test tests/csv.test.ts tests/result.test.ts before every change, preserve CSV string identifiers, and keep ledger error codes stable. Document that the memory plugin uses Phase 1 extraction then Phase 2 consolidation. Read the implementation and run that exact verification command before documenting success. No memory tool calls.",
-    followup: "For future work always use the exact targeted Bun test command from README, never substitute npm test. Confirm both CSV and Result tests passed and that README records the command. No memory tool calls.",
+    followup:
+      "For future work always use the exact targeted Bun test command from README, never substitute npm test. Confirm both CSV and Result tests passed and that README records the command. No memory tool calls.",
     artifact: "README.md",
   },
 ] as const
@@ -117,16 +120,25 @@ const EXHAUSTED_MODELS = ["extract-quota", "consolidate-quota"] as const
  */
 function startQuotaExhaustedUpstream() {
   const hits = new Map<string, number>()
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
-    const body = await request.json().catch(() => ({})) as { model?: unknown }
-    const model = String(body.model)
-    hits.set(model, (hits.get(model) ?? 0) + 1)
-    return Response.json({ error: {
-      message: "You exceeded your current quota, please check your plan and billing details.",
-      type: "insufficient_quota",
-      code: "insufficient_quota",
-    } }, { status: 429 })
-  } })
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json().catch(() => ({}))) as { model?: unknown }
+      const model = String(body.model)
+      hits.set(model, (hits.get(model) ?? 0) + 1)
+      return Response.json(
+        {
+          error: {
+            message: "You exceeded your current quota, please check your plan and billing details.",
+            type: "insufficient_quota",
+            code: "insufficient_quota",
+          },
+        },
+        { status: 429 },
+      )
+    },
+  })
   return { hits, url: `${server.url.href}v1`, stop: () => server.stop(true) }
 }
 
@@ -134,14 +146,26 @@ function startQuotaExhaustedUpstream() {
 function addExhaustedProvider(sandbox: Sandbox, baseURL: string): void {
   const file = path.join(sandbox.configHome, "opencode", "opencode.json")
   const config = JSON.parse(fs.readFileSync(file, "utf8"))
-  const models = (v2: boolean) => Object.fromEntries(EXHAUSTED_MODELS.map((id) => [id, v2 ? { name: id, modelID: id } : { name: id }]))
-  config.provider = { ...config.provider, exhausted: {
-    npm: "@ai-sdk/openai-compatible", name: "Exhausted", options: { baseURL, apiKey: "test-only" }, models: models(false),
-  } }
-  config.providers = { ...config.providers, exhausted: {
-    name: "Exhausted", package: "@opencode/ai/providers/openai-compatible",
-    settings: { baseURL, apiKey: "test-only" }, models: models(true),
-  } }
+  const models = (v2: boolean) =>
+    Object.fromEntries(EXHAUSTED_MODELS.map((id) => [id, v2 ? { name: id, modelID: id } : { name: id }]))
+  config.provider = {
+    ...config.provider,
+    exhausted: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "Exhausted",
+      options: { baseURL, apiKey: "test-only" },
+      models: models(false),
+    },
+  }
+  config.providers = {
+    ...config.providers,
+    exhausted: {
+      name: "Exhausted",
+      package: "@opencode/ai/providers/openai-compatible",
+      settings: { baseURL, apiKey: "test-only" },
+      models: models(true),
+    },
+  }
   fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n")
 }
 
@@ -195,8 +219,12 @@ function phase2Consolidated(sandbox: Sandbox): boolean {
   const job = phase2Job(sandbox)
   if (!job || job.last_error !== null || job.finished_at === null) return false
   if (job.status !== "done" && job.status !== "pending") return false
-  return (sqlAll<{ max_thread_count: number }>(memoryDbPath(sandbox),
-    "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count ?? 0) > 0
+  return (
+    (sqlAll<{ max_thread_count: number }>(
+      memoryDbPath(sandbox),
+      "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1",
+    )[0]?.max_thread_count ?? 0) > 0
+  )
 }
 
 async function main() {
@@ -246,10 +274,15 @@ async function main() {
     }
   }
   const checkV2Injection = (sessionID: string, step: string) => {
-    const summaries = injections().filter((row) => row.sessionID === sessionID).map((row) => row.summary)
+    const summaries = injections()
+      .filter((row) => row.sessionID === sessionID)
+      .map((row) => row.summary)
     check(summaries.length > 0, step, "native hook captured V2 summary injection")
-    check(summaries.length > 0 && summaries.every((summary) => Buffer.byteLength(summary) <= MEMORY_V2_SUMMARY_MAX_BYTES),
-      step, "V2 injection stays under 10k UTF-8 bytes, including the truncation marker")
+    check(
+      summaries.length > 0 && summaries.every((summary) => Buffer.byteLength(summary) <= MEMORY_V2_SUMMARY_MAX_BYTES),
+      step,
+      "V2 injection stays under 10k UTF-8 bytes, including the truncation marker",
+    )
     return summaries
   }
 
@@ -266,11 +299,22 @@ async function main() {
     {
       const sid = await createSession(serve, sandbox, "e2e-read")
       if (serve.v2) {
-        const status = await api(serve, sandbox, "POST", "/api/rpc/opencode-codex-memory/status", { input: {} }, {
-          "location[directory]": sandbox.project,
-        })
+        const status = await api(
+          serve,
+          sandbox,
+          "POST",
+          "/api/rpc/opencode-codex-memory/status",
+          { input: {} },
+          {
+            "location[directory]": sandbox.project,
+          },
+        )
         const effective = (status.json as { output?: { extractModel?: string; consolidationModel?: string } })?.output
-        if (status.status !== 200 || effective?.extractModel !== extractModel || effective.consolidationModel !== consolidationModel) {
+        if (
+          status.status !== 200 ||
+          effective?.extractModel !== extractModel ||
+          effective.consolidationModel !== consolidationModel
+        ) {
           throw new Error(`plugin options not applied: ${status.text}`)
         }
         log("config", "OK — V2 plugin received configured model options")
@@ -295,20 +339,18 @@ async function main() {
       const sid = await createSession(serve, sandbox, f.title)
       const reply = await promptSession(serve, sandbox, sid, f.prompt, { timeoutMs: 300_000 })
       // Second turn so the transcript is more than a single Q&A.
-      await promptSession(
-        serve,
-        sandbox,
-        sid,
-        f.followup,
-        { timeoutMs: 180_000 },
-      )
+      await promptSession(serve, sandbox, sid, f.followup, { timeoutMs: 180_000 })
       workIds.push(sid)
       check(fs.existsSync(path.join(sandbox.project, f.artifact)), "work", `${f.artifact} implemented`)
       log("work", `${sid} (${f.title}) reply_len=${reply.length}`)
       await sleep(1500)
     }
     const noteDir = path.join(sandbox.memories, "extensions", "ad_hoc", "notes")
-    check(!fs.existsSync(noteDir) || fs.readdirSync(noteDir).length === 0, "work", "ordinary work completed without direct memory notes")
+    check(
+      !fs.existsSync(noteDir) || fs.readdirSync(noteDir).length === 0,
+      "work",
+      "ordinary work completed without direct memory notes",
+    )
 
     // ----- Step 3: wait real idle, then trigger -----
     // 0.01h = 36s. Do not forge sqlite timestamps — that would not test
@@ -332,7 +374,8 @@ async function main() {
           const rows = stage1Rows(sandbox).filter((r) => workIds.includes(r.session_id))
           if (rows.length > 0) return true
           const jobs = stage1Jobs(sandbox)
-          if (!jobs.length && Date.now() - phase1Started > 60_000) throw new Error("no stage1 claims after real idle + trigger")
+          if (!jobs.length && Date.now() - phase1Started > 60_000)
+            throw new Error("no stage1 claims after real idle + trigger")
           // A trigger that lands while an earlier pass still runs is a no-op
           // (already_running).
           if (Date.now() - lastTrigger > 60_000 && !workIds.some((id) => jobs.some((j) => j.job_key === id))) {
@@ -342,15 +385,11 @@ async function main() {
           }
           const failed = jobs.filter((j) => j.status === "failed" || (j.last_error && j.status !== "done"))
           if (failed.length >= FACTS.length) {
-            throw new Error(
-              `all stage1 jobs failed: ${failed.map((j) => `${j.job_key}:${j.last_error}`).join("; ")}`,
-            )
+            throw new Error(`all stage1 jobs failed: ${failed.map((j) => `${j.job_key}:${j.last_error}`).join("; ")}`)
           }
           // Work sessions finished as selective no-output — fail fast (do not
           // burn the full phase1 timeout waiting for rows that will never come).
-          const workDone = workIds.filter((id) =>
-            jobs.some((j) => j.job_key === id && j.status === "done"),
-          )
+          const workDone = workIds.filter((id) => jobs.some((j) => j.job_key === id && j.status === "done"))
           if (workDone.length >= workIds.length && rows.length === 0) {
             throw new Error(
               `all ${workIds.length} work sessions extracted as no-output (model too selective or transcripts empty)`,
@@ -430,8 +469,7 @@ async function main() {
           const mem = path.join(sandbox.memories, "MEMORY.md")
           const sum = path.join(sandbox.memories, "memory_summary.md")
           const rollouts = path.join(sandbox.memories, "rollout_summaries")
-          const hasRollouts =
-            fs.existsSync(rollouts) && fs.readdirSync(rollouts).some((f) => f.endsWith(".md"))
+          const hasRollouts = fs.existsSync(rollouts) && fs.readdirSync(rollouts).some((f) => f.endsWith(".md"))
           // Progress only — keep waiting for job done so reset is not refused.
           if (!loggedArtifacts && sandbox.memoryVersion === "v1" && fs.existsSync(mem) && hasRollouts) {
             loggedArtifacts = true
@@ -480,12 +518,14 @@ async function main() {
     if (sandbox.memoryVersion === "v2") {
       check(summaryText.split(/\r?\n/, 1)[0] === "v1", "phase2", "v2 summary starts with v1")
       for (const heading of ["## User Profile", "## User preferences", "## General Tips", "## What's in Memory"]) {
-        check(summaryText.split(/\r?\n/).some((line) => line.trim() === heading), "phase2", `v2 heading ${heading}`)
+        check(
+          summaryText.split(/\r?\n/).some((line) => line.trim() === heading),
+          "phase2",
+          `v2 heading ${heading}`,
+        )
       }
     }
-    const rolloutFiles = fs.existsSync(rollouts)
-      ? fs.readdirSync(rollouts).filter((f) => f.endsWith(".md"))
-      : []
+    const rolloutFiles = fs.existsSync(rollouts) ? fs.readdirSync(rollouts).filter((f) => f.endsWith(".md")) : []
     check(rolloutFiles.length >= 1, "phase2", `rollout_summaries has md files (${rolloutFiles.length})`)
 
     const gitDir = path.join(sandbox.memories, ".git")
@@ -493,8 +533,15 @@ async function main() {
     if (quota) {
       const hits = Object.fromEntries(quota.hits)
       log("fallback", `exhausted upstream requests ${JSON.stringify(hits)}`)
-      for (const [model, phase] of [[EXHAUSTED_MODELS[0], "extraction"], [EXHAUSTED_MODELS[1], "consolidation"]] as const) {
-        check((quota.hits.get(model) ?? 0) > 0, "fallback", `${phase} tried the exhausted model first, then succeeded on ${models.model}`)
+      for (const [model, phase] of [
+        [EXHAUSTED_MODELS[0], "extraction"],
+        [EXHAUSTED_MODELS[1], "consolidation"],
+      ] as const) {
+        check(
+          (quota.hits.get(model) ?? 0) > 0,
+          "fallback",
+          `${phase} tried the exhausted model first, then succeeded on ${models.model}`,
+        )
       }
     }
     if (serve.v2) {
@@ -503,7 +550,9 @@ async function main() {
       const helpers = (listed.json as { data: { id: string }[] }).data
       let executed = 0
       for (const helper of helpers) {
-        const transcript = await api(serve, sandbox, "GET", `/api/session/${helper.id}/message`, undefined, { limit: "100" })
+        const transcript = await api(serve, sandbox, "GET", `/api/session/${helper.id}/message`, undefined, {
+          limit: "100",
+        })
         if (transcript.status !== 200) throw new Error(`helper transcript failed: ${transcript.text}`)
         for (const message of (transcript.json as { data: any[] }).data) {
           for (const part of message.content ?? []) {
@@ -523,19 +572,31 @@ async function main() {
 
     // ----- Step 7: closed loop -----
     if (args.dualWrite) {
-      await waitFor("shadow pipeline consolidated", () => {
-        const job = phase2Job(shadow)
-        if (job?.status === "failed") throw new Error(`shadow phase2 failed: ${job.last_error}`)
-        return phase2Consolidated(shadow)
-      }, { timeoutMs: args.phase2TimeoutMs, intervalMs: 3000 })
+      await waitFor(
+        "shadow pipeline consolidated",
+        () => {
+          const job = phase2Job(shadow)
+          if (job?.status === "failed") throw new Error(`shadow phase2 failed: ${job.last_error}`)
+          return phase2Consolidated(shadow)
+        },
+        { timeoutMs: args.phase2TimeoutMs, intervalMs: 3000 },
+      )
       const shadowRows = stage1Rows(shadow).filter((row) => workIds.includes(row.session_id))
       check(shadowRows.length > 0, "dual", "same work sessions learned in shadow pipeline")
       if (shadow.memoryVersion === "v2") {
-        check(shadowRows.every((row) => row.raw_memory === ""), "dual", "V2 extraction remains summary-only")
+        check(
+          shadowRows.every((row) => row.raw_memory === ""),
+          "dual",
+          "V2 extraction remains summary-only",
+        )
         check(!fs.existsSync(path.join(shadow.memories, "MEMORY.md")), "dual", "V2 creates no V1 handbook")
       }
       const shadowNotes = path.join(shadow.memories, "extensions/ad_hoc/notes")
-      check(!fs.existsSync(shadowNotes) || fs.readdirSync(shadowNotes).length === 0, "dual", "shadow learning came from extraction")
+      check(
+        !fs.existsSync(shadowNotes) || fs.readdirSync(shadowNotes).length === 0,
+        "dual",
+        "shadow learning came from extraction",
+      )
     }
     {
       const sid = await createSession(serve, sandbox, "e2e-closed-loop")
@@ -543,7 +604,7 @@ async function main() {
         serve,
         sandbox,
         sid,
-         "What did we work on in previous sessions in this project? Recall a specific implementation decision from memory; if unknown, say so.",
+        "What did we work on in previous sessions in this project? Recall a specific implementation decision from memory; if unknown, say so.",
         { timeoutMs: 180_000 },
       )
       const hit =
@@ -582,12 +643,15 @@ async function main() {
     {
       const noteMarker = `E2E_EXPLICIT_${crypto.randomUUID()}`
       const sid = await createSession(serve, sandbox, "e2e-remember")
-      await promptSession(serve, sandbox, sid,
+      await promptSession(
+        serve,
+        sandbox,
+        sid,
         `Remember this for future sessions: the project deployment label is ${noteMarker}. Save it with memory_add_note, preserving the exact label.`,
       )
-      const saved = fs.existsSync(noteDir) && fs.readdirSync(noteDir).some((file) =>
-        fs.readFileSync(path.join(noteDir, file), "utf8").includes(noteMarker),
-      )
+      const saved =
+        fs.existsSync(noteDir) &&
+        fs.readdirSync(noteDir).some((file) => fs.readFileSync(path.join(noteDir, file), "utf8").includes(noteMarker))
       check(saved, "remember", "explicit remember request persisted a durable note")
     }
 
@@ -603,23 +667,57 @@ async function main() {
       serve = await startServe(sandbox)
       const oldId = workIds[0]!
       const freshId = await createSession(serve, sandbox, "e2e-v2-cutover")
-      const reply = await promptSession(serve, sandbox, freshId,
+      const reply = await promptSession(
+        serve,
+        sandbox,
+        freshId,
         "What did we work on in previous sessions in this project? Use memory tools to check a relevant recap, recall a specific implementation decision, and cite the recap you read.",
-        { timeoutMs: 180_000 })
-      check(/000742|leading zero|LEDGER_NEGATIVE_AMOUNT|bun test/i.test(reply), "cutover", "fresh session recalls learned V2 implementation decisions")
+        { timeoutMs: 180_000 },
+      )
+      check(
+        /000742|leading zero|LEDGER_NEGATIVE_AMOUNT|bun test/i.test(reply),
+        "cutover",
+        "fresh session recalls learned V2 implementation decisions",
+      )
       checkV2Injection(freshId, "cutover")
       const meta = path.join(sandbox.opencodeData, "memory.db")
-      const versions = sqlAll<{ session_id: string; version: string }>(meta,
-        "SELECT session_id, version FROM memory_session_versions WHERE session_id IN (?, ?)", [oldId, freshId])
-      check(versions.some((row) => row.session_id === oldId && row.version === "v1"), "cutover", "existing session retains V1 namespace")
-      check(versions.some((row) => row.session_id === freshId && row.version === "v2"), "cutover", "new session reads V2 namespace")
-      check(stage1Rows(shadow).some((row) => row.usage_count > 0), "cutover", "V2 recap citation credited to V2")
+      const versions = sqlAll<{ session_id: string; version: string }>(
+        meta,
+        "SELECT session_id, version FROM memory_session_versions WHERE session_id IN (?, ?)",
+        [oldId, freshId],
+      )
+      check(
+        versions.some((row) => row.session_id === oldId && row.version === "v1"),
+        "cutover",
+        "existing session retains V1 namespace",
+      )
+      check(
+        versions.some((row) => row.session_id === freshId && row.version === "v2"),
+        "cutover",
+        "new session reads V2 namespace",
+      )
+      check(
+        stage1Rows(shadow).some((row) => row.usage_count > 0),
+        "cutover",
+        "V2 recap citation credited to V2",
+      )
       if (serve.v2) {
-        const status = await api(serve, sandbox, "POST", "/api/rpc/opencode-codex-memory/status", {
-          input: { sessionID: freshId, minConsolidatedThreads: 1 },
-        }, { "location[directory]": sandbox.project })
+        const status = await api(
+          serve,
+          sandbox,
+          "POST",
+          "/api/rpc/opencode-codex-memory/status",
+          {
+            input: { sessionID: freshId, minConsolidatedThreads: 1 },
+          },
+          { "location[directory]": sandbox.project },
+        )
         const state = (status.json as { output?: { v2Ready?: boolean; version?: string } })?.output
-        check(state?.v2Ready === true && state.version === "v2", "cutover", "readiness RPC confirms successfully warmed V2")
+        check(
+          state?.v2Ready === true && state.version === "v2",
+          "cutover",
+          "readiness RPC confirms successfully warmed V2",
+        )
       }
     }
 
@@ -632,24 +730,57 @@ async function main() {
       const head = "E2E_OVERSIZED_HEAD"
       const tailMarker = "E2E_OVERSIZED_TAIL"
       const middle = `E2E_OVERSIZED_MIDDLE_${crypto.randomUUID()}`
-      const oversized = original.replace(/^(v1\r?\n)/, `$1${head}\n`) + "\n"
-        + "ö".repeat(12_000) + "\n" + middle + "\n" + "ö".repeat(12_000) + "\n" + tailMarker + "\n"
+      const oversized =
+        original.replace(/^(v1\r?\n)/, `$1${head}\n`) +
+        "\n" +
+        "ö".repeat(12_000) +
+        "\n" +
+        middle +
+        "\n" +
+        "ö".repeat(12_000) +
+        "\n" +
+        tailMarker +
+        "\n"
       const middleLine = oversized.split("\n").indexOf(middle) + 1
-      check(oversized.length > 20_000 && Buffer.byteLength(oversized) > 10_000, "oversize", "fixture exceeds both old disk-size gates")
+      check(
+        oversized.length > 20_000 && Buffer.byteLength(oversized) > 10_000,
+        "oversize",
+        "fixture exceeds both old disk-size gates",
+      )
       try {
         fs.writeFileSync(file, oversized)
         const sid = await createSession(serve, sandbox, "e2e-v2-oversized-summary")
         await promptSession(serve, sandbox, sid, "Reply exactly: ok. Do not call tools.")
-        const reply = await promptSession(serve, sandbox, sid,
+        const reply = await promptSession(
+          serve,
+          sandbox,
+          sid,
           `Call memory_read with path="memory_summary.md", line_offset=${middleLine}, max_lines=1. Return that line's full text.`,
         )
         const captured = checkV2Injection(sid, "oversize")
-        check(captured.every((text) => text.includes(head) && text.endsWith(tailMarker)
-          && text.includes("[...truncated...]") && !text.includes(middle) && !text.includes("\uFFFD")),
-          "oversize", "head/tail survive UTF-8-safe truncation; middle stays off the injection")
-        check(captured.length >= 2 && captured.every((text) => text === captured[0]), "oversize", "follow-up injection remains cache-stable")
+        check(
+          captured.every(
+            (text) =>
+              text.includes(head) &&
+              text.endsWith(tailMarker) &&
+              text.includes("[...truncated...]") &&
+              !text.includes(middle) &&
+              !text.includes("\uFFFD"),
+          ),
+          "oversize",
+          "head/tail survive UTF-8-safe truncation; middle stays off the injection",
+        )
+        check(
+          captured.length >= 2 && captured.every((text) => text === captured[0]),
+          "oversize",
+          "follow-up injection remains cache-stable",
+        )
         check(reply.includes(middle), "oversize", "native memory_read retrieves the discarded middle")
-        check(fs.readFileSync(file, "utf8") === oversized, "oversize", "injection leaves the full disk summary unchanged")
+        check(
+          fs.readFileSync(file, "utf8") === oversized,
+          "oversize",
+          "injection leaves the full disk summary unchanged",
+        )
       } finally {
         fs.writeFileSync(file, original)
       }
@@ -672,34 +803,31 @@ async function main() {
       let resetReply: string
       if (serve.v2) {
         // V2 exposes reset through the panel RPC, never as a model tool.
-        const reset = await api(serve, sandbox, "POST", "/api/rpc/opencode-codex-memory/resetMemory", {
-          input: { confirm: true },
-        }, { "location[directory]": sandbox.project })
+        const reset = await api(
+          serve,
+          sandbox,
+          "POST",
+          "/api/rpc/opencode-codex-memory/resetMemory",
+          {
+            input: { confirm: true },
+          },
+          { "location[directory]": sandbox.project },
+        )
         const result = (reset.json as { output?: { ok?: boolean; message?: string } })?.output
         resetReply = result?.message ?? reset.text
         check(reset.status === 200 && result?.ok === true, "reset", `panel reset: ${resetReply}`)
       } else {
         const sid = await createSession(serve, sandbox, "e2e-reset")
         const approval = `I explicitly approve resetting both disposable test memory stores under ${sandbox.opencodeData}. These are isolated test data, not my normal memory. Call memory_reset with confirm=true now. After the tool returns, reply RESET_DONE.`
-        resetReply = await promptSession(
-          serve,
-          sandbox,
-          sid,
-          approval,
-          { timeoutMs: 180_000 },
-        )
+        resetReply = await promptSession(serve, sandbox, sid, approval, { timeoutMs: 180_000 })
         // One retry after an in-flight refusal or an extra model confirmation.
         const refused = /consolidation is currently running|Reset refused|Reset aborted/i.test(resetReply)
         if (refused || targets.some((target) => stage1Rows(target).length > 0)) {
           log("reset", "reset not completed — confirming approval and retrying once")
           if (refused) await sleep(15_000)
-          resetReply = await promptSession(
-            serve,
-            sandbox,
-            sid,
-            `Yes, I confirm that approval. ${approval}`,
-            { timeoutMs: 180_000 },
-          )
+          resetReply = await promptSession(serve, sandbox, sid, `Yes, I confirm that approval. ${approval}`, {
+            timeoutMs: 180_000,
+          })
         }
       }
       await sleep(1000)
@@ -714,9 +842,15 @@ async function main() {
       }
       if (args.dualWrite) {
         check(stage1Rows(shadow).length === 0, "reset", "shadow stage1 outputs empty")
-        check(!fs.existsSync(shadow.memories) || fs.readdirSync(shadow.memories).length === 0, "reset", "shadow workspace empty")
-        const progress = sqlAll<{ max_thread_count: number }>(memoryDbPath(shadow),
-          "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1")[0]?.max_thread_count
+        check(
+          !fs.existsSync(shadow.memories) || fs.readdirSync(shadow.memories).length === 0,
+          "reset",
+          "shadow workspace empty",
+        )
+        const progress = sqlAll<{ max_thread_count: number }>(
+          memoryDbPath(shadow),
+          "SELECT max_thread_count FROM consolidation_progress WHERE singleton=1",
+        )[0]?.max_thread_count
         check(progress === 0, "reset", "shadow readiness progress reset")
       }
     } else {

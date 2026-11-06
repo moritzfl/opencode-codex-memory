@@ -244,9 +244,15 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   const pluginFileUrl = pathToFileURL(opts.bare ? repoRoot() : pluginDir).href
   if (!opts.bare) {
     fs.mkdirSync(pluginDir, { recursive: true })
-    fs.writeFileSync(path.join(pluginDir, "package.json"), JSON.stringify({
-      name: "ocm-live-plugin", type: "module", main: "./index.js", exports: { ".": "./index.js" },
-    }))
+    fs.writeFileSync(
+      path.join(pluginDir, "package.json"),
+      JSON.stringify({
+        name: "ocm-live-plugin",
+        type: "module",
+        main: "./index.js",
+        exports: { ".": "./index.js" },
+      }),
+    )
     fs.writeFileSync(
       path.join(pluginDir, "index.js"),
       `export { default } from ${JSON.stringify(path.join(repoRoot(), "dist", "src", "index.js"))}\n`,
@@ -254,10 +260,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
     config.plugin = [[pluginFileUrl, pluginOptions]]
     config.plugins = [{ package: pluginDir, options: pluginOptions }]
   }
-  fs.writeFileSync(
-    path.join(configHome, "opencode", "opencode.json"),
-    JSON.stringify(config, null, 2) + "\n",
-  )
+  fs.writeFileSync(path.join(configHome, "opencode", "opencode.json"), JSON.stringify(config, null, 2) + "\n")
   if (live) {
     fs.writeFileSync(
       path.join(opencodeData, "auth.json"),
@@ -326,7 +329,9 @@ export function requireAuth(): LiveEnv {
 /** Observe native model-bound hooks; persist only the sandbox's injected summary. */
 export function captureMemoryInjections(sandbox: Sandbox, entry = path.join(repoRoot(), "dist/src/index.js")) {
   const snapshots = path.join(sandbox.root, "memory-injections.jsonl")
-  fs.writeFileSync(path.join(sandbox.project, ".opencode/memory-plugin/index.js"), `
+  fs.writeFileSync(
+    path.join(sandbox.project, ".opencode/memory-plugin/index.js"),
+    `
 import fs from "node:fs"
 import plugin from ${JSON.stringify(entry)}
 function capture(sessionID, system) {
@@ -363,10 +368,17 @@ export default {
     return cleanup
   },
 }
-`)
-  return (): { sessionID: string; summary: string }[] => fs.existsSync(snapshots)
-    ? fs.readFileSync(snapshots, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    : []
+`,
+  )
+  return (): { sessionID: string; summary: string }[] =>
+    fs.existsSync(snapshots)
+      ? fs
+          .readFileSync(snapshots, "utf8")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : []
 }
 
 export function requireModels(models: HostModels = resolveHostModels()): {
@@ -437,12 +449,7 @@ function jsonReady(json: unknown): boolean {
 }
 
 async function serveIsReady(baseUrl: string, sandbox: Sandbox): Promise<boolean | string> {
-  const urls = [
-    `${baseUrl}/openapi.json`,
-    `${baseUrl}/global/health`,
-    `${baseUrl}/api/status`,
-    `${baseUrl}/api/info`,
-  ]
+  const urls = [`${baseUrl}/openapi.json`, `${baseUrl}/global/health`, `${baseUrl}/api/status`, `${baseUrl}/api/info`]
   let last = "no response"
   for (const withAuth of [false, true]) {
     for (const url of urls) {
@@ -462,16 +469,12 @@ async function spawnServe(
   extraArgs: string[],
 ): Promise<ChildProcess> {
   const logFd = fs.openSync(logPath, "a")
-  const child = spawn(
-    bin,
-    ["serve", "--hostname", "127.0.0.1", "--port", String(port), ...extraArgs],
-    {
-      cwd: sandbox.project,
-      env: sandbox.env,
-      stdio: ["ignore", logFd, logFd],
-      detached: false,
-    },
-  )
+  const child = spawn(bin, ["serve", "--hostname", "127.0.0.1", "--port", String(port), ...extraArgs], {
+    cwd: sandbox.project,
+    env: sandbox.env,
+    stdio: ["ignore", logFd, logFd],
+    detached: false,
+  })
   fs.closeSync(logFd)
   return child
 }
@@ -589,11 +592,7 @@ function unwrapData(json: unknown): unknown {
   return json
 }
 
-export async function createSession(
-  serve: ServeHandle,
-  sandbox: Sandbox,
-  title: string,
-): Promise<string> {
+export async function createSession(serve: ServeHandle, sandbox: Sandbox, title: string): Promise<string> {
   const res = serve.v2
     ? await api(serve, sandbox, "POST", "/api/session", {
         title,
@@ -701,7 +700,10 @@ export function completedV2Reply(json: unknown, promptID: string): string {
   if (!assistant.time?.completed || !assistant.finish || assistant.finish === "tool-calls") {
     throw new Error(`assistant turn incomplete after session.wait (${assistant.finish ?? "no finish"})`)
   }
-  return (assistant.content ?? []).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
+  return (assistant.content ?? [])
+    .filter((p: any) => p.type === "text")
+    .map((p: any) => p.text)
+    .join("\n")
 }
 
 function extractAssistantText(body: string): string {
@@ -794,9 +796,7 @@ export function backdateSessions(sandbox: Sandbox, hours = 2): number {
     )
     const table = names.has("session") ? "session" : names.has("session_v2") ? "session_v2" : null
     if (!table) return 0
-    const cols = new Set(
-      (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((r) => r.name),
-    )
+    const cols = new Set((db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((r) => r.name))
     const delta = hours * 3600 * 1000
     const sets = ["time_updated = time_updated - ?"]
     const params: SQLQueryBindings[] = [delta]

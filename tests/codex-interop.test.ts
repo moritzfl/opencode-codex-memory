@@ -58,14 +58,18 @@ describe("resolveCodexInterop", () => {
     expect(viaEnv?.codexMemoryRoot).toBe(path.join(TEST_ROOT, "env-home", "memories"))
     delete process.env.CODEX_HOME
     const viaDefault = resolveCodexInterop({ import: true, export: false })
-    expect(viaDefault?.codexMemoryRoot).toBe(path.join(os.homedir(), ".codex", viaDefault?.codexVersion === "v2" ? "memories_v2" : "memories"))
+    expect(viaDefault?.codexMemoryRoot).toBe(
+      path.join(os.homedir(), ".codex", viaDefault?.codexVersion === "v2" ? "memories_v2" : "memories"),
+    )
   })
 
   it("ignores an empty CODEX_HOME env like codex find_codex_home", () => {
     const { resolveCodexInterop } = interop()
     process.env.CODEX_HOME = ""
     const resolved = resolveCodexInterop({ import: true, export: false })
-    expect(resolved?.codexMemoryRoot).toBe(path.join(os.homedir(), ".codex", resolved?.codexVersion === "v2" ? "memories_v2" : "memories"))
+    expect(resolved?.codexMemoryRoot).toBe(
+      path.join(os.homedir(), ".codex", resolved?.codexVersion === "v2" ? "memories_v2" : "memories"),
+    )
   })
 
   it("fails closed when the codex memory root overlaps the plugin memory root", () => {
@@ -201,7 +205,9 @@ describe("syncCodexImport", () => {
     expect(await ensureBaseline()).toBe(true)
     expect(syncCodexImport(CODEX_MEM, "v1")).toBe(true)
     const diff = await captureWorkspaceDiff()
-    const added = diff.changes.filter((c: { status: string; path: string }) => c.status === "A").map((c: { path: string }) => c.path)
+    const added = diff.changes
+      .filter((c: { status: string; path: string }) => c.status === "A")
+      .map((c: { path: string }) => c.path)
     expect(added).toContain("extensions/codex_import/resources/codex/MEMORY.md")
     expect(added).toContain("extensions/codex_import/resources/codex/memory_summary.md")
     expect(added).toContain("extensions/codex_import/instructions.md")
@@ -371,9 +377,11 @@ describe("Codex memory version", () => {
     const opts = { import: true, export: false, codex_home: CODEX_HOME }
     fs.mkdirSync(path.join(CODEX_HOME, "config.toml"), { recursive: true })
     let warned = ""
-    expect(warnsOf(() => {
-      expect(resolveCodexInterop(opts)).toBeNull()
-    })).toContain("could not read")
+    expect(
+      warnsOf(() => {
+        expect(resolveCodexInterop(opts)).toBeNull()
+      }),
+    ).toContain("could not read")
     expect(codexInteropBlockReason(opts)).toContain("could not read")
     fs.rmSync(path.join(CODEX_HOME, "config.toml"), { recursive: true, force: true })
 
@@ -383,7 +391,7 @@ describe("Codex memory version", () => {
     })
     expect(warned).toContain("could not parse")
 
-    writeConfig('[memories]\nversion = 2\n')
+    writeConfig("[memories]\nversion = 2\n")
     warned = warnsOf(() => {
       expect(resolveCodexInterop(opts)).toBeNull()
     })
@@ -403,15 +411,18 @@ describe("Codex memory version", () => {
     fs.mkdirSync(pluginMemoryRoot(), { recursive: true })
     fs.symlinkSync(pluginMemoryRoot(), path.join(overlapHome, "memories_v2"))
     fs.writeFileSync(path.join(overlapHome, "config.toml"), '[memories]\nversion = "v2"\n')
-    expect(warnsOf(() => {
-      expect(resolveCodexInterop({ import: true, codex_home: overlapHome })).toBeNull()
-    })).toContain("overlaps")
+    expect(
+      warnsOf(() => {
+        expect(resolveCodexInterop({ import: true, codex_home: overlapHome })).toBeNull()
+      }),
+    ).toContain("overlaps")
   })
 })
 
 describe("syncCodexImport v2", () => {
   const V2_ROOT = path.join(CODEX_HOME, "memories_v2")
-  const V2_SUMMARY = "v1\n\n## User Profile\nv2 fact\n\n## What's in Memory\nrollout_summaries/thread.md — detail; thread_id=abc\n"
+  const V2_SUMMARY =
+    "v1\n\n## User Profile\nv2 fact\n\n## What's in Memory\nrollout_summaries/thread.md — detail; thread_id=abc\n"
 
   function seedV2(summary = V2_SUMMARY): void {
     fs.mkdirSync(V2_ROOT, { recursive: true })
@@ -445,7 +456,9 @@ describe("syncCodexImport v2", () => {
     expect(fs.existsSync(path.join(resDir, "MEMORY.md"))).toBe(false)
     expect(fs.readFileSync(path.join(resDir, "memory_summary.md"), "utf8")).toContain("v2 fact")
     expect(fs.readFileSync(path.join(resDir, "note.md"), "utf8")).toBe("keep")
-    expect(fs.readFileSync(path.join(pluginMemoryRoot(), "extensions", "codex_import", "instructions.md"), "utf8")).toContain("no `MEMORY.md`")
+    expect(
+      fs.readFileSync(path.join(pluginMemoryRoot(), "extensions", "codex_import", "instructions.md"), "utf8"),
+    ).toContain("no `MEMORY.md`")
   })
 
   it("forgets from the v2 root when its summary is gone, not from leftover v1 files", () => {
@@ -468,7 +481,12 @@ describe("syncCodexImport v2", () => {
     syncCodexImport(V2_ROOT, "v2")
     fs.rmSync(V2_ROOT, { recursive: true, force: true })
     expect(syncCodexImport(V2_ROOT, "v2")).toBe(false)
-    expect(fs.readFileSync(path.join(pluginMemoryRoot(), "extensions", "codex_import", "resources", "codex", "memory_summary.md"), "utf8")).toContain("v2 fact")
+    expect(
+      fs.readFileSync(
+        path.join(pluginMemoryRoot(), "extensions", "codex_import", "resources", "codex", "memory_summary.md"),
+        "utf8",
+      ),
+    ).toContain("v2 fact")
   })
 })
 
@@ -506,7 +524,8 @@ describe("exportToCodexMemory v2", () => {
 })
 
 describe("plugin Memory V2 writer", () => {
-  const VALID_V2 = "v1\n\n## User Profile\nopencode v2 fact\n\n## User preferences\nkeep it\n\n## General Tips\nnone\n\n## What's in Memory\nhere\n"
+  const VALID_V2 =
+    "v1\n\n## User Profile\nopencode v2 fact\n\n## User preferences\nkeep it\n\n## General Tips\nnone\n\n## What's in Memory\nhere\n"
 
   function useV2Writer(): void {
     const { applyPluginOptions } = require("../src/index.js")
@@ -539,8 +558,12 @@ describe("plugin Memory V2 writer", () => {
     expect(exportToCodexMemory(CODEX_MEM, "v1")).toBe(true)
     const extDir = path.join(CODEX_MEM, "extensions", "opencode_import")
     expect(fs.existsSync(path.join(extDir, "resources", "opencode", "MEMORY.md"))).toBe(false)
-    expect(fs.readFileSync(path.join(extDir, "resources", "opencode", "memory_summary.md"), "utf8")).toContain("opencode v2 fact")
-    expect(fs.readFileSync(path.join(extDir, "instructions.md"), "utf8")).toContain("Fold supported claims into Codex `MEMORY.md`")
+    expect(fs.readFileSync(path.join(extDir, "resources", "opencode", "memory_summary.md"), "utf8")).toContain(
+      "opencode v2 fact",
+    )
+    expect(fs.readFileSync(path.join(extDir, "instructions.md"), "utf8")).toContain(
+      "Fold supported claims into Codex `MEMORY.md`",
+    )
   })
 
   it("tells a Codex v2 store not to create a handbook from our v2 summary", () => {

@@ -2,7 +2,13 @@ import { SCAN_LIMIT } from "./store.js"
 import type { MemoryStore } from "./store.js"
 import { getPluginInput } from "./llm.js"
 import { recordDiscoveryStatus } from "./diagnostics.js"
-import { hostListSessionsGlobal, hostPartType, hostSessionMessages, pluginHttpGet, withHostTimeout } from "./host-client.js"
+import {
+  hostListSessionsGlobal,
+  hostPartType,
+  hostSessionMessages,
+  pluginHttpGet,
+  withHostTimeout,
+} from "./host-client.js"
 
 export interface SessionRow {
   id: string
@@ -41,11 +47,7 @@ export function resetDiscoveryCacheForTest(): void {
 
 export async function listRecentSessions(limit: number = SCAN_LIMIT): Promise<SessionRow[]> {
   const now = Date.now()
-  if (
-    discoveryCache &&
-    discoveryCache.limit >= limit &&
-    now - discoveryCache.at < DISCOVERY_CACHE_MS
-  ) {
+  if (discoveryCache && discoveryCache.limit >= limit && now - discoveryCache.at < DISCOVERY_CACHE_MS) {
     return discoveryCache.rows.slice(0, limit)
   }
 
@@ -141,11 +143,14 @@ export async function loadTranscript(sessionId: string): Promise<TranscriptMessa
     for (const part of row?.parts ?? []) {
       const question = part as { tool?: string; ignored?: boolean; state?: { input?: unknown; output?: unknown } }
       const answer = question?.state?.output
-      const userReply = question?.tool === "question" && question.ignored !== true
-        && typeof answer === "string" && answer.startsWith("User has answered your questions:")
-        && /"="(?!Unanswered")[^"]+"/.test(answer)
-        ? { question: JSON.stringify(question.state?.input ?? {}), answer }
-        : undefined
+      const userReply =
+        question?.tool === "question" &&
+        question.ignored !== true &&
+        typeof answer === "string" &&
+        answer.startsWith("User has answered your questions:") &&
+        /"="(?!Unanswered")[^"]+"/.test(answer)
+          ? { question: JSON.stringify(question.state?.input ?? {}), answer }
+          : undefined
       out.push({
         type: hostPartType(part),
         role,
@@ -208,10 +213,7 @@ export interface EligibilityOptions {
   excludeSession?: string
 }
 
-export async function selectEligibleSessions(
-  store: MemoryStore,
-  opts: EligibilityOptions,
-): Promise<SessionRow[]> {
+export async function selectEligibleSessions(store: MemoryStore, opts: EligibilityOptions): Promise<SessionRow[]> {
   const now = Date.now()
   const minUpdated = now - opts.maxAgeDays * 24 * 60 * 60 * 1000
   const maxUpdated = now - opts.minIdleHours * 60 * 60 * 1000

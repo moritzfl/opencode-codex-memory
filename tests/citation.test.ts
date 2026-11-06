@@ -120,7 +120,12 @@ ses_abc123
     expect(r.length).toBe(1)
     expect(r[0].entries).toEqual([
       { path: "MEMORY.md", lineStart: 12, lineEnd: 14, note: "build command for the api service" },
-      { path: "rollout_summaries/2026-02-17T21-23-02-ln3m-example.md", lineStart: 10, lineEnd: 12, note: "weekly report format" },
+      {
+        path: "rollout_summaries/2026-02-17T21-23-02-ln3m-example.md",
+        lineStart: 10,
+        lineEnd: 12,
+        note: "weekly report format",
+      },
     ])
   })
 
@@ -168,7 +173,8 @@ describe("parseCitations", () => {
 
 describe("extractCitedSessionIds", () => {
   it("dedupes session ids across blocks", () => {
-    const text = `<memory-citation><citation_entries>a,b</citation_entries></memory-citation>` +
+    const text =
+      `<memory-citation><citation_entries>a,b</citation_entries></memory-citation>` +
       `<memory-citation><citation_entries>b,c</citation_entries></memory-citation>`
     expect(extractCitedSessionIds(text).sort()).toEqual(["a", "b", "c"])
   })
@@ -205,7 +211,9 @@ describe("experimental.text.complete hook", () => {
       generated_at: Date.now(),
     })
 
-    const output = { text: `answer\n\n<memory-citation>\n<citation_entries>ses_cited_tc</citation_entries>\n</memory-citation>` }
+    const output = {
+      text: `answer\n\n<memory-citation>\n<citation_entries>ses_cited_tc</citation_entries>\n</memory-citation>`,
+    }
     await hooks["experimental.text.complete"](
       { sessionID: "ses_main_tc", messageID: "msg_1", partID: "prt_tc_1" },
       output,
@@ -215,7 +223,9 @@ describe("experimental.text.complete hook", () => {
     expect(row.usage_count).toBe(1)
 
     // Second sight of the same part (e.g. the event fallback) records nothing.
-    const again = { text: `answer\n\n<memory-citation>\n<citation_entries>ses_cited_tc</citation_entries>\n</memory-citation>` }
+    const again = {
+      text: `answer\n\n<memory-citation>\n<citation_entries>ses_cited_tc</citation_entries>\n</memory-citation>`,
+    }
     await hooks["experimental.text.complete"](
       { sessionID: "ses_main_tc", messageID: "msg_1", partID: "prt_tc_1" },
       again,

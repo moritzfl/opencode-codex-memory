@@ -2,7 +2,7 @@
 
 `opencode-codex-memory` is a TypeScript port of codex's memory system, packaged as a
 standalone opencode plugin (no core changes, no MCP server, no separate process).
-This document explains *how the system is shaped and why*, and how to keep it
+This document explains _how the system is shaped and why_, and how to keep it
 aligned with upstream codex over time.
 
 For installation, configuration, and daily use, start with the
@@ -148,7 +148,7 @@ constraints — read before changing the corresponding subsystem.
 
 opencode's V1 `experimental.chat.system.transform` has no epoch-aware injection;
 the system prompt is rebuilt each turn, and codex's V2 `SystemContext.Source` is
-not exposed to plugins. **Workaround:** append the *same byte-identical string*
+not exposed to plugins. **Workaround:** append the _same byte-identical string_
 every turn.
 
 opencode pre-joins everything of its own (agent/provider prompt, environment,
@@ -160,13 +160,13 @@ puts cache breakpoints on the first two system messages
 (`provider/transform.ts`, `.slice(0, 2)`). The stable memory block therefore
 gets its own cache segment: changing memory invalidates that segment without
 invalidating opencode's base prompt. The plugin caches the summary in process
-  memory keyed by summary path, stats it each turn, and re-reads only after an external edit
-  changes its mtime, size, or inode, or Phase 2 explicitly invalidates the cache. Sessionless
-  invocations of the same hook (used by opencode while generating agent
-  definitions) are ignored, as is a symlinked memory root or summary file.
-  OpenCode's hidden `title` agent reuses the real conversation `sessionID` and
-  the hook does not receive `agent`, so title-generation is skipped by sniffing
-  the title prompt already present in `system[]`.
+memory keyed by summary path, stats it each turn, and re-reads only after an external edit
+changes its mtime, size, or inode, or Phase 2 explicitly invalidates the cache. Sessionless
+invocations of the same hook (used by opencode while generating agent
+definitions) are ignored, as is a symlinked memory root or summary file.
+OpenCode's hidden `title` agent reuses the real conversation `sessionID` and
+the hook does not receive `agent`, so title-generation is skipped by sniffing
+the title prompt already present in `system[]`.
 
 Limitations, both accepted:
 
@@ -176,7 +176,7 @@ Limitations, both accepted:
   whole array is joined into the request's `instructions` field
   (`request.ts`), so no system cache breakpoints exist and D1 buys nothing
   there. Injection itself is unaffected — only the caching benefit is.
-- Another plugin appending a *volatile* string triggers the collapse and shares
+- Another plugin appending a _volatile_ string triggers the collapse and shares
   one cache segment with ours, invalidating it whenever that plugin's text
   changes. Plugin order is deterministic, so a stable co-tenant is harmless.
 - Title-generation skip sniffs OpenCode's default `title` agent prompt. A
@@ -301,16 +301,16 @@ authenticated client (`input.client`), which shares auth with the host:
   A first-time empty transcript finalizes as no-output; an empty transcript for
   a session with an existing extraction retries instead of deleting that row.
 - Discovery: `GET /experimental/session?roots=true` (`Session.listGlobal`) —
-   one call across all projects. The V1 plugin client has no `experimental`
-   namespace, so the call goes through the host client's hey-api transport
-   (`client._client.get`) which already carries baseUrl + auth. The SDK also
-   auto-injects `directory` on GETs (project scope); we pass `directory=""` so
-   the handler runs listGlobal without a directory filter — required because
-   memory is global. Fail-safe: any error skips the pass and never finalizes a
-   job. The pass is also rate-limited (30s min interval). Helper-session
-   cleanup after reload uses a title-filtered, cursor-paginated host-wide list
-   so memory-root extract/consolidate sessions are visible even beyond the
-   first page (project-scoped `session.list` cannot see them).
+  one call across all projects. The V1 plugin client has no `experimental`
+  namespace, so the call goes through the host client's hey-api transport
+  (`client._client.get`) which already carries baseUrl + auth. The SDK also
+  auto-injects `directory` on GETs (project scope); we pass `directory=""` so
+  the handler runs listGlobal without a directory filter — required because
+  memory is global. Fail-safe: any error skips the pass and never finalizes a
+  job. The pass is also rate-limited (30s min interval). Helper-session
+  cleanup after reload uses a title-filtered, cursor-paginated host-wide list
+  so memory-root extract/consolidate sessions are visible even beyond the
+  first page (project-scoped `session.list` cannot see them).
 
 Trade-off accepted: discovery rides an experimental route (stable since
 1.17.x) rather than reading `opencode.db`. The only SQLite the plugin touches
@@ -350,7 +350,7 @@ schema change.
 
 #### Codex CLI (`src/codex-interop.ts`)
 
-Two-way exchange of *consolidated* global memory:
+Two-way exchange of _consolidated_ global memory:
 
 Exchange runs for each active writer. A Memory V2 writer receives the same
 byte copies under `memories_v2/extensions/` and is instructed to fold them
@@ -425,22 +425,22 @@ root" invariant. The extension approach is pure content.
 
 ## Known gaps vs codex (accepted trade-offs)
 
-| Gap | Codex | This plugin | Mitigation |
-|---|---|---|---|
-| Network sandbox | Seatbelt | Tool-permission deny on subagents | `memorize*` deny `bash`/`webfetch`/`websearch`/`task` |
-| Consolidator FS scope | `WorkspaceWrite` limited to memory root | Sub-session `directory` = memory root → project-bound tools only see that tree; user projects need `external_directory` (denied) | No shell/network; tool-permission sandbox, not process Seatbelt |
-| Token counting | tiktoken | chars/4 estimate | Sufficient for the 2500-token cap |
-| Cache-stable injection | V2 `SystemContext.Source` | V1 hook + byte-identical append | Content-addressed provider caches (D1) |
-| LLM call API | Internal model client | HTTP API → subagent sessions | Reuses opencode auth/usage (D3) |
-| Transcript access | Direct rollout files (own format) | `session.messages` + `experimental.session.list`; `opencode.db` never read | Official surfaces only (D4) |
-| Git baseline | gix / libgit2 | `isomorphic-git` (pure JS) | No external binary; git bundled |
-| Hook stability | N/A (core code) | `experimental.*` V1 hooks may deprecate | Migrate to V2 SDK if/when it exposes the seam |
-| Rate-limit awareness | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open | Phase-1 30s anti-stampede plus an observed-quota circuit breaker (1h, scoped per configured model or phase default; a fallback chain is gated only when every model is backed off); quota failures do not burn stage-1 retries | See `src/ratelimit.ts`; wire live provider quota when opencode exposes it |
-| Plugin dispose / reload | N/A (in-process core) | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions; startup reseeds helpers via paginated host-wide `experimental.session` | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry |
-| Per-instance state | Single process per home | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win. OpenCode2 ref-counts live location instances: panel toggles survive later setups, a disposed location re-points the shim to a survivor, and only the last dispose shuts the pipeline down | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter |
-| Memory version lifetime | Thread-extension runtime state | Persistent per-session read-version stamp | New sessions follow config; resumed sessions retain their namespace |
-| External-context pollution via codemode `fetch()` | Every external-context channel marks the thread (tool output flag, MCP calls, MCP hooks) | OpenCode2 codemode `fetch()` is a sandbox extension, not a tool, so `tool.execute.before` never fires and `disable_on_external_context` cannot see it. Inner codemode *tool* calls (`websearch`, `webfetch`, MCP) are marked normally | Accepted gap: no code-text heuristics (`fetch(` is too common a name). Revisit when OpenCode reports codemode web requests to plugins |
-| Extraction model config (OpenCode2) | Model client of the running thread | Extraction prefers the registered service's `generate.text`, which resolves models against the server's global config (no location parameter); a provider defined only in a project's config is unavailable there | Deliberate: memory is global, and the service call is cancellable. The plugin-location `ctx.generate.text` fallback applies only when no registered service offers `generate.text` |
+| Gap                                               | Codex                                                                                    | This plugin                                                                                                                                                                                                                                                                                                                                               | Mitigation                                                                                                                                                                         |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Network sandbox                                   | Seatbelt                                                                                 | Tool-permission deny on subagents                                                                                                                                                                                                                                                                                                                         | `memorize*` deny `bash`/`webfetch`/`websearch`/`task`                                                                                                                              |
+| Consolidator FS scope                             | `WorkspaceWrite` limited to memory root                                                  | Sub-session `directory` = memory root → project-bound tools only see that tree; user projects need `external_directory` (denied)                                                                                                                                                                                                                          | No shell/network; tool-permission sandbox, not process Seatbelt                                                                                                                    |
+| Token counting                                    | tiktoken                                                                                 | chars/4 estimate                                                                                                                                                                                                                                                                                                                                          | Sufficient for the 2500-token cap                                                                                                                                                  |
+| Cache-stable injection                            | V2 `SystemContext.Source`                                                                | V1 hook + byte-identical append                                                                                                                                                                                                                                                                                                                           | Content-addressed provider caches (D1)                                                                                                                                             |
+| LLM call API                                      | Internal model client                                                                    | HTTP API → subagent sessions                                                                                                                                                                                                                                                                                                                              | Reuses opencode auth/usage (D3)                                                                                                                                                    |
+| Transcript access                                 | Direct rollout files (own format)                                                        | `session.messages` + `experimental.session.list`; `opencode.db` never read                                                                                                                                                                                                                                                                                | Official surfaces only (D4)                                                                                                                                                        |
+| Git baseline                                      | gix / libgit2                                                                            | `isomorphic-git` (pure JS)                                                                                                                                                                                                                                                                                                                                | No external binary; git bundled                                                                                                                                                    |
+| Hook stability                                    | N/A (core code)                                                                          | `experimental.*` V1 hooks may deprecate                                                                                                                                                                                                                                                                                                                   | Migrate to V2 SDK if/when it exposes the seam                                                                                                                                      |
+| Rate-limit awareness                              | Provider rate-limit info (`min_rate_limit_remaining_percent`), fail open                 | Phase-1 30s anti-stampede plus an observed-quota circuit breaker (1h, scoped per configured model or phase default; a fallback chain is gated only when every model is backed off); quota failures do not burn stage-1 retries                                                                                                                            | See `src/ratelimit.ts`; wire live provider quota when opencode exposes it                                                                                                          |
+| Plugin dispose / reload                           | N/A (in-process core)                                                                    | `dispose` aborts `pluginShutdownSignal` (extract) + phase-2 scope (consolidator), releases jobs without 1h backoff; best-effort `session.abort` on sub-sessions; startup reseeds helpers via paginated host-wide `experimental.session`                                                                                                                   | Signal-driven cancel unblocks both phases; host `session.abort` still best-effort for server-side cleanup. Cross-process lease may still run until expiry                          |
+| Per-instance state                                | Single process per home                                                                  | Module-global options/client/caches; when one opencode process hosts several instances (directories), the last-booted instance's plugin options and client win. OpenCode2 ref-counts live location instances: panel toggles survive later setups, a disposed location re-points the shim to a survivor, and only the last dispose shuts the pipeline down | Memory itself is global, so shared state is mostly correct; revisit if per-project plugin options ever matter                                                                      |
+| Memory version lifetime                           | Thread-extension runtime state                                                           | Persistent per-session read-version stamp                                                                                                                                                                                                                                                                                                                 | New sessions follow config; resumed sessions retain their namespace                                                                                                                |
+| External-context pollution via codemode `fetch()` | Every external-context channel marks the thread (tool output flag, MCP calls, MCP hooks) | OpenCode2 codemode `fetch()` is a sandbox extension, not a tool, so `tool.execute.before` never fires and `disable_on_external_context` cannot see it. Inner codemode _tool_ calls (`websearch`, `webfetch`, MCP) are marked normally                                                                                                                     | Accepted gap: no code-text heuristics (`fetch(` is too common a name). Revisit when OpenCode reports codemode web requests to plugins                                              |
+| Extraction model config (OpenCode2)               | Model client of the running thread                                                       | Extraction prefers the registered service's `generate.text`, which resolves models against the server's global config (no location parameter); a provider defined only in a project's config is unavailable there                                                                                                                                         | Deliberate: memory is global, and the service call is cancellable. The plugin-location `ctx.generate.text` fallback applies only when no registered service offers `generate.text` |
 
 ---
 

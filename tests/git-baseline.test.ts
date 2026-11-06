@@ -13,8 +13,7 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
 })
 
 function memFile(rel: string): string {

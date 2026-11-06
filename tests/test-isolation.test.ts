@@ -14,7 +14,10 @@ it("lifecycle tests never write to the fallback memory home during teardown", as
   const env: NodeJS.ProcessEnv = { ...process.env, OPENCODE_CODEX_MEMORY_HOME: home }
   delete env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   const child = Bun.spawn([process.execPath, "test", "tests/lifecycle.test.ts"], {
-    cwd: path.resolve(import.meta.dirname, ".."), env, stdout: "pipe", stderr: "pipe",
+    cwd: path.resolve(import.meta.dirname, ".."),
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
   })
   try {
     const [code, stdout, stderr] = await Promise.all([

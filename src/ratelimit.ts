@@ -14,7 +14,10 @@ export interface ProviderCapacityBackoff {
 }
 
 export class ProviderCapacityError extends Error {
-  constructor(message: string, readonly statusCode?: number) {
+  constructor(
+    message: string,
+    readonly statusCode?: number,
+  ) {
     super(message)
     this.name = "ProviderCapacityError"
   }
@@ -55,7 +58,7 @@ const PROVIDER_CAPACITY_RE =
 const REQUEST_SIZE_RE = /request too large|context[\s_-]?length|maximum context|prompt is too long|too many tokens/i
 
 function errorRecord(error: unknown): Record<string, unknown> | null {
-  return error && typeof error === "object" ? error as Record<string, unknown> : null
+  return error && typeof error === "object" ? (error as Record<string, unknown>) : null
 }
 
 function providerCapacityStatusCode(error: unknown): number | null {

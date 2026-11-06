@@ -1,7 +1,15 @@
 import fs from "fs"
 import path from "path"
 import { tool } from "@opencode-ai/plugin"
-import { allMemoryRoots, memoryDbPath, memoryRoot, memorySummaryPath, sessionMetaDbPath, dataRoot, memoryHomeSource } from "../src/paths.js"
+import {
+  allMemoryRoots,
+  memoryDbPath,
+  memoryRoot,
+  memorySummaryPath,
+  sessionMetaDbPath,
+  dataRoot,
+  memoryHomeSource,
+} from "../src/paths.js"
 import { clearAllVersionMemoryData, MemoryStore, PHASE2_COOLDOWN_MS } from "../src/store.js"
 import { invalidateCache } from "../src/source.js"
 import { estimateTokens } from "../src/token.js"
@@ -10,11 +18,7 @@ import { isPhase2InFlight } from "../src/phase2.js"
 import { pluginOptions, getConfigWarnings } from "../src/options.js"
 import { codexInteropBlockReason, codexInteropMtimes, resolveCodexInterop } from "../src/codex-interop.js"
 import { claudeImportStatus, resolveClaudeHome } from "../src/claude-import.js"
-import {
-  formatDiagnosticLine,
-  getDiscoveryStatus,
-  getRecentDiagnostics,
-} from "../src/diagnostics.js"
+import { formatDiagnosticLine, getDiscoveryStatus, getRecentDiagnostics } from "../src/diagnostics.js"
 import { isPluginShuttingDown } from "../src/lifecycle.js"
 import { getAgentHealth } from "../src/agent-health.js"
 import { activeProviderCapacityBackoffs } from "../src/ratelimit.js"
@@ -130,8 +134,7 @@ function renderEffectiveConfig(): string[] {
   } else {
     const home = resolveClaudeHome(cl)
     const reachable = fs.existsSync(home)
-    const allow =
-      cl.projects && cl.projects.length > 0 ? ` projects=[${cl.projects.join(", ")}]` : " projects=all"
+    const allow = cl.projects && cl.projects.length > 0 ? ` projects=[${cl.projects.join(", ")}]` : " projects=all"
     lines.push(
       `  claude_import: enabled${allow}`,
       `    claude home: ${home}${reachable ? "" : " (not found — nothing imported until Claude Code creates it)"}`,
@@ -165,7 +168,11 @@ function listMemoriesDir(): string[] {
       // lstat: report symlinks as entries but never walk THROUGH them —
       // a link to a big/looping directory must not be followed.
       let stat
-      try { stat = fs.lstatSync(abs) } catch { continue }
+      try {
+        stat = fs.lstatSync(abs)
+      } catch {
+        continue
+      }
       if (stat.isSymbolicLink()) {
         out.push(`${rel}@`)
       } else if (stat.isDirectory()) {
@@ -223,7 +230,11 @@ export function performMemoryReset(): { ok: boolean; message: string } {
     // codex keeps its state DB pool open across resets (clear_memory_roots_contents
     // only wipes directories); closing here would strand cached handles elsewhere.
     invalidateCache()
-    return { ok: true, message: "Memory reset complete. Extracted memories and jobs cleared, memories directory (incl. git history) wiped, cache invalidated. Per-session memory modes were preserved." }
+    return {
+      ok: true,
+      message:
+        "Memory reset complete. Extracted memories and jobs cleared, memories directory (incl. git history) wiped, cache invalidated. Per-session memory modes were preserved.",
+    }
   } catch (err) {
     return { ok: false, message: `memory_reset error: ${(err as Error).message}` }
   }
@@ -266,11 +277,7 @@ function fmtWatermarkMs(ms: number | null | undefined): string {
   return new Date(ms).toISOString()
 }
 
-function phase2NoteLines(phase2: {
-  status: string
-  last_error: string | null
-  finished_at: number | null
-}): string[] {
+function phase2NoteLines(phase2: { status: string; last_error: string | null; finished_at: number | null }): string[] {
   if (phase2.last_error || phase2.status === "running" || phase2.finished_at == null) return []
   const until = phase2.finished_at + PHASE2_COOLDOWN_MS / 1000
   const now = Math.floor(Date.now() / 1000)
@@ -290,7 +297,12 @@ export const memory_inspect = tool({
     "effective plugin options, and any configuration warnings. Use it to verify " +
     "configuration and debug why memory is not building. Read-only.",
   args: {
-    min_consolidated_threads: tool.schema.number().int().min(1).max(4096).optional()
+    min_consolidated_threads: tool.schema
+      .number()
+      .int()
+      .min(1)
+      .max(4096)
+      .optional()
       .describe("V2 readiness threshold: distinct sessions in a successful consolidation (default 20)."),
   },
   async execute(args, ctx) {
@@ -299,171 +311,165 @@ export const memory_inspect = tool({
 })
 
 function inspect(args: { min_consolidated_threads?: number }, ctx?: { sessionID?: string }) {
-    try {
-      // Refuse to walk/report through a symlinked root (same rule as reset).
-      assertMemoryRootSafe()
-      const store = new MemoryStore()
-      const outputs = store.stage1Outputs()
-      const staleBeforeSec = Math.floor(Date.now() / 1000) - pluginOptions.max_rollout_age_days * 86_400
-      const stage1Jobs = store.stage1JobSnapshot(staleBeforeSec)
-      const summaryPath = memorySummaryPath()
-      let summaryChars = 0
-      let summaryTokens = 0
-      if (fs.existsSync(summaryPath)) {
-        const text = readRegularFileNoFollow(summaryPath).content.toString("utf8")
-        summaryChars = text.length
-        summaryTokens = estimateTokens(text)
-      }
-      const listing = listMemoriesDir()
-      const phase2 = store.phase2JobSnapshot()
-      const phase2Lines = phase2
-        ? [
-            `phase2_status: ${phase2.status}`,
-            `phase2_last_error: ${phase2.last_error ?? "none"}`,
-            `phase2_started_at: ${fmtUnixSec(phase2.started_at)}`,
-            `phase2_running_for: ${phase2.status === "running" ? fmtElapsedSec(phase2.started_at) : "n/a"}`,
-            `phase2_lease_until: ${fmtUnixSec(phase2.lease_until)}`,
-            `phase2_retry_at: ${fmtUnixSec(phase2.retry_at)}`,
-            `phase2_last_attempt_finished_at: ${fmtUnixSec(phase2.finished_at)}`,
-            `phase2_last_success_watermark: ${fmtWatermarkMs(phase2.last_success_watermark)}`,
-            // Clean-success finish only — never a failure timestamp.
-            `phase2_last_success_finished_at: ${fmtUnixSec(phase2.success_finished_at)}`,
-            ...phase2NoteLines(phase2),
-          ]
-        : [
-            "phase2_status: none",
-            "phase2_last_error: none",
-            "phase2_started_at: none",
-            "phase2_running_for: n/a",
-            "phase2_lease_until: none",
-            "phase2_retry_at: none",
-            "phase2_last_attempt_finished_at: none",
-            "phase2_last_success_watermark: none",
-            "phase2_last_success_finished_at: none",
-          ]
-      const stage1StatusParts = Object.entries(stage1Jobs.by_status)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([s, c]) => `${s}=${c}`)
-      const fc = stage1Jobs.by_failure_class
-      const failureParts = [
-        fc.due > 0 ? `due=${fc.due}` : "",
-        fc.backoff > 0 ? `backoff=${fc.backoff}` : "",
-        fc.provider_capacity > 0 ? `provider_capacity=${fc.provider_capacity}` : "",
-        fc.other_exhausted > 0 ? `other_exhausted=${fc.other_exhausted}` : "",
-      ].filter(Boolean)
-      const stage1Lines = [
-        `stage1_jobs: ${stage1StatusParts.length > 0 ? stage1StatusParts.join(" ") : "none"}`,
-        `stage1_failures: ${failureParts.length > 0 ? failureParts.join(" ") : "none"}`,
-        ...(stage1Jobs.stale_exhausted > 0
-          ? [
-              `stage1_stale_exhausted: ${stage1Jobs.stale_exhausted} (older than max_rollout_age_days, will not retry)`,
-            ]
-          : []),
-        ...stage1Jobs.recent_errors.map((e) => {
-          const klass = e.failure_class ? `, ${e.failure_class}` : ""
-          const retry = e.retry_at ? ` retry_at=${fmtUnixSec(e.retry_at)}` : ""
-          return `  stage1_error ${e.session_id} (${e.status}${klass}): ${e.last_error.slice(0, 200)}${retry}`
-        }),
-      ]
-      const discovery = getDiscoveryStatus()
-      const discoveryLine = discovery
-        ? `discovery: ${discovery.ok ? "ok" : "failed"} count=${discovery.count} at=${new Date(discovery.at).toISOString()}${discovery.error ? ` error=${discovery.error}` : ""} (this process's session list, not total chats)`
-        : "discovery: never ran (no phase-1 pass yet this process)"
-      const idleHours = pluginOptions.min_rollout_idle_hours
-      const eligibilityHint =
-        `eligibility: sessions must be idle ≥ ${idleHours}h and younger than ${pluginOptions.max_rollout_age_days}d ` +
-        `(generate_memories=${pluginOptions.generate_memories}). ` +
-        `For faster local testing, set min_rollout_idle_hours to 1 (clamp floor).`
-      const processLines = [
-        `phase2_in_flight: ${isPhase2InFlight()}`,
-        `plugin_shutting_down: ${isPluginShuttingDown()}`,
-      ]
-      const capacityBackoffs = activeProviderCapacityBackoffs()
-      const capacityLines = capacityBackoffs.length > 0
+  try {
+    // Refuse to walk/report through a symlinked root (same rule as reset).
+    assertMemoryRootSafe()
+    const store = new MemoryStore()
+    const outputs = store.stage1Outputs()
+    const staleBeforeSec = Math.floor(Date.now() / 1000) - pluginOptions.max_rollout_age_days * 86_400
+    const stage1Jobs = store.stage1JobSnapshot(staleBeforeSec)
+    const summaryPath = memorySummaryPath()
+    let summaryChars = 0
+    let summaryTokens = 0
+    if (fs.existsSync(summaryPath)) {
+      const text = readRegularFileNoFollow(summaryPath).content.toString("utf8")
+      summaryChars = text.length
+      summaryTokens = estimateTokens(text)
+    }
+    const listing = listMemoriesDir()
+    const phase2 = store.phase2JobSnapshot()
+    const phase2Lines = phase2
+      ? [
+          `phase2_status: ${phase2.status}`,
+          `phase2_last_error: ${phase2.last_error ?? "none"}`,
+          `phase2_started_at: ${fmtUnixSec(phase2.started_at)}`,
+          `phase2_running_for: ${phase2.status === "running" ? fmtElapsedSec(phase2.started_at) : "n/a"}`,
+          `phase2_lease_until: ${fmtUnixSec(phase2.lease_until)}`,
+          `phase2_retry_at: ${fmtUnixSec(phase2.retry_at)}`,
+          `phase2_last_attempt_finished_at: ${fmtUnixSec(phase2.finished_at)}`,
+          `phase2_last_success_watermark: ${fmtWatermarkMs(phase2.last_success_watermark)}`,
+          // Clean-success finish only — never a failure timestamp.
+          `phase2_last_success_finished_at: ${fmtUnixSec(phase2.success_finished_at)}`,
+          ...phase2NoteLines(phase2),
+        ]
+      : [
+          "phase2_status: none",
+          "phase2_last_error: none",
+          "phase2_started_at: none",
+          "phase2_running_for: n/a",
+          "phase2_lease_until: none",
+          "phase2_retry_at: none",
+          "phase2_last_attempt_finished_at: none",
+          "phase2_last_success_watermark: none",
+          "phase2_last_success_finished_at: none",
+        ]
+    const stage1StatusParts = Object.entries(stage1Jobs.by_status)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([s, c]) => `${s}=${c}`)
+    const fc = stage1Jobs.by_failure_class
+    const failureParts = [
+      fc.due > 0 ? `due=${fc.due}` : "",
+      fc.backoff > 0 ? `backoff=${fc.backoff}` : "",
+      fc.provider_capacity > 0 ? `provider_capacity=${fc.provider_capacity}` : "",
+      fc.other_exhausted > 0 ? `other_exhausted=${fc.other_exhausted}` : "",
+    ].filter(Boolean)
+    const stage1Lines = [
+      `stage1_jobs: ${stage1StatusParts.length > 0 ? stage1StatusParts.join(" ") : "none"}`,
+      `stage1_failures: ${failureParts.length > 0 ? failureParts.join(" ") : "none"}`,
+      ...(stage1Jobs.stale_exhausted > 0
+        ? [`stage1_stale_exhausted: ${stage1Jobs.stale_exhausted} (older than max_rollout_age_days, will not retry)`]
+        : []),
+      ...stage1Jobs.recent_errors.map((e) => {
+        const klass = e.failure_class ? `, ${e.failure_class}` : ""
+        const retry = e.retry_at ? ` retry_at=${fmtUnixSec(e.retry_at)}` : ""
+        return `  stage1_error ${e.session_id} (${e.status}${klass}): ${e.last_error.slice(0, 200)}${retry}`
+      }),
+    ]
+    const discovery = getDiscoveryStatus()
+    const discoveryLine = discovery
+      ? `discovery: ${discovery.ok ? "ok" : "failed"} count=${discovery.count} at=${new Date(discovery.at).toISOString()}${discovery.error ? ` error=${discovery.error}` : ""} (this process's session list, not total chats)`
+      : "discovery: never ran (no phase-1 pass yet this process)"
+    const idleHours = pluginOptions.min_rollout_idle_hours
+    const eligibilityHint =
+      `eligibility: sessions must be idle ≥ ${idleHours}h and younger than ${pluginOptions.max_rollout_age_days}d ` +
+      `(generate_memories=${pluginOptions.generate_memories}). ` +
+      `For faster local testing, set min_rollout_idle_hours to 1 (clamp floor).`
+    const processLines = [`phase2_in_flight: ${isPhase2InFlight()}`, `plugin_shutting_down: ${isPluginShuttingDown()}`]
+    const capacityBackoffs = activeProviderCapacityBackoffs()
+    const capacityLines =
+      capacityBackoffs.length > 0
         ? capacityBackoffs.map((b) => `provider_capacity_backoff ${b.scope}: retry_at=${fmtUnixSec(b.retry_at)}`)
         : ["provider_capacity_backoff: none"]
-      const diagnostics = getRecentDiagnostics(12)
-      const migration = readMigrationStatus(args.min_consolidated_threads)
-      const pipelines = memoryPipelineSnapshots()
-      const diagnosticLines =
-        diagnostics.length > 0
-          ? ["recent_events:", ...diagnostics.map((e) => `  ${formatDiagnosticLine(e)}`)]
-          : ["recent_events: none"]
-      const out = [
-        `stage1_outputs: ${outputs.length}`,
-        `read_version: ${peekSessionMemoryVersion(ctx?.sessionID)}`,
-        `dual_write: ${pluginOptions.dual_write}`,
-        `v2_ready: ${migration.v2Ready}`,
-        `v2_not_ready_reason: ${migration.v2NotReadyReason ?? "none"}`,
-        `v2_summary_bytes: ${migration.v2SummaryBytes ?? "unknown"} (UTF-8 on disk)`,
-        `v2_injected_summary_bytes: ${migration.v2InjectedSummaryBytes ?? "unknown"} (UTF-8; capped under 10000, including truncation marker)`,
-        `v2_consolidated_threads: ${migration.v2ConsolidatedThreads} (minimum ${migration.minConsolidatedThreads})`,
-        ...pipelines.flatMap((p) => [
-          `pipeline_${p.version}: outputs=${p.stage1Count}, phase2=${p.phase2?.status ?? "none"}, root=${p.root}`,
-          `  pipeline_${p.version}_phase2_last_error: ${p.phase2?.last_error ?? "none"}`,
-          `  pipeline_${p.version}_phase2_retry_at: ${fmtUnixSec(p.phase2?.retry_at ?? null)}`,
-        ]),
-        ...stage1Lines,
-        ...phase2Lines,
-        discoveryLine,
-        eligibilityHint,
-        ...processLines,
-        ...capacityLines,
-        `memory_summary_chars: ${summaryChars}`,
-        `memory_summary_tokens_est: ${summaryTokens} (on disk; injection caps at ~2500)`,
-        `memories_dir_entries: ${listing.length}`,
-        "",
-        ...renderEffectiveConfig(),
-        "",
-        ...renderAgentHealth(),
-        "",
-        ...diagnosticLines,
-        "",
-        "Files:",
-        listing.length > 0 ? listing.join("\n") : "(empty)",
-      ].join("\n")
-      return {
-        output: out,
-        metadata: {
-          stage1_count: outputs.length,
-          migration,
-          pipelines,
-          read_version: peekSessionMemoryVersion(ctx?.sessionID),
-          stage1_jobs: stage1Jobs.by_status,
-          stage1_failures: stage1Jobs.by_failure_class,
-          stage1_stale_exhausted: stage1Jobs.stale_exhausted,
-          stage1_recent_errors: stage1Jobs.recent_errors,
-          phase2_status: phase2?.status ?? null,
-          phase2_last_error: phase2?.last_error ?? null,
-          phase2_retry_at: phase2?.retry_at ?? null,
-          phase2_last_attempt_finished_at: phase2?.finished_at ?? null,
-          phase2_last_success_watermark: phase2?.last_success_watermark ?? null,
-          phase2_last_success_finished_at: phase2?.success_finished_at ?? null,
-          provider_capacity_backoffs: capacityBackoffs,
-          // Back-compat aliases used by earlier inspect consumers.
-          phase2_last_finished_at: phase2?.success_finished_at ?? null,
-          discovery,
-          summary_chars: summaryChars,
-          summary_tokens_est: summaryTokens,
-          files: listing,
-          effective_options: {
-            ...pluginOptions,
-            codex_interop: { ...pluginOptions.codex_interop },
-            claude_import: {
-              ...pluginOptions.claude_import,
-              ...(pluginOptions.claude_import.projects
-                ? { projects: [...pluginOptions.claude_import.projects] }
-                : {}),
-            },
+    const diagnostics = getRecentDiagnostics(12)
+    const migration = readMigrationStatus(args.min_consolidated_threads)
+    const pipelines = memoryPipelineSnapshots()
+    const diagnosticLines =
+      diagnostics.length > 0
+        ? ["recent_events:", ...diagnostics.map((e) => `  ${formatDiagnosticLine(e)}`)]
+        : ["recent_events: none"]
+    const out = [
+      `stage1_outputs: ${outputs.length}`,
+      `read_version: ${peekSessionMemoryVersion(ctx?.sessionID)}`,
+      `dual_write: ${pluginOptions.dual_write}`,
+      `v2_ready: ${migration.v2Ready}`,
+      `v2_not_ready_reason: ${migration.v2NotReadyReason ?? "none"}`,
+      `v2_summary_bytes: ${migration.v2SummaryBytes ?? "unknown"} (UTF-8 on disk)`,
+      `v2_injected_summary_bytes: ${migration.v2InjectedSummaryBytes ?? "unknown"} (UTF-8; capped under 10000, including truncation marker)`,
+      `v2_consolidated_threads: ${migration.v2ConsolidatedThreads} (minimum ${migration.minConsolidatedThreads})`,
+      ...pipelines.flatMap((p) => [
+        `pipeline_${p.version}: outputs=${p.stage1Count}, phase2=${p.phase2?.status ?? "none"}, root=${p.root}`,
+        `  pipeline_${p.version}_phase2_last_error: ${p.phase2?.last_error ?? "none"}`,
+        `  pipeline_${p.version}_phase2_retry_at: ${fmtUnixSec(p.phase2?.retry_at ?? null)}`,
+      ]),
+      ...stage1Lines,
+      ...phase2Lines,
+      discoveryLine,
+      eligibilityHint,
+      ...processLines,
+      ...capacityLines,
+      `memory_summary_chars: ${summaryChars}`,
+      `memory_summary_tokens_est: ${summaryTokens} (on disk; injection caps at ~2500)`,
+      `memories_dir_entries: ${listing.length}`,
+      "",
+      ...renderEffectiveConfig(),
+      "",
+      ...renderAgentHealth(),
+      "",
+      ...diagnosticLines,
+      "",
+      "Files:",
+      listing.length > 0 ? listing.join("\n") : "(empty)",
+    ].join("\n")
+    return {
+      output: out,
+      metadata: {
+        stage1_count: outputs.length,
+        migration,
+        pipelines,
+        read_version: peekSessionMemoryVersion(ctx?.sessionID),
+        stage1_jobs: stage1Jobs.by_status,
+        stage1_failures: stage1Jobs.by_failure_class,
+        stage1_stale_exhausted: stage1Jobs.stale_exhausted,
+        stage1_recent_errors: stage1Jobs.recent_errors,
+        phase2_status: phase2?.status ?? null,
+        phase2_last_error: phase2?.last_error ?? null,
+        phase2_retry_at: phase2?.retry_at ?? null,
+        phase2_last_attempt_finished_at: phase2?.finished_at ?? null,
+        phase2_last_success_watermark: phase2?.last_success_watermark ?? null,
+        phase2_last_success_finished_at: phase2?.success_finished_at ?? null,
+        provider_capacity_backoffs: capacityBackoffs,
+        // Back-compat aliases used by earlier inspect consumers.
+        phase2_last_finished_at: phase2?.success_finished_at ?? null,
+        discovery,
+        summary_chars: summaryChars,
+        summary_tokens_est: summaryTokens,
+        files: listing,
+        effective_options: {
+          ...pluginOptions,
+          codex_interop: { ...pluginOptions.codex_interop },
+          claude_import: {
+            ...pluginOptions.claude_import,
+            ...(pluginOptions.claude_import.projects ? { projects: [...pluginOptions.claude_import.projects] } : {}),
           },
-          config_warnings: [...getConfigWarnings()],
-          agent_health: getAgentHealth(),
-          recent_events: diagnostics,
         },
-      }
-    } catch (err) {
-      return { output: `memory_inspect error: ${(err as Error).message}` }
+        config_warnings: [...getConfigWarnings()],
+        agent_health: getAgentHealth(),
+        recent_events: diagnostics,
+      },
     }
+  } catch (err) {
+    return { output: `memory_inspect error: ${(err as Error).message}` }
+  }
 }
 
 export const memory_mode = tool({
@@ -489,11 +495,19 @@ export const memory_mode = tool({
     // that read that content must not lift it on its own. A rejection
     // propagates to the host as usual.
     if (args.mode === "enabled" && polluted) {
-      await ctx.ask({ permission: "memory_mode", patterns: [sid], always: [], metadata: { sessionId: sid, from: "polluted", to: "enabled" } })
+      await ctx.ask({
+        permission: "memory_mode",
+        patterns: [sid],
+        always: [],
+        metadata: { sessionId: sid, from: "polluted", to: "enabled" },
+      })
     }
     try {
       store.setMemoryMode(sid, args.mode)
-      return { output: `Memory mode for session ${sid} set to '${args.mode}'.`, metadata: { sessionId: sid, mode: args.mode } }
+      return {
+        output: `Memory mode for session ${sid} set to '${args.mode}'.`,
+        metadata: { sessionId: sid, mode: args.mode },
+      }
     } catch (err) {
       return { output: `memory_mode error: ${(err as Error).message}` }
     }

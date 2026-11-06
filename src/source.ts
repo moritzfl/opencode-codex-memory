@@ -90,9 +90,10 @@ function readMemorySummary(): string | null {
       const raw = fs.readFileSync(fd, "utf8").trim().replace(SKILL_LINK, "runbook `$1`")
       if (!raw) return null
 
-      const truncated = currentMemoryVersion() === "v2"
-        ? truncateToBytes(raw, MEMORY_V2_SUMMARY_MAX_BYTES)
-        : truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
+      const truncated =
+        currentMemoryVersion() === "v2"
+          ? truncateToBytes(raw, MEMORY_V2_SUMMARY_MAX_BYTES)
+          : truncateToTokens(raw, MEMORY_SUMMARY_TOKEN_LIMIT)
       cache.set(summaryPath, { content: truncated, identity })
       return truncated
     })
@@ -112,8 +113,12 @@ export function buildMemorySystemPrompt(dedicatedTools: boolean): string | null 
   const template = readTemplate()
   const v2 = currentMemoryVersion() === "v2"
   const searchStep = dedicatedTools
-    ? (v2 ? SEARCH_STEP_TOOLS_V2 : SEARCH_STEP_TOOLS)
-    : (v2 ? SEARCH_STEP_FILES_V2 : SEARCH_STEP_FILES)
+    ? v2
+      ? SEARCH_STEP_TOOLS_V2
+      : SEARCH_STEP_TOOLS
+    : v2
+      ? SEARCH_STEP_FILES_V2
+      : SEARCH_STEP_FILES
   return fillTemplate(template, {
     search_step: searchStep,
     skill_step: dedicatedTools ? SKILL_STEP_TOOLS : SKILL_STEP_FILES,

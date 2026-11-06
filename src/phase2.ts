@@ -11,12 +11,7 @@ import {
   removeMemorySymlinks,
 } from "./workspace.js"
 import { ensureBaseline, captureWorkspaceDiff, resetBaseline, DIFF_ARTIFACT } from "./git-baseline.js"
-import {
-  consolidateViaSubagent,
-  getPluginInput,
-  SubagentCancelledError,
-  SubagentShutdownError,
-} from "./llm.js"
+import { consolidateViaSubagent, getPluginInput, SubagentCancelledError, SubagentShutdownError } from "./llm.js"
 import { hostSessionLiveness, withHostTimeout } from "./host-client.js"
 import { invalidateCache } from "./source.js"
 import { withMemoryVersion } from "./memory-version.js"
@@ -148,10 +143,7 @@ export async function runPhase2(
   return withMemoryVersion(store.version, () => runVersionPhase2(store, opts))
 }
 
-async function runVersionPhase2(
-  store: MemoryStore,
-  opts: Phase2Options,
-): Promise<{ status: string }> {
+async function runVersionPhase2(store: MemoryStore, opts: Phase2Options): Promise<{ status: string }> {
   if (isPluginShuttingDown()) return { status: "shutting_down" }
   const root = memoryRoot()
   if (phase2InFlight.has(root)) return { status: "already_running" }
@@ -197,7 +189,7 @@ async function runVersionPhase2(
       // files stay visible as additions. Stale stage-1
       // output pruning happens in phase 1, before the rate gate (codex
       // start.rs ordering).
-      if (!await withHostTimeout(ensureBaseline(), GIT_TIMEOUT_MS, "ensureBaseline")) {
+      if (!(await withHostTimeout(ensureBaseline(), GIT_TIMEOUT_MS, "ensureBaseline"))) {
         store.markPhase2Failed(claim.ownershipToken, "git baseline failed")
         return { status: "baseline_failed" }
       }
@@ -252,7 +244,10 @@ async function runVersionPhase2(
           maybeExportToCodex(interop)
           return { status: "no_workspace_changes" }
         }
-        console.warn("[opencode-codex-memory] no workspace changes but artifacts invalid; running consolidator:", valid.reason)
+        console.warn(
+          "[opencode-codex-memory] no workspace changes but artifacts invalid; running consolidator:",
+          valid.reason,
+        )
       }
 
       writeWorkspaceDiff(diff)
@@ -294,12 +289,7 @@ async function runVersionPhase2(
       const heartbeat = setInterval(heartbeatOnce, opts.heartbeatIntervalMs ?? PHASE2_HEARTBEAT_SECONDS * 1000)
 
       try {
-        await consolidateViaSubagent(
-          memoryRoot(),
-          DIFF_ARTIFACT,
-          consolidationModel,
-          consolidationSignal,
-        )
+        await consolidateViaSubagent(memoryRoot(), DIFF_ARTIFACT, consolidationModel, consolidationSignal)
       } catch (err) {
         // codex phase2.rs: when the consolidation agent's shutdown fails, keep
         // the existing lease until it expires so another worker cannot race a
@@ -348,7 +338,7 @@ async function runVersionPhase2(
         return { status: "failed_invalid_artifacts" }
       }
 
-      if (!await withHostTimeout(resetBaseline(diff.extensionSnapshot), GIT_TIMEOUT_MS, "resetBaseline")) {
+      if (!(await withHostTimeout(resetBaseline(diff.extensionSnapshot), GIT_TIMEOUT_MS, "resetBaseline"))) {
         store.markPhase2Failed(claim.ownershipToken, "baseline reset failed")
         return { status: "baseline_reset_failed" }
       }

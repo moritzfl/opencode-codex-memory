@@ -18,7 +18,8 @@ const REDACTIONS: { re: RegExp; replacement: string }[] = [
 // Optional quotes around the key cover JSON/YAML forms that codex's bare-key
 // assignment regex misses. Value boundaries are scanned instead of guessed by
 // one regex so escaped strings and nested JSON remain intact.
-const SECRET_ASSIGNMENT_START = /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token|aws_secret_access_key|aws_access_key_id)\1([ \t]*[:=][ \t]*)/gi
+const SECRET_ASSIGNMENT_START =
+  /(["']?)(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token|aws_secret_access_key|aws_access_key_id)\1([ \t]*[:=][ \t]*)/gi
 const JSON_PRIMITIVE = /^(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)(?=\s*[,}\]])/i
 
 export function redact(text: string): string {

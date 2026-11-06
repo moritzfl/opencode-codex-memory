@@ -133,10 +133,14 @@ async function createSession(title: string): Promise<string> {
       body: {
         title,
         metadata: { [SUBSESSION_METADATA_KEY]: true },
-        ...(title === "codex-memory-consolidate" ? { permission: [
-          { permission: "external_directory", pattern: "*", action: "deny" as const },
-          { permission: "external_directory", pattern: path.join(memoryRoot(), "*"), action: "allow" as const },
-        ] } : {}),
+        ...(title === "codex-memory-consolidate"
+          ? {
+              permission: [
+                { permission: "external_directory", pattern: "*", action: "deny" as const },
+                { permission: "external_directory", pattern: path.join(memoryRoot(), "*"), action: "allow" as const },
+              ],
+            }
+          : {}),
       },
       signal: controller.signal,
     }),
@@ -185,12 +189,12 @@ async function getConfigModels(): Promise<{ model?: string; smallModel?: string 
   const request = (async (): Promise<{ model?: string; smallModel?: string }> => {
     const controller = new AbortController()
     try {
-      const res = await withHostTimeout(
+      const res = (await withHostTimeout(
         input.client.config.get({ signal: controller.signal }),
         configGetTimeoutMs,
         "config.get",
         controller,
-      ) as { data?: { model?: string; small_model?: string }; error?: unknown }
+      )) as { data?: { model?: string; small_model?: string }; error?: unknown }
       if (res.error || !res.data || generation !== inputGeneration) return {}
       const resolved = { model: res.data.model, smallModel: res.data.small_model }
       configModels = resolved
@@ -304,9 +308,11 @@ export class SubagentShutdownError extends Error {
 
 async function abortSession(sessionId: string): Promise<void> {
   const input = getPluginInput()
-  const session = (input?.client as {
-    session?: { abort?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<unknown> }
-  })?.session
+  const session = (
+    input?.client as {
+      session?: { abort?: (opts: { path: { id: string }; signal?: AbortSignal }) => Promise<unknown> }
+    }
+  )?.session
   if (typeof session?.abort !== "function") return
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -374,14 +380,16 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
       if (isProviderCapacityError(res.error)) throw new ProviderCapacityError(message)
       throw new Error(message)
     }
-    const promptError = (res.data as {
-      info?: {
-        error?: {
-          name?: string
-          data?: { message?: string; statusCode?: number }
+    const promptError = (
+      res.data as {
+        info?: {
+          error?: {
+            name?: string
+            data?: { message?: string; statusCode?: number }
+          }
         }
       }
-    }).info?.error
+    ).info?.error
     if (promptError) {
       const detail = promptError.data?.message
       const status = promptError.data?.statusCode
@@ -406,7 +414,12 @@ async function runPrompt(sessionId: string, prompt: string, agent: string, opts:
   }
 }
 
-async function promptSession(sessionId: string, prompt: string, agent: string, opts: PromptOptions = {}): Promise<string> {
+async function promptSession(
+  sessionId: string,
+  prompt: string,
+  agent: string,
+  opts: PromptOptions = {},
+): Promise<string> {
   return extractAssistantText(await runPrompt(sessionId, prompt, agent, opts))
 }
 
@@ -415,7 +428,11 @@ function extractAssistantText(body: any): string {
   if (typeof body === "string") return body
   if (Array.isArray(body)) return body.map(extractAssistantText).join("\n")
   if (typeof body.text === "string") return body.text
-  if (body.parts && Array.isArray(body.parts)) return body.parts.map((p: any) => p?.text ?? "").filter(Boolean).join("\n")
+  if (body.parts && Array.isArray(body.parts))
+    return body.parts
+      .map((p: any) => p?.text ?? "")
+      .filter(Boolean)
+      .join("\n")
   if (body.messages && Array.isArray(body.messages)) {
     return body.messages
       .filter((m: any) => m?.info?.role === "assistant")
@@ -465,7 +482,8 @@ async function withModelFallback<T>(
         err instanceof SubagentShutdownError ||
         signal?.aborted ||
         isPluginShuttingDown()
-      ) throw err
+      )
+        throw err
       const capacity = isProviderCapacityError(err)
       if (capacity) {
         noteProviderCapacityExhausted(phase, model)
@@ -533,7 +551,11 @@ const EXTRACTION_SCHEMA_V2 = {
  * session.aborts the sub-session for host-side cleanup; extractor has no FS
  * write tools (D2) so a lingering server turn cannot dual-write the memory root.
  */
-export async function extractViaSubagent(sessionId: string, transcript: string, opts: ExtractOptions = {}): Promise<ExtractionResult | null> {
+export async function extractViaSubagent(
+  sessionId: string,
+  transcript: string,
+  opts: ExtractOptions = {},
+): Promise<ExtractionResult | null> {
   // Bounded by the stage-1 job lease (1h), minus headroom for transcript
   // load, session creation, and model lookups before the prompt starts.
   // Codex has no per-request timeout; a timeout past the lease lets another
@@ -541,7 +563,8 @@ export async function extractViaSubagent(sessionId: string, transcript: string, 
   const deadline = Date.now() + (opts.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
   const signal = opts.signal ?? pluginShutdownSignal()
   return withModelFallback("phase1", opts.model, deadline, signal, (model, timeoutMs) =>
-    extractOnce(sessionId, transcript, opts.cwd, model, timeoutMs, signal))
+    extractOnce(sessionId, transcript, opts.cwd, model, timeoutMs, signal),
+  )
 }
 
 async function extractOnce(
@@ -605,7 +628,8 @@ export async function consolidateViaSubagent(
 ): Promise<void> {
   const deadline = Date.now() + CONSOLIDATION_TIMEOUT_MS
   return withModelFallback("phase2", model, deadline, signal, (configured, timeoutMs) =>
-    consolidateOnce(memoryRoot, diffFileName, configured, timeoutMs, signal))
+    consolidateOnce(memoryRoot, diffFileName, configured, timeoutMs, signal),
+  )
 }
 
 async function consolidateOnce(
@@ -647,10 +671,7 @@ async function consolidateOnce(
 // Must exceed the longest legitimate sub-session lifetime (consolidation may
 // run up to CONSOLIDATION_TIMEOUT_MS = 60min), or a second opencode instance /
 // plugin reload would delete a working sub-session mid-run.
-export async function cleanupOldSubSessions(
-  maxAgeMinutes = 90,
-  timeoutMs = SUBSESSION_LIST_TIMEOUT_MS,
-): Promise<void> {
+export async function cleanupOldSubSessions(maxAgeMinutes = 90, timeoutMs = SUBSESSION_LIST_TIMEOUT_MS): Promise<void> {
   const input = getPluginInput()
   if (!input) return
   if (!pluginHttpGet(input.client)) return
@@ -702,9 +723,9 @@ export async function cleanupOldSubSessions(
         }
       }
       if (list.length < pageLimit) return
-      const updates = list.map((s) => s.time?.updated).filter((updated): updated is number =>
-        typeof updated === "number" && Number.isFinite(updated) && updated >= 0
-      )
+      const updates = list
+        .map((s) => s.time?.updated)
+        .filter((updated): updated is number => typeof updated === "number" && Number.isFinite(updated) && updated >= 0)
       if (updates.length === 0) return
       // listGlobal uses `updated < cursor`. Add one millisecond so sessions
       // tied at the page boundary remain visible, then dedupe repeated rows.
@@ -725,27 +746,20 @@ export async function cleanupOldSubSessions(
   }
 }
 
-async function deleteStaleSubSessions(
-  sessionIds: string[],
-  input: PluginInput,
-  timeoutMs: number,
-): Promise<void> {
+async function deleteStaleSubSessions(sessionIds: string[], input: PluginInput, timeoutMs: number): Promise<void> {
   let cursor = 0
   const deadline = Date.now() + timeoutMs
-  const workers = Array.from(
-    { length: Math.min(SUBSESSION_DELETE_CONCURRENCY, sessionIds.length) },
-    async () => {
-      while (cursor < sessionIds.length && Date.now() < deadline && !isPluginShuttingDown()) {
-        const id = sessionIds[cursor++]
-        try {
-          await deleteSession(id, input, Math.max(1, Math.min(SUBSESSION_DELETE_TIMEOUT_MS, deadline - Date.now())))
-        } catch {
-          // deleteSession is best-effort; one unexpected failure must not stop
-          // the remaining stale-helper cleanup.
-        }
+  const workers = Array.from({ length: Math.min(SUBSESSION_DELETE_CONCURRENCY, sessionIds.length) }, async () => {
+    while (cursor < sessionIds.length && Date.now() < deadline && !isPluginShuttingDown()) {
+      const id = sessionIds[cursor++]
+      try {
+        await deleteSession(id, input, Math.max(1, Math.min(SUBSESSION_DELETE_TIMEOUT_MS, deadline - Date.now())))
+      } catch {
+        // deleteSession is best-effort; one unexpected failure must not stop
+        // the remaining stale-helper cleanup.
       }
-    },
-  )
+    }
+  })
   await Promise.all(workers)
 }
 
@@ -794,7 +808,7 @@ async function deleteSession(
     // after shutdown succeeded. Hosts without session.get cannot confirm;
     // the successful delete is all the evidence there is.
     const canConfirm = typeof (input.client.session as { get?: unknown } | undefined)?.get === "function"
-    if (!canConfirm || await hostSessionDeletionConfirmed(input.client, id, SUBSESSION_CONFIRM_TIMEOUT_MS)) {
+    if (!canConfirm || (await hostSessionDeletionConfirmed(input.client, id, SUBSESSION_CONFIRM_TIMEOUT_MS))) {
       activeSubSessions.delete(id)
     }
     return true
@@ -935,7 +949,10 @@ export function validateExtraction(
  * is unavailable; the primary path reads AssistantMessage.structured directly.
  */
 export function parseExtraction(raw: string, version: MemoryVersion = currentMemoryVersion()): ExtractionResult | null {
-  const cleaned = raw.replace(/^```(?:json)?/gim, "").replace(/```$/gim, "").trim()
+  const cleaned = raw
+    .replace(/^```(?:json)?/gim, "")
+    .replace(/```$/gim, "")
+    .trim()
   const start = cleaned.indexOf("{")
   const end = cleaned.lastIndexOf("}")
   if (start === -1 || end === -1 || end <= start) {

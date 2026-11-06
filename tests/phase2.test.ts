@@ -7,12 +7,7 @@ import { captureWorkspaceDiff } from "../src/git-baseline.js"
 import { memoryRoot } from "../src/paths.js"
 import { beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
 import { setPluginInput } from "../src/llm.js"
-import {
-  DEFAULT_PHASE2_OPTIONS,
-  dropGonePhase2Inputs,
-  runPhase2,
-  selectLivePhase2Inputs,
-} from "../src/phase2.js"
+import { DEFAULT_PHASE2_OPTIONS, dropGonePhase2Inputs, runPhase2, selectLivePhase2Inputs } from "../src/phase2.js"
 import { noteProviderCapacityExhausted, resetRateLimitForTest } from "../src/ratelimit.js"
 import { MemoryStore } from "../src/store.js"
 
@@ -139,9 +134,9 @@ describe("phase 2 orchestration", () => {
 
     const result = await runPhase2(new MemoryStore())
     expect(result.status).toBe("failed_invalid_artifacts")
-    const job = openDb()
-      .prepare("SELECT last_error FROM memory_jobs WHERE kind='memory_consolidate_global'")
-      .get() as { last_error: string }
+    const job = openDb().prepare("SELECT last_error FROM memory_jobs WHERE kind='memory_consolidate_global'").get() as {
+      last_error: string
+    }
     expect(job.last_error).toMatch(/removed \d+ symbolic links/)
     const link = path.join(memoryRoot(), "extensions", "external_agent_import", "instructions.md")
     expect(fs.existsSync(link)).toBe(false)
@@ -179,9 +174,7 @@ describe("phase 2 orchestration", () => {
     noteProviderCapacityExhausted("phase2")
     const result = await runPhase2(new MemoryStore())
     expect(result.status).toBe("skipped_rate_limit")
-    expect(
-      openDb().prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_consolidate_global'").get(),
-    ).toBeNull()
+    expect(openDb().prepare("SELECT 1 FROM memory_jobs WHERE kind='memory_consolidate_global'").get()).toBeNull()
   })
 
   it("consolidates with the backup model and skips only when the whole chain is backed off", async () => {
@@ -195,7 +188,11 @@ describe("phase 2 orchestration", () => {
             const model = `${req.body.model.providerID}/${req.body.model.modelID}`
             prompted.push(model)
             if (model === "quota/primary") {
-              return { data: { info: { error: { name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } } } } }
+              return {
+                data: {
+                  info: { error: { name: "APIError", data: { message: "Free usage exceeded", statusCode: 429 } } },
+                },
+              }
             }
             const root = memoryRoot()
             fs.writeFileSync(path.join(root, "MEMORY.md"), "# MEMORY.md\n")
@@ -213,7 +210,11 @@ describe("phase 2 orchestration", () => {
     expect(prompted).toEqual(["quota/primary", "ok/backup"])
 
     noteProviderCapacityExhausted("phase2", "ok/backup")
-    const skipped = await runPhase2(new MemoryStore(), { ...DEFAULT_PHASE2_OPTIONS, consolidationModel: chain, bypassCooldown: true })
+    const skipped = await runPhase2(new MemoryStore(), {
+      ...DEFAULT_PHASE2_OPTIONS,
+      consolidationModel: chain,
+      bypassCooldown: true,
+    })
     expect(skipped.status).toBe("skipped_rate_limit")
   })
 
@@ -334,11 +335,11 @@ describe("phase 2 orchestration", () => {
         "SELECT status, lease_until, retry_at, last_error FROM memory_jobs WHERE kind='memory_consolidate_global'",
       )
       .get() as {
-        status: string
-        lease_until: number | null
-        retry_at: number | null
-        last_error: string | null
-      }
+      status: string
+      lease_until: number | null
+      retry_at: number | null
+      last_error: string | null
+    }
     expect(job.status).toBe("pending")
     expect(job.lease_until).toBeNull()
     expect(job.retry_at).toBeNull()
@@ -377,7 +378,12 @@ describe("phase 2 orchestration", () => {
     }
     const kept = await dropGonePhase2Inputs(store, store.getPhase2InputSelection(50, 30))
     expect(kept.map((o) => o.session_id).sort()).toEqual(["ses_err", "ses_live"])
-    expect(store.stage1Outputs().map((o) => o.session_id).sort()).toEqual(["ses_err", "ses_live"])
+    expect(
+      store
+        .stage1Outputs()
+        .map((o) => o.session_id)
+        .sort(),
+    ).toEqual(["ses_err", "ses_live"])
   })
 
   it("backfills a gone top-ranked input with the next live session", async () => {
@@ -422,9 +428,10 @@ describe("phase 2 orchestration", () => {
     setPluginInput({
       client: {
         session: {
-          get: async (req: { path: { id: string } }) => gone.has(req.path.id)
-            ? { response: { status: 404 } }
-            : { data: { id: req.path.id }, response: { status: 200 } },
+          get: async (req: { path: { id: string } }) =>
+            gone.has(req.path.id)
+              ? { response: { status: 404 } }
+              : { data: { id: req.path.id }, response: { status: 200 } },
         },
       },
     } as any)

@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test"
-import {
-  recordDiscoveryStatus,
-  getRecentDiagnostics,
-  resetDiagnosticsForTest,
-} from "../src/diagnostics.js"
+import { recordDiscoveryStatus, getRecentDiagnostics, resetDiagnosticsForTest } from "../src/diagnostics.js"
 
 describe("recordDiscoveryStatus", () => {
   beforeEach(() => {
@@ -18,10 +14,7 @@ describe("recordDiscoveryStatus", () => {
       expect.objectContaining({ kind: "discovery", message: "listed 1 session(s)" }),
     ])
     recordDiscoveryStatus({ ok: true, count: 3 })
-    expect(getRecentDiagnostics().map((e) => e.message)).toEqual([
-      "listed 1 session(s)",
-      "listed 3 session(s)",
-    ])
+    expect(getRecentDiagnostics().map((e) => e.message)).toEqual(["listed 1 session(s)", "listed 3 session(s)"])
   })
 
   it("always logs discovery failures", () => {

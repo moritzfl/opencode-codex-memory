@@ -78,9 +78,12 @@ function connectionFailed(error: unknown): boolean {
     if (current.name === "AbortError") return false
     const status = current.status ?? current.statusCode ?? current.response?.status
     if (status === 401 || status === 403 || current.reason === "Transport") failed = true
-    if (/ECONNREFUSED|ECONNRESET|EPIPE|ENOTFOUND|ETIMEDOUT|fetch failed|unauthori[sz]ed/i.test(
-      [current.code, current.type, current._tag, current.name, current.message].join(" "),
-    )) failed = true
+    if (
+      /ECONNREFUSED|ECONNRESET|EPIPE|ENOTFOUND|ETIMEDOUT|fetch failed|unauthori[sz]ed/i.test(
+        [current.code, current.type, current._tag, current.name, current.message].join(" "),
+      )
+    )
+      failed = true
   }
   return failed
 }
@@ -208,7 +211,9 @@ export async function fetchServiceStatus(
     if (ready) return ready
     throw new Error(`registered OpenCode service is not healthy (GET ${route})`)
   }
-  throw new Error("registered OpenCode service has no readiness endpoint (/api/info, /api/status, /api/health returned 404)")
+  throw new Error(
+    "registered OpenCode service has no readiness endpoint (/api/info, /api/status, /api/health returned 404)",
+  )
 }
 
 function productionDependencies(): V2ServiceDependencies {
@@ -265,10 +270,16 @@ export async function discoverOwnService(
   if (!endpoint) return null
   const client = deps.make({ baseUrl: endpoint.url, headers: deps.service.headers(endpoint) })
   const controller = new AbortController()
-  const health = await withServiceTimeout(probeEndpoint(deps, endpoint, client, controller.signal), timeoutMs, controller)
+  const health = await withServiceTimeout(
+    probeEndpoint(deps, endpoint, client, controller.signal),
+    timeoutMs,
+    controller,
+  )
   if (health.pid !== process.pid) {
     if (!isLoopbackEndpointUrl(endpoint.url)) {
-      throw new Error(`registered OpenCode service PID ${String(health.pid)} does not match plugin host PID ${process.pid}`)
+      throw new Error(
+        `registered OpenCode service PID ${String(health.pid)} does not match plugin host PID ${process.pid}`,
+      )
     }
     console.warn(
       `[opencode-codex-memory] registered OpenCode service PID ${String(health.pid)} is a different local process than plugin host PID ${process.pid}; using it for global session list`,

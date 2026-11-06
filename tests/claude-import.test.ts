@@ -61,11 +61,9 @@ describe("discoverExternalMemoryFiles", () => {
     seedProject("project-b", "cwd-b", { "MEMORY.md": "project B memory" })
 
     const files = discoverExternalMemoryFiles(CLAUDE_HOME)
-    expect(files.map((f: { projectKey: string; relativePath: string }) => `${f.projectKey}:${f.relativePath}`).sort()).toEqual([
-      "project-a:MEMORY.md",
-      "project-a:topics/release.md",
-      "project-b:MEMORY.md",
-    ])
+    expect(
+      files.map((f: { projectKey: string; relativePath: string }) => `${f.projectKey}:${f.relativePath}`).sort(),
+    ).toEqual(["project-a:MEMORY.md", "project-a:topics/release.md", "project-b:MEMORY.md"])
     const a = files.find((f: { projectKey: string }) => f.projectKey === "project-a")
     expect(a.projectCwd).toBe(fs.realpathSync.native(path.join(TEST_ROOT, "cwd-a")))
   })
@@ -110,9 +108,9 @@ describe("syncClaudeImport", () => {
     expect(fs.readFileSync(path.join(res, "release-process.md"), "utf8")).toBe("process")
     const scope = JSON.parse(fs.readFileSync(path.join(res, "scope.json"), "utf8"))
     expect(scope.cwd).toBe(fs.realpathSync.native(path.join(TEST_ROOT, "cwd-a")))
-    expect(fs.existsSync(path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-b"))).toBe(
-      false,
-    )
+    expect(
+      fs.existsSync(path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-b")),
+    ).toBe(false)
     const instructions = fs.readFileSync(
       path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "instructions.md"),
       "utf8",
@@ -130,7 +128,9 @@ describe("syncClaudeImport", () => {
     const r = syncClaudeImport({ enabled: true, claude_home: CLAUDE_HOME })
     expect(r.synchronizedProjects.sort()).toEqual(["project-a", "project-b"])
     expect(
-      fs.existsSync(path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-b", "MEMORY.md")),
+      fs.existsSync(
+        path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-b", "MEMORY.md"),
+      ),
     ).toBe(true)
   })
 
@@ -197,7 +197,8 @@ describe("syncClaudeImport", () => {
   })
 
   it.each(["projects", "projects/project-a", "projects/project-a/memory", "projects/project-a/memory/topics"])(
-    "preserves imports when discovery cannot read %s", (relative) => {
+    "preserves imports when discovery cannot read %s",
+    (relative) => {
       const { syncClaudeImport } = mod()
       seedProject("project-a", "cwd-a", { "MEMORY.md": "A", "topics/extra.md": "details" })
       const options = { enabled: true, claude_home: CLAUDE_HOME }
@@ -232,7 +233,12 @@ describe("syncClaudeImport", () => {
     }) as any)
     try {
       expect(() => syncClaudeImport(options)).toThrow("EIO")
-      expect(fs.readFileSync(path.join(pluginMemoryRoot(), "extensions/external_agent_import/resources/project-a/MEMORY.md"), "utf8")).toBe("A")
+      expect(
+        fs.readFileSync(
+          path.join(pluginMemoryRoot(), "extensions/external_agent_import/resources/project-a/MEMORY.md"),
+          "utf8",
+        ),
+      ).toBe("A")
     } finally {
       spy.mockRestore()
     }
@@ -249,7 +255,9 @@ describe("syncClaudeImport", () => {
       fs.existsSync(path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-b")),
     ).toBe(false)
     expect(
-      fs.existsSync(path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-a", "MEMORY.md")),
+      fs.existsSync(
+        path.join(pluginMemoryRoot(), "extensions", "external_agent_import", "resources", "project-a", "MEMORY.md"),
+      ),
     ).toBe(true)
   })
 
@@ -277,9 +285,7 @@ describe("syncClaudeImport", () => {
     expect(await ensureBaseline()).toBe(true)
     expect(syncClaudeImport({ enabled: true, claude_home: CLAUDE_HOME }).changed).toBe(true)
     const diff = await captureWorkspaceDiff()
-    const added = diff.changes
-      .filter((c: { status: string }) => c.status === "A")
-      .map((c: { path: string }) => c.path)
+    const added = diff.changes.filter((c: { status: string }) => c.status === "A").map((c: { path: string }) => c.path)
     expect(added).toContain("extensions/external_agent_import/instructions.md")
     expect(added).toContain("extensions/external_agent_import/resources/project-a/MEMORY.md")
     expect(added).toContain("extensions/external_agent_import/resources/project-a/scope.json")

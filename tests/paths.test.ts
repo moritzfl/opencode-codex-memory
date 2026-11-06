@@ -16,16 +16,13 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_HOME
   try {
     require("../src/options.js").resetPluginOptions()
-  } catch {
-  }
+  } catch {}
   try {
     require("../src/db.js").closeDb()
-  } catch {
-  }
+  } catch {}
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
 })
 
 describe("paths", () => {

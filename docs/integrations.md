@@ -6,9 +6,9 @@ You do not need Codex CLI or Claude Code to use this plugin. If you also use
 them on the same machine, these optional integrations can reuse what they
 have learned. Both are off by default.
 
-| Integration | Direction | This plugin's writer |
-|---|---|---|
-| Codex CLI sharing | Import, export, or both | Memory V1 and Memory V2 |
+| Integration        | Direction                 | This plugin's writer    |
+| ------------------ | ------------------------- | ----------------------- |
+| Codex CLI sharing  | Import, export, or both   | Memory V1 and Memory V2 |
 | Claude Code import | Claude Code → this plugin | Memory V1 and Memory V2 |
 
 With dual-write enabled, Codex exchange runs for each active writer.
@@ -74,11 +74,11 @@ either side, to fold claims into `memory_summary.md` and not to create
 
 All fields are inside `codex_interop`:
 
-| Option | Default | Meaning |
-|---|---|---|
-| `import` | `false` | Bring Codex's selected memory store into each active writer. |
-| `export` | `false` | Offer each active writer's validated memory to that same Codex store. |
-| `codex_home` | `$CODEX_HOME`, otherwise `~/.codex` | Codex CLI's data location. |
+| Option       | Default                             | Meaning                                                               |
+| ------------ | ----------------------------------- | --------------------------------------------------------------------- |
+| `import`     | `false`                             | Bring Codex's selected memory store into each active writer.          |
+| `export`     | `false`                             | Offer each active writer's validated memory to that same Codex store. |
+| `codex_home` | `$CODEX_HOME`, otherwise `~/.codex` | Codex CLI's data location.                                            |
 
 The exchange instructions use `[from codex]` / `[from opencode]` tags and tell
 each consolidator to skip re-importing the other side's content, limiting
@@ -119,11 +119,11 @@ back to Claude Code.
 
 All fields are inside `claude_import`:
 
-| Option | Default | Meaning |
-|---|---|---|
-| `enabled` | `false` | Turn import on. |
-| `claude_home` | `~/.claude` | Claude Code's data location. |
-| `projects` | All resolvable projects | Optional allowlist of Claude project folder IDs. An empty list also means all projects. |
+| Option        | Default                 | Meaning                                                                                 |
+| ------------- | ----------------------- | --------------------------------------------------------------------------------------- |
+| `enabled`     | `false`                 | Turn import on.                                                                         |
+| `claude_home` | `~/.claude`             | Claude Code's data location.                                                            |
+| `projects`    | All resolvable projects | Optional allowlist of Claude project folder IDs. An empty list also means all projects. |
 
 To find project IDs, list Claude's project directories:
 

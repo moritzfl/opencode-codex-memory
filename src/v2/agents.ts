@@ -63,19 +63,20 @@ export function buildMemorizeAgent(): V2AgentDefinition {
  * store. Pass the same directory the session is created in.
  */
 export function consolidationPermissions(root: string, sessionDir?: string): V2AgentDefinition["permissions"] {
-  return [
-    { action: "*", resource: "*", effect: "deny" },
-    ...workspacePermissions(root, sessionDir),
-  ]
+  return [{ action: "*", resource: "*", effect: "deny" }, ...workspacePermissions(root, sessionDir)]
 }
 
 function workspacePermissions(root: string, sessionDir?: string): V2AgentDefinition["permissions"] {
   const absolute = [root, path.join(root, "*")]
   return [
     ...sessionRelativePermissions(root, sessionDir),
-    ...["read", "edit", "external_directory"].flatMap((action) => absolute.map((resource) => ({
-      action, resource, effect: "allow" as const,
-    }))),
+    ...["read", "edit", "external_directory"].flatMap((action) =>
+      absolute.map((resource) => ({
+        action,
+        resource,
+        effect: "allow" as const,
+      })),
+    ),
     // These actions check the search pattern, not a path. search-sandbox.ts
     // wraps the built-in executors to enforce this helper's single root.
     ...["glob", "grep"].map((action) => ({ action, resource: "*", effect: "allow" as const })),
@@ -95,10 +96,14 @@ function sessionRelativePermissions(root: string, sessionDir?: string): V2AgentD
   const posix = rel.split(path.sep).join("/")
   const inside = !posix || posix.split("/").every((seg) => seg === "..")
   const escape = posix ? `${posix}/..` : ".."
-  return ["read", "edit"].flatMap((action) => inside ? [
-    { action, resource: "*", effect: "allow" as const },
-    ...["/*", "?:/*", escape, `${escape}/*`].map((resource) => ({ action, resource, effect: "deny" as const })),
-  ] : [posix, `${posix}/*`].map((resource) => ({ action, resource, effect: "allow" as const })))
+  return ["read", "edit"].flatMap((action) =>
+    inside
+      ? [
+          { action, resource: "*", effect: "allow" as const },
+          ...["/*", "?:/*", escape, `${escape}/*`].map((resource) => ({ action, resource, effect: "deny" as const })),
+        ]
+      : [posix, `${posix}/*`].map((resource) => ({ action, resource, effect: "allow" as const })),
+  )
 }
 
 /**
@@ -230,19 +235,20 @@ export async function ensureV2Agents(ctx: {
 }
 
 function isShippedIncomplete(id: string, existing: Record<string, unknown>, shipped: V2AgentDefinition): boolean {
-  const system = typeof existing.system === "string"
-    ? existing.system
-    : typeof existing.prompt === "string"
-      ? existing.prompt
-      : ""
+  const system =
+    typeof existing.system === "string" ? existing.system : typeof existing.prompt === "string" ? existing.prompt : ""
   if (system !== shipped.system) return false
   if (typeof existing.description === "string" && existing.description !== shipped.description) return false
   if (id !== MEMORIZE_AGENT_ID) return false
   const perms = existing.permissions
   if (!Array.isArray(perms)) return true
-  return shipped.permissions.some((expected) => !perms.some((rule) =>
-    rule?.action === expected.action && rule?.resource === expected.resource && rule?.effect === expected.effect,
-  ))
+  return shipped.permissions.some(
+    (expected) =>
+      !perms.some(
+        (rule) =>
+          rule?.action === expected.action && rule?.resource === expected.resource && rule?.effect === expected.effect,
+      ),
+  )
 }
 
 function v2PermissionsToV1Map(permissions: unknown): Record<string, unknown> {

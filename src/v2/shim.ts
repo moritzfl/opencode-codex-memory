@@ -27,7 +27,13 @@ import type { Plugin } from "@opencode/plugin"
 import { memoryRoot } from "../paths.js"
 import { consolidationPermissions } from "./agents.js"
 import { retryModelSelection } from "./model-readiness.js"
-import { invalidateOwnService, lastServiceFailure, ownServiceClient, serviceRequest, type V2ServiceClient } from "./service.js"
+import {
+  invalidateOwnService,
+  lastServiceFailure,
+  ownServiceClient,
+  serviceRequest,
+  type V2ServiceClient,
+} from "./service.js"
 
 export type V2Context = Plugin.Context
 
@@ -70,7 +76,10 @@ async function sessionGoneOnService(client: V2ServiceClient, sessionID: string):
   if (typeof client.session.get !== "function") return false
   try {
     const info = await serviceRequest(client, () => client.session.get({ sessionID }))
-    if ((info as { error?: unknown } | null | undefined)?.error && isNotFoundError((info as { error: unknown }).error)) {
+    if (
+      (info as { error?: unknown } | null | undefined)?.error &&
+      isNotFoundError((info as { error: unknown }).error)
+    ) {
       return true
     }
     const data = und(info)
@@ -160,7 +169,12 @@ function joinTextParts(content: unknown): string {
   if (!Array.isArray(content)) return ""
   const out: string[] = []
   for (const p of content) {
-    if (p && typeof p === "object" && (p as { type?: unknown }).type === "text" && typeof (p as { text?: unknown }).text === "string") {
+    if (
+      p &&
+      typeof p === "object" &&
+      (p as { type?: unknown }).type === "text" &&
+      typeof (p as { text?: unknown }).text === "string"
+    ) {
       out.push((p as { text: string }).text)
     } else if (typeof p === "string") {
       out.push(p)
@@ -240,7 +254,7 @@ export function adaptV2Messages(msgs: unknown): Array<{ info?: { role?: string }
 /** V2 model.list (legacy catalog.model.list) → V1 provider-list shape. */
 export function adaptProviderCatalog(v2: unknown): unknown {
   const items = und(v2)
-  const list: any[] = Array.isArray(items) ? items : (items as any)?.data ?? []
+  const list: any[] = Array.isArray(items) ? items : ((items as any)?.data ?? [])
   const providers = new Map<string, Record<string, unknown>>()
   for (const m of list) {
     if (!m || typeof m !== "object") continue
@@ -253,10 +267,14 @@ export function adaptProviderCatalog(v2: unknown): unknown {
     const variants: Record<string, unknown> = {}
     for (const v of (m as any).variants ?? []) {
       if (v && typeof v === "object" && typeof (v as any).id === "string") {
-        variants[(v as any).id] = { ...(typeof (v as any).disabled === "boolean" ? { disabled: (v as any).disabled } : {}) }
+        variants[(v as any).id] = {
+          ...(typeof (v as any).disabled === "boolean" ? { disabled: (v as any).disabled } : {}),
+        }
       }
     }
-    ;(providers.get(providerID) as Record<string, unknown>)[modelID] = { ...(m.variants !== undefined ? { variants } : {}) }
+    ;(providers.get(providerID) as Record<string, unknown>)[modelID] = {
+      ...(m.variants !== undefined ? { variants } : {}),
+    }
   }
   return { all: [...providers.entries()].map(([id, models]) => ({ id, models })) }
 }
@@ -304,10 +322,12 @@ async function loadV2Messages(sessionID: string, context?: V2Context, signal?: A
     const seenCursors = new Set<string>()
     let cursor: string | undefined
     while (true) {
-      const response = await serviceRequest(client, () => client.message!.list(
-        cursor ? { sessionID, cursor } : { sessionID, order: "asc" },
-        signal ? { signal } : undefined,
-      ))
+      const response = await serviceRequest(client, () =>
+        client.message!.list(
+          cursor ? { sessionID, cursor } : { sessionID, order: "asc" },
+          signal ? { signal } : undefined,
+        ),
+      )
       const rows = responseRows(response)
       if (!rows) throw new Error("registered service returned an invalid message list")
       messages.push(...rows)
@@ -343,10 +363,20 @@ function completedPromptResponse(rows: any[], promptID: unknown): { data: unknow
   if (assistant.error) {
     // V1 runPrompt recognizes info.error, including its quota status code.
     const error = assistant.error
-    return { data: { info: { error: {
-      name: error.type ?? error.name,
-      data: { message: error.message ?? error.data?.message, statusCode: error.status ?? error.statusCode ?? error.data?.statusCode },
-    } }, parts: [] } }
+    return {
+      data: {
+        info: {
+          error: {
+            name: error.type ?? error.name,
+            data: {
+              message: error.message ?? error.data?.message,
+              statusCode: error.status ?? error.statusCode ?? error.data?.statusCode,
+            },
+          },
+        },
+        parts: [],
+      },
+    }
   }
   const idle = messages.findLast((m) => m?.type === "idle")
   if (idle && idle.outcome !== "succeeded") throw new Error(`consolidation ${idle.outcome} after session.wait`)
@@ -388,7 +418,14 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 
 async function v2promptWithWait(
   sessionID: string,
-  body: { agent: string; system?: string; model?: { providerID: string; modelID: string }; format?: unknown; variant?: string; parts: { type: string; text: string }[] },
+  body: {
+    agent: string
+    system?: string
+    model?: { providerID: string; modelID: string }
+    format?: unknown
+    variant?: string
+    parts: { type: string; text: string }[]
+  },
   signal?: AbortSignal,
 ): Promise<{ error?: unknown; data?: unknown }> {
   const c = ctx()
@@ -413,30 +450,48 @@ async function v2promptWithWait(
     // that complete reference; never emit a variant-only model object.
     const payload = {
       prompt,
-      ...(parsed ? { model: {
-        providerID: parsed.providerID,
-        id: parsed.modelID,
-        ...(body.variant ? { variant: body.variant } : {}),
-      } } : {}),
+      ...(parsed
+        ? {
+            model: {
+              providerID: parsed.providerID,
+              id: parsed.modelID,
+              ...(body.variant ? { variant: body.variant } : {}),
+            },
+          }
+        : {}),
     }
     if (signal?.aborted) throw new Error("sub-agent prompt cancelled")
     const publicClient = await ownServiceClient()
     if (typeof publicClient?.generate?.text === "function") {
-      const gen = und(await retryModelSelection(async () => {
-        const result = await serviceRequest(publicClient, () => publicClient.generate!.text(payload, signal ? { signal } : undefined))
-        if ((result as { error?: unknown })?.error) throw (result as { error: unknown }).error
-        return result
-      }, payload.model, signal))
+      const gen = und(
+        await retryModelSelection(
+          async () => {
+            const result = await serviceRequest(publicClient, () =>
+              publicClient.generate!.text(payload, signal ? { signal } : undefined),
+            )
+            if ((result as { error?: unknown })?.error) throw (result as { error: unknown }).error
+            return result
+          },
+          payload.model,
+          signal,
+        ),
+      )
       const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
       return { data: { parts: [{ type: "text", text: outText }] } }
     }
     // ctx.generate.text ignores request-option signals. Race AbortSignal.
-    const gen = und(await retryModelSelection(async () => {
-      const genP = (c as any).generate.text(payload)
-      const result = signal ? await raceAbort(genP, signal) : await genP
-      if (result?.error) throw result.error
-      return result
-    }, payload.model, signal))
+    const gen = und(
+      await retryModelSelection(
+        async () => {
+          const genP = (c as any).generate.text(payload)
+          const result = signal ? await raceAbort(genP, signal) : await genP
+          if (result?.error) throw result.error
+          return result
+        },
+        payload.model,
+        signal,
+      ),
+    )
     const outText = typeof gen?.text === "string" ? gen.text : JSON.stringify(gen)
     return { data: { parts: [{ type: "text", text: outText }] } }
   }
@@ -508,19 +563,17 @@ export function buildV1ClientShim(): unknown {
       })) as any
       const rawRows = responseRows(response)
       if (!rawRows) throw new Error("registered service returned an invalid session list")
-      const rows = rawRows
-        .map(adaptV2SessionRow)
-        .filter((row) => {
-          if (!row || typeof row !== "object") return false
-          const record = row as Record<string, unknown>
-          const time = record.time
-          const updated = time && typeof time === "object" ? (time as { updated?: unknown }).updated : undefined
-          if (timestampCursor !== undefined && (typeof updated !== "number" || updated >= timestampCursor)) return false
-          if (!search) return true
-          const title = typeof record.title === "string" ? record.title : ""
-          const id = typeof record.id === "string" ? record.id : ""
-          return `${id}\n${title}`.toLowerCase().includes(search.toLowerCase())
-        })
+      const rows = rawRows.map(adaptV2SessionRow).filter((row) => {
+        if (!row || typeof row !== "object") return false
+        const record = row as Record<string, unknown>
+        const time = record.time
+        const updated = time && typeof time === "object" ? (time as { updated?: unknown }).updated : undefined
+        if (timestampCursor !== undefined && (typeof updated !== "number" || updated >= timestampCursor)) return false
+        if (!search) return true
+        const title = typeof record.title === "string" ? record.title : ""
+        const id = typeof record.id === "string" ? record.id : ""
+        return `${id}\n${title}`.toLowerCase().includes(search.toLowerCase())
+      })
       out.push(...rows)
       const candidate = responseNextCursor(response)
       if (!candidate || seenCursors.has(candidate) || rawRows.length === 0) break
@@ -530,7 +583,11 @@ export function buildV1ClientShim(): unknown {
     return { data: out.slice(0, limit) }
   }
 
-  async function listGlobalSessions(limit: number, cursor?: string | number, search?: string): Promise<{ data: unknown[] }> {
+  async function listGlobalSessions(
+    limit: number,
+    cursor?: string | number,
+    search?: string,
+  ): Promise<{ data: unknown[] }> {
     const localList = v2ctx ? (v2ctx.session as { list?: unknown }).list : undefined
     if (typeof localList === "function") {
       const result = await paginateSessionList((input) => localList(input), limit, cursor, search)
@@ -539,7 +596,12 @@ export function buildV1ClientShim(): unknown {
     }
     const client = await ownServiceClient()
     if (client && typeof client.session.list === "function") {
-      const result = await paginateSessionList((input) => serviceRequest(client, () => client.session.list(input)), limit, cursor, search)
+      const result = await paginateSessionList(
+        (input) => serviceRequest(client, () => client.session.list(input)),
+        limit,
+        cursor,
+        search,
+      )
       discoveryStatus = { source: "service", warning: null }
       return result
     }
@@ -552,7 +614,10 @@ export function buildV1ClientShim(): unknown {
   }
 
   const session = {
-    create: async (opts: { query?: { directory?: string }; body?: { title?: string; metadata?: Record<string, unknown> } }) => {
+    create: async (opts: {
+      query?: { directory?: string }
+      body?: { title?: string; metadata?: Record<string, unknown> }
+    }) => {
       try {
         // Extraction turns run through generate.text (see prompt below) and
         // never touch a session, so hand out a stable synthetic id instead
@@ -585,14 +650,16 @@ export function buildV1ClientShim(): unknown {
         // Keep the HTTP status: an undeclared 429 surfaces as ClientError
         // "UnexpectedStatus" whose message alone misses the capacity breaker.
         if (!(e instanceof Error)) return { error: e }
-        const status = (e as { status?: unknown; cause?: { status?: unknown } }).status
-          ?? (e as { cause?: { status?: unknown } }).cause?.status
+        const status =
+          (e as { status?: unknown; cause?: { status?: unknown } }).status ??
+          (e as { cause?: { status?: unknown } }).cause?.status
         return { error: { message: e.message, ...(typeof status === "number" ? { statusCode: status } : {}) } }
       }
     },
     messages: async (opts: { path: { id: string } }) => {
       try {
-        if (isReleasedSubSession(opts.path.id)) throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
+        if (isReleasedSubSession(opts.path.id))
+          throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
         return { data: adaptV2Messages(await loadV2Messages(opts.path.id)) }
       } catch (e) {
         return { error: e }
@@ -623,12 +690,12 @@ export function buildV1ClientShim(): unknown {
       try {
         client = await ownServiceClient()
         if (client) {
-          if (typeof client.session.remove !== "function") throw new Error("registered service does not support session.remove")
+          if (typeof client.session.remove !== "function")
+            throw new Error("registered service does not support session.remove")
           const service = client
-          const result = await serviceRequest(service, () => service.session.remove(
-            { sessionID: id },
-            opts.signal ? { signal: opts.signal } : undefined,
-          ))
+          const result = await serviceRequest(service, () =>
+            service.session.remove({ sessionID: id }, opts.signal ? { signal: opts.signal } : undefined),
+          )
           if ((result as { error?: unknown } | null | undefined)?.error) throw (result as { error: unknown }).error
         }
       } catch (error) {
@@ -694,7 +761,9 @@ export function buildV1ClientShim(): unknown {
     get: async () => {
       try {
         const client = await serviceOrThrow()
-        const response = await serviceRequest(client, async () => client.config?.get({ location: { directory: ctx().location.directory } }))
+        const response = await serviceRequest(client, async () =>
+          client.config?.get({ location: { directory: ctx().location.directory } }),
+        )
         const documents = und(response)
         const candidates = Array.isArray(documents) ? documents : documents?.type === "document" ? [documents] : []
         let info: Record<string, unknown> = {}

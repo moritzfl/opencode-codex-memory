@@ -15,7 +15,12 @@ import { buildMemorySystemPrompt, invalidateCache } from "../src/source.js"
 import { setPluginInput } from "../src/llm.js"
 import { resetDiscoveryCacheForTest } from "../src/capture.js"
 import { resetRateLimitForTest } from "../src/ratelimit.js"
-import { beginPhase2AbortScope, abortPhase2Consolidation, beginPluginShutdown, resetPluginLifecycle } from "../src/lifecycle.js"
+import {
+  beginPhase2AbortScope,
+  abortPhase2Consolidation,
+  beginPluginShutdown,
+  resetPluginLifecycle,
+} from "../src/lifecycle.js"
 import { memory_read, memory_add_note } from "../tools/memory.js"
 import { memory_reset, memory_inspect } from "../tools/control.js"
 import { overlayV2CitationInstructions } from "../src/v2/citation-overlay.js"
@@ -23,7 +28,8 @@ import { overlayV2CitationInstructions } from "../src/v2/citation-overlay.js"
 let root: string
 const SUMMARY = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
 const ctx = (id: string) => ({ sessionID: id, messageID: "msg_test", agent: "build", ask: async () => {} }) as any
-const text = (result: Awaited<ReturnType<typeof memory_read.execute>>) => typeof result === "string" ? result : result.output
+const text = (result: Awaited<ReturnType<typeof memory_read.execute>>) =>
+  typeof result === "string" ? result : result.output
 const store = (version: MemoryVersion) => withMemoryVersion(version, () => new MemoryStore())
 
 beforeEach(() => {
@@ -50,8 +56,12 @@ afterEach(() => {
 
 function seed(target: MemoryStore, id: string) {
   const output = {
-    session_id: id, source_updated_at: Date.now(), raw_memory: target.version === "v1" ? "Keep warehouse identifiers as strings" : "",
-    rollout_summary: "The user requires leading zeroes in warehouse identifiers.", rollout_slug: id, generated_at: Date.now(),
+    session_id: id,
+    source_updated_at: Date.now(),
+    raw_memory: target.version === "v1" ? "Keep warehouse identifiers as strings" : "",
+    rollout_summary: "The user requires leading zeroes in warehouse identifiers.",
+    rollout_slug: id,
+    generated_at: Date.now(),
   }
   target.upsertStage1Output(output)
   return output
@@ -77,48 +87,76 @@ describe("Codex memory migration", () => {
     let consolidations = 0
     let releaseExtract!: () => void
     let releaseConsolidate!: () => void
-    const extracting = new Promise<void>((r) => { releaseExtract = r })
-    const consolidating = new Promise<void>((r) => { releaseConsolidate = r })
+    const extracting = new Promise<void>((r) => {
+      releaseExtract = r
+    })
+    const consolidating = new Promise<void>((r) => {
+      releaseConsolidate = r
+    })
     let helper = 0
     const seen = new Set<string>()
-    setPluginInput({ client: {
-      _client: { get: async () => ({ data: [{ id: "ses_work", directory: "/project", time: { updated: Date.now() - 7 * 3600_000 } }] }) },
-      config: { get: async () => ({ data: {} }) },
-      session: {
-        create: async ({ body }: any) => {
-          if (body.title === "codex-memory-consolidate") {
-            expect(body.permission).toEqual([
-              { permission: "external_directory", pattern: "*", action: "deny" },
-              { permission: "external_directory", pattern: path.join(memoryRoot(), "*"), action: "allow" },
-            ])
-          }
-          return { data: { id: `ses_helper_${++helper}` } }
+    setPluginInput({
+      client: {
+        _client: {
+          get: async () => ({
+            data: [{ id: "ses_work", directory: "/project", time: { updated: Date.now() - 7 * 3600_000 } }],
+          }),
         },
-        get: async ({ path: p }: any) => p.id === "ses_work" ? { data: { id: p.id } } : { response: { status: 404 } },
-        messages: async () => ({ data: [{ info: { role: "user" }, parts: [{ type: "text", text: "Always preserve warehouse identifier 000742 as a string." }] }] }),
-        delete: async () => ({ data: {} }),
-        prompt: async ({ body }: any) => {
-          const version = currentMemoryVersion()
-          if (body.agent === "memorize-extract") {
-            if (++extractions === 2) releaseExtract()
-            await extracting
+        config: { get: async () => ({ data: {} }) },
+        session: {
+          create: async ({ body }: any) => {
+            if (body.title === "codex-memory-consolidate") {
+              expect(body.permission).toEqual([
+                { permission: "external_directory", pattern: "*", action: "deny" },
+                { permission: "external_directory", pattern: path.join(memoryRoot(), "*"), action: "allow" },
+              ])
+            }
+            return { data: { id: `ses_helper_${++helper}` } }
+          },
+          get: async ({ path: p }: any) =>
+            p.id === "ses_work" ? { data: { id: p.id } } : { response: { status: 404 } },
+          messages: async () => ({
+            data: [
+              {
+                info: { role: "user" },
+                parts: [{ type: "text", text: "Always preserve warehouse identifier 000742 as a string." }],
+              },
+            ],
+          }),
+          delete: async () => ({ data: {} }),
+          prompt: async ({ body }: any) => {
+            const version = currentMemoryVersion()
+            if (body.agent === "memorize-extract") {
+              if (++extractions === 2) releaseExtract()
+              await extracting
+              expect(currentMemoryVersion()).toBe(version)
+              expect(body.format.schema.required.includes("raw_memory")).toBe(version === "v1")
+              seen.add(`extract-${version}`)
+              return {
+                data: {
+                  info: {
+                    structured: {
+                      ...(version === "v1"
+                        ? { raw_memory: "Keep warehouse identifiers as strings, never infer numbers." }
+                        : {}),
+                      rollout_summary: "Warehouse identifiers must preserve leading zeroes such as 000742.",
+                      rollout_slug: "warehouse",
+                    },
+                  },
+                  parts: [],
+                },
+              }
+            }
+            if (++consolidations === 2) releaseConsolidate()
+            await consolidating
             expect(currentMemoryVersion()).toBe(version)
-            expect(body.format.schema.required.includes("raw_memory")).toBe(version === "v1")
-            seen.add(`extract-${version}`)
-            return { data: { info: { structured: {
-              ...(version === "v1" ? { raw_memory: "Keep warehouse identifiers as strings, never infer numbers." } : {}),
-              rollout_summary: "Warehouse identifiers must preserve leading zeroes such as 000742.", rollout_slug: "warehouse",
-            } }, parts: [] } }
-          }
-          if (++consolidations === 2) releaseConsolidate()
-          await consolidating
-          expect(currentMemoryVersion()).toBe(version)
-          seen.add(`consolidate-${version}`)
-          summary(version, version === "v2" ? "ö".repeat(6000) : version)
-          return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+            seen.add(`consolidate-${version}`)
+            summary(version, version === "v2" ? "ö".repeat(6000) : version)
+            return { data: { info: {}, parts: [{ type: "text", text: "done" }] } }
+          },
         },
       },
-    } } as any)
+    } as any)
     const result = await runMemoryPipeline("ses_current")
     expect(result).toEqual(["succeeded", "succeeded"])
     expect([...seen].sort()).toEqual(["consolidate-v1", "consolidate-v2", "extract-v1", "extract-v2"])
@@ -157,7 +195,8 @@ describe("Codex memory migration", () => {
   })
 
   it("shares exclusion metadata before ranking limits, even in the shadow store", () => {
-    const v1 = store("v1"), v2 = store("v2")
+    const v1 = store("v1"),
+      v2 = store("v2")
     seed(v2, "ses_blocked")
     seed(v2, "ses_allowed")
     v2.recordUsage(["ses_blocked"])
@@ -193,7 +232,8 @@ describe("Codex memory migration", () => {
   it("distinguishes insufficient progress from invalid summaries above the threshold", () => {
     summary("v2")
     expect(readMigrationStatus()).toMatchObject({
-      v2Ready: false, v2NotReadyReason: "insufficient consolidated threads: 0 < 20",
+      v2Ready: false,
+      v2NotReadyReason: "insufficient consolidated threads: 0 < 20",
       v2SummaryBytes: Buffer.byteLength(SUMMARY + "v2"),
     })
     expect(fs.existsSync(path.join(root, "memory_v2.db"))).toBe(false)
@@ -204,10 +244,17 @@ describe("Codex memory migration", () => {
     if (claim.type !== "claimed") throw new Error(claim.type)
     v2.markPhase2Succeeded(claim.ownershipToken, selected)
     const file = path.join(memoryRoot("v2"), "memory_summary.md")
-    for (const content of [SUMMARY, SUMMARY.replaceAll("\n", "\r\n"), SUMMARY.padEnd(10000, "x"), SUMMARY + "ö".repeat(5000)]) {
+    for (const content of [
+      SUMMARY,
+      SUMMARY.replaceAll("\n", "\r\n"),
+      SUMMARY.padEnd(10000, "x"),
+      SUMMARY + "ö".repeat(5000),
+    ]) {
       fs.writeFileSync(file, content)
       expect(readMigrationStatus()).toMatchObject({
-        v2ConsolidatedThreads: 186, v2Ready: true, v2NotReadyReason: null,
+        v2ConsolidatedThreads: 186,
+        v2Ready: true,
+        v2NotReadyReason: null,
         v2SummaryBytes: Buffer.byteLength(content),
       })
       expect(readMigrationStatus().v2InjectedSummaryBytes!).toBeLessThan(10000)
@@ -216,11 +263,16 @@ describe("Codex memory migration", () => {
     for (const [content, reason] of [
       ["\uFEFF" + SUMMARY, "summary must start with the exact line 'v1' (UTF-8 BOM detected)"],
       [SUMMARY.replace("## General Tips", "## General tips"), "missing required headings: ## General Tips"],
-      [SUMMARY.replace("## General Tips", "## General tips") + "ö".repeat(5000), "missing required headings: ## General Tips"],
+      [
+        SUMMARY.replace("## General Tips", "## General tips") + "ö".repeat(5000),
+        "missing required headings: ## General Tips",
+      ],
     ]) {
       fs.writeFileSync(file, content!)
       expect(readMigrationStatus()).toMatchObject({
-        v2ConsolidatedThreads: 186, v2Ready: false, v2NotReadyReason: reason,
+        v2ConsolidatedThreads: 186,
+        v2Ready: false,
+        v2NotReadyReason: reason,
         v2SummaryBytes: Buffer.byteLength(content!),
       })
     }
@@ -254,16 +306,20 @@ describe("Codex memory migration", () => {
     })
     try {
       expect(readMigrationStatus()).toMatchObject({
-        v2Ready: false, v2SummaryBytes: null,
+        v2Ready: false,
+        v2SummaryBytes: null,
         v2NotReadyReason: `cannot read V2 memory summary (${code}): summary unavailable`,
       })
-    } finally { open.mockRestore() }
+    } finally {
+      open.mockRestore()
+    }
   })
 
   it("inspect exposes shadow failures and V2 size while keeping V1 summary statistics", async () => {
     summary("v1")
     summary("v2")
-    const v1 = store("v1"), v2 = store("v2")
+    const v1 = store("v1"),
+      v2 = store("v2")
     const success = v1.claimGlobalPhase2Job()
     const failed = v2.claimGlobalPhase2Job()
     if (success.type !== "claimed" || failed.type !== "claimed") throw new Error("expected claims")
@@ -282,7 +338,9 @@ describe("Codex memory migration", () => {
     expect(output).toContain(`v2_summary_bytes: ${bytes} (UTF-8 on disk)`)
     const injectedBytes = readMigrationStatus().v2InjectedSummaryBytes
     expect(injectedBytes!).toBeLessThan(10000)
-    expect(output).toContain(`v2_injected_summary_bytes: ${injectedBytes} (UTF-8; capped under 10000, including truncation marker)`)
+    expect(output).toContain(
+      `v2_injected_summary_bytes: ${injectedBytes} (UTF-8; capped under 10000, including truncation marker)`,
+    )
     expect(output).toContain("v2_not_ready_reason: insufficient consolidated threads: 0 < 20")
     expect(output).toContain(`memory_summary_chars: ${(SUMMARY + "v1").length}`)
     expect(openDb("v2").prepare("SELECT * FROM memory_jobs").all()).toEqual(before)
@@ -300,7 +358,9 @@ describe("Codex memory migration", () => {
     }
     applyPluginOptions({ version: "v1", dual_write: false })
     let scheduled = 0
-    handleSessionDeleted("ses_deleted", undefined, () => { scheduled++ })
+    handleSessionDeleted("ses_deleted", undefined, () => {
+      scheduled++
+    })
     expect(scheduled).toBe(1)
     expect(store("v1").stage1Outputs()).toEqual([])
     expect(store("v2").stage1Outputs()).toEqual([])

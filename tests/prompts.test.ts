@@ -177,7 +177,8 @@ describe("buildMemorySystemPrompt (read_path.md)", () => {
     fs.writeFileSync(memorySummaryPath(), summary)
     invalidateCache()
     const prompt = buildMemorySystemPrompt(true)!
-    const injected = prompt.split("========= MEMORY_SUMMARY BEGINS =========\n")[1]!
+    const injected = prompt
+      .split("========= MEMORY_SUMMARY BEGINS =========\n")[1]!
       .split("\n========= MEMORY_SUMMARY ENDS =========")[0]!
     expect(Buffer.byteLength(injected)).toBeLessThan(10000)
     expect(injected.startsWith("v1\n\nHEAD\n")).toBe(true)

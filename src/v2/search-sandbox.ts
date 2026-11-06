@@ -14,13 +14,15 @@ export function guardMemorySearchTools(
       const execute = tool.execute
       tool.execute = async (input: any, context: any) => {
         if (context.agent !== MEMORIZE_AGENT_ID) return execute(input, context)
-        const response = await getSession(context.sessionID) as any
+        const response = (await getSession(context.sessionID)) as any
         const session = response?.data ?? response
         // Helper permissions persist across plugin reloads and select one writer
         // even during dual-write. Never fall back to the active project or version.
-        const allowed = roots.filter((root) => session?.permissions?.some((rule: any) =>
-          rule.action === "read" && rule.resource === root && rule.effect === "allow",
-        ))
+        const allowed = roots.filter((root) =>
+          session?.permissions?.some(
+            (rule: any) => rule.action === "read" && rule.resource === root && rule.effect === "allow",
+          ),
+        )
         if (allowed.length !== 1) throw new Error("memory search requires one session-scoped memory workspace")
         const root = allowed[0]
         const requested = input.path ?? "."

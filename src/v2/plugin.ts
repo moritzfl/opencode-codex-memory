@@ -38,12 +38,7 @@ import { hostMcpStatus } from "../host-client.js"
 import { recordDiagnostic } from "../diagnostics.js"
 import { resetAgentHealth } from "../agent-health.js"
 import { applyPluginOptions, handleSessionDeleted } from "../index.js"
-import {
-  setV2Context,
-  buildV1ClientShim,
-  rememberV2Session,
-  type V2Context,
-} from "./shim.js"
+import { setV2Context, buildV1ClientShim, rememberV2Session, type V2Context } from "./shim.js"
 import { ensureV2Agents } from "./agents.js"
 import { buildV2Tools } from "./tools.js"
 import { performMemoryReset } from "../../tools/control.js"
@@ -132,7 +127,8 @@ function getStore(): MemoryStore {
 function recordV2Citations(sessionId: string, assistantMessageId: string, text: string): void {
   if (!hasCitationMarkup(text)) return
   const ids = extractCitedSessionIds(text)
-  if (ids.length > 0) withSessionMemoryVersion(sessionId, () => getStore().recordUsageOnce(sessionId, assistantMessageId, ids))
+  if (ids.length > 0)
+    withSessionMemoryVersion(sessionId, () => getStore().recordUsageOnce(sessionId, assistantMessageId, ids))
 }
 
 function stripAndReconcileCitations(sessionId: string, messages: any[] | undefined): void {
@@ -213,7 +209,8 @@ async function mcpToolPrefixes(): Promise<string[] | null> {
         if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
         const prefixes: string[] = []
         for (const [server, status] of Object.entries(servers as Record<string, unknown>)) {
-          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string") continue
+          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string")
+            continue
           prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
         }
         return prefixes
@@ -359,7 +356,8 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       return { status: "started" }
     },
     resetMemory: async (input: unknown) => {
-      if ((input as { confirm?: unknown } | undefined)?.confirm !== true) return { ok: false, message: "Reset not confirmed." }
+      if ((input as { confirm?: unknown } | undefined)?.confirm !== true)
+        return { ok: false, message: "Reset not confirmed." }
       const result = performMemoryReset()
       notifyStatusChanged()
       return result
@@ -516,7 +514,8 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
       }
       await abortableSleep(5000, eventAbort.signal)
     }
-  })().catch((err) => console.error("[opencode-codex-memory] v2 event loop error:", err))
+  })()
+    .catch((err) => console.error("[opencode-codex-memory] v2 event loop error:", err))
     .finally(() => eventLoops.delete(eventAbort))
   eventLoops.add(eventAbort)
 

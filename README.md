@@ -34,9 +34,7 @@ to your existing global `~/.config/opencode/opencode.jsonc` or `opencode.json`
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    { "package": "opencode-codex-memory@0.10.1" }
-  ]
+  "plugins": [{ "package": "opencode-codex-memory@0.10.1" }],
 }
 ```
 
@@ -93,14 +91,14 @@ privacy, backups, and relocation.
 
 ## Start here
 
-| I want to… | Read |
-|---|---|
-| Recall past work, save a note, or pause learning | [Using memory](./docs/usage.md) |
-| Choose or switch memory behavior | [Memory V1 and Memory V2](./docs/memory-versions.md) |
-| Set models, learning frequency, or other options | [Configuration](./docs/configuration.md) |
-| Find, back up, move, or reset my data | [Storage and privacy](./docs/storage-and-privacy.md) |
-| Share with Codex CLI or import Claude Code memories | [Integrations](./docs/integrations.md) |
-| Fix missing memory or check an update | [Troubleshooting](./docs/troubleshooting.md) |
+| I want to…                                          | Read                                                 |
+| --------------------------------------------------- | ---------------------------------------------------- |
+| Recall past work, save a note, or pause learning    | [Using memory](./docs/usage.md)                      |
+| Choose or switch memory behavior                    | [Memory V1 and Memory V2](./docs/memory-versions.md) |
+| Set models, learning frequency, or other options    | [Configuration](./docs/configuration.md)             |
+| Find, back up, move, or reset my data               | [Storage and privacy](./docs/storage-and-privacy.md) |
+| Share with Codex CLI or import Claude Code memories | [Integrations](./docs/integrations.md)               |
+| Fix missing memory or check an update               | [Troubleshooting](./docs/troubleshooting.md)         |
 
 ## Learn more and contribute
 

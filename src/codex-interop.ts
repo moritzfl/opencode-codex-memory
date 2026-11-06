@@ -398,9 +398,7 @@ function overlaps(a: string, b: string): boolean {
 }
 
 type CodexInteropClass =
-  | { status: "off" }
-  | { status: "blocked"; reason: string }
-  | { status: "ready"; resolved: ResolvedCodexInterop }
+  { status: "off" } | { status: "blocked"; reason: string } | { status: "ready"; resolved: ResolvedCodexInterop }
 
 function describeVersion(value: unknown): string {
   if (typeof value === "string") {
@@ -435,7 +433,9 @@ function resolveUnsetCodexVersion(codexHome: string, dualWrite: unknown): CodexM
  * An unreadable file, a parse failure, or a value other than "v1"/"v2" fails
  * closed so a leftover `memories/` handbook is not imported by guess.
  */
-function readCodexMemoryVersion(codexHome: string): { ok: true; version: CodexMemoryVersion } | { ok: false; reason: string } {
+function readCodexMemoryVersion(
+  codexHome: string,
+): { ok: true; version: CodexMemoryVersion } | { ok: false; reason: string } {
   const file = path.join(codexHome, CODEX_CONFIG_FILE)
   let text: string
   try {
@@ -472,7 +472,8 @@ function classifyCodexInterop(opts: CodexInteropOptions, warn: boolean): CodexIn
   // codex find_codex_home ignores an EMPTY env var (home-dir/src/lib.rs);
   // without the filter "" would resolve to a cwd-relative "memories" path.
   const envHome = process.env[CODEX_HOME_ENV]
-  const codexHome = opts.codex_home ?? (envHome && envHome.length > 0 ? envHome : undefined) ?? path.join(os.homedir(), ".codex")
+  const codexHome =
+    opts.codex_home ?? (envHome && envHome.length > 0 ? envHome : undefined) ?? path.join(os.homedir(), ".codex")
   const version = readCodexMemoryVersion(codexHome)
   if (!version.ok) {
     if (warn) console.warn(`[opencode-codex-memory] codex_interop disabled: ${version.reason}`)

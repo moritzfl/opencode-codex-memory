@@ -40,10 +40,12 @@ function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
         throw new Error("Agent not found")
       },
       transform: async (cb: (e: any) => void) => {
-        cb({ update: (id: string, fn: (a: any) => void) => {
-          agentUpdates.push(id)
-          fn({ id })
-        } })
+        cb({
+          update: (id: string, fn: (a: any) => void) => {
+            agentUpdates.push(id)
+            fn({ id })
+          },
+        })
       },
     },
     tool: {
@@ -51,7 +53,10 @@ function fakeCtx(options: Record<string, unknown> = {}, events: any[] = []) {
         toolTransforms.push(cb)
         rebuildTools()
       },
-      reload: async () => { toolReloads++; rebuildTools() },
+      reload: async () => {
+        toolReloads++
+        rebuildTools()
+      },
       hook: async (name: string, cb: (e: any) => unknown) => {
         ;(hooks[name] ??= []).push(cb)
       },
@@ -111,8 +116,7 @@ afterEach(() => {
   delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
   try {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true })
-  } catch {
-  }
+  } catch {}
   resetPluginOptions()
   resetAgentHealth()
   resetV2ModuleStateForTest()
@@ -191,10 +195,18 @@ describe("v2 setup", () => {
       const parts = spec.split("/")
       return spec.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]!
     }
-    const runtimePackages = [...new Set([...bare]
-      .filter((spec) => !spec.startsWith(".") && !spec.startsWith("file:") && !builtins.has(spec) && !hostProvided.has(spec))
-      .map(packageName))]
-    const missing = (dependencies: Record<string, string> = {}) => runtimePackages.filter((name) => !(name in dependencies))
+    const runtimePackages = [
+      ...new Set(
+        [...bare]
+          .filter(
+            (spec) =>
+              !spec.startsWith(".") && !spec.startsWith("file:") && !builtins.has(spec) && !hostProvided.has(spec),
+          )
+          .map(packageName),
+      ),
+    ]
+    const missing = (dependencies: Record<string, string> = {}) =>
+      runtimePackages.filter((name) => !(name in dependencies))
 
     expect(missing(pkg.dependencies)).toEqual([])
     for (const name of runtimePackages) {
@@ -248,7 +260,10 @@ describe("v2 setup", () => {
     const success = parseMemoryStatus(await f.rpcHandlers.status())
     expect(success.activity).toBe("idle")
     expect(success.lastSuccessAt).toBeGreaterThan(0)
-    require("../src/db.js").openDb().prepare("UPDATE memory_jobs SET finished_at=1 WHERE kind='memory_consolidate_global'").run()
+    require("../src/db.js")
+      .openDb()
+      .prepare("UPDATE memory_jobs SET finished_at=1 WHERE kind='memory_consolidate_global'")
+      .run()
     const next = store.claimGlobalPhase2Job()
     if (next.type !== "claimed") throw new Error("expected retry claim")
     store.markPhase2Failed(next.ownershipToken, "test failure")
@@ -273,8 +288,13 @@ describe("v2 setup", () => {
       delete legacy.v2InjectedSummaryBytes
       expect(parseMemoryStatus(legacy)).toEqual(legacy)
       for (const patch of [
-        { v2NotReadyReason: 42 }, { v2SummaryBytes: -1 }, { v2SummaryBytes: 1.5 }, { v2SummaryBytes: "100" },
-        { v2InjectedSummaryBytes: -1 }, { v2InjectedSummaryBytes: 1.5 }, { v2InjectedSummaryBytes: "100" },
+        { v2NotReadyReason: 42 },
+        { v2SummaryBytes: -1 },
+        { v2SummaryBytes: 1.5 },
+        { v2SummaryBytes: "100" },
+        { v2InjectedSummaryBytes: -1 },
+        { v2InjectedSummaryBytes: 1.5 },
+        { v2InjectedSummaryBytes: "100" },
         { v2InjectedSummaryBytes: 10000 },
       ]) {
         expect(() => parseMemoryStatus({ ...snapshot, ...patch })).toThrow("invalid memory status payload")
@@ -284,7 +304,9 @@ describe("v2 setup", () => {
       const summary = "v1\n\n## User Profile\n\n## User preferences\n\n## General Tips\n\n## What's in Memory\n"
       fs.writeFileSync(path.join(dir, "memory_summary.md"), summary)
       expect(parseMemoryStatus(await f.rpcHandlers.status())).toMatchObject({
-        v2Ready: false, v2SummaryBytes: Buffer.byteLength(summary), v2InjectedSummaryBytes: Buffer.byteLength(summary.trim()),
+        v2Ready: false,
+        v2SummaryBytes: Buffer.byteLength(summary),
+        v2InjectedSummaryBytes: Buffer.byteLength(summary.trim()),
         v2NotReadyReason: "insufficient consolidated threads: 0 < 20",
       })
       fs.writeFileSync(path.join(dir, "memory_summary.md"), summary + "ö".repeat(6000))
@@ -293,7 +315,9 @@ describe("v2 setup", () => {
       expect(oversized.v2InjectedSummaryBytes!).toBeLessThan(10000)
       expect(oversized.v2NotReadyReason).toBe("insufficient consolidated threads: 0 < 20")
       expect(fs.existsSync(path.join(TEST_ROOT, "memory_v2.db"))).toBe(false)
-    } finally { await cleanup?.() }
+    } finally {
+      await cleanup?.()
+    }
   })
 
   it("serves the memory panel controls: option toggles, session mode, and consolidate-now", async () => {
@@ -333,8 +357,12 @@ describe("v2 setup", () => {
       const store = new MemoryStore()
       const extract = (id: string) => {
         const output = {
-          session_id: id, source_updated_at: Date.now(), raw_memory: "Remember the project convention.",
-          rollout_summary: "Project convention", rollout_slug: id, generated_at: Date.now(),
+          session_id: id,
+          source_updated_at: Date.now(),
+          raw_memory: "Remember the project convention.",
+          rollout_summary: "Project convention",
+          rollout_slug: id,
+          generated_at: Date.now(),
         }
         const [claim] = store.claimStage1Jobs([{ id, updated_at: output.source_updated_at }])
         store.markStage1Succeeded(id, claim!.ownershipToken, output)
@@ -351,10 +379,18 @@ describe("v2 setup", () => {
       const before = openDb().query("SELECT * FROM memory_jobs ORDER BY kind, job_key").all()
       const queued = parseMemoryStatus(await f.rpcHandlers.status())
       expect(queued).toMatchObject({ activity: "idle", lastSuccessAt: finished, retryAt: null, warnings: [] })
-      expect(queued.pipelines).toEqual([{
-        version: "v1", stage1Count: 3, extracting: 0, phase2Status: "pending", lastError: null,
-        phase2CooldownUntil: finished + PHASE2_COOLDOWN_MS, phase1RetryAt: null, phase2RetryAt: null,
-      }])
+      expect(queued.pipelines).toEqual([
+        {
+          version: "v1",
+          stage1Count: 3,
+          extracting: 0,
+          phase2Status: "pending",
+          lastError: null,
+          phase2CooldownUntil: finished + PHASE2_COOLDOWN_MS,
+          phase1RetryAt: null,
+          phase2RetryAt: null,
+        },
+      ])
       expect(openDb().query("SELECT * FROM memory_jobs ORDER BY kind, job_key").all()).toEqual(before)
       expect(store.claimGlobalPhase2Job()).toEqual({ type: "skipped_cooldown" })
 
@@ -364,20 +400,24 @@ describe("v2 setup", () => {
       expect(retrying).toMatchObject({ activity: "retrying", lastSuccessAt: finished })
       expect(retrying.retryAt).toBeGreaterThan(Date.now())
       expect(retrying.pipelines[0]).toMatchObject({
-        phase2Status: "pending", lastError: null, phase2CooldownUntil: finished + PHASE2_COOLDOWN_MS,
-        phase1RetryAt: retrying.retryAt, phase2RetryAt: null,
+        phase2Status: "pending",
+        lastError: null,
+        phase2CooldownUntil: finished + PHASE2_COOLDOWN_MS,
+        phase1RetryAt: retrying.retryAt,
+        phase2RetryAt: null,
       })
-      expect(retrying.warnings).toEqual([
-        "v1: Extraction retry (1 job): Model unavailable: xai/grok-4.7",
-      ])
+      expect(retrying.warnings).toEqual(["v1: Extraction retry (1 job): Model unavailable: xai/grok-4.7"])
       const invalid = structuredClone(retrying) as any
       invalid.pipelines[0].phase2CooldownUntil = "tomorrow"
       expect(() => parseMemoryStatus(invalid)).toThrow("invalid memory status payload")
 
-      openDb().prepare("UPDATE memory_jobs SET finished_at=? WHERE kind='memory_consolidate_global'")
+      openDb()
+        .prepare("UPDATE memory_jobs SET finished_at=? WHERE kind='memory_consolidate_global'")
         .run(Math.floor((Date.now() - PHASE2_COOLDOWN_MS) / 1000) - 1)
       expect(parseMemoryStatus(await f.rpcHandlers.status()).pipelines[0]!.phase2CooldownUntil).toBeNull()
-    } finally { await cleanup?.() }
+    } finally {
+      await cleanup?.()
+    }
   })
 
   it("reports retries from the active shadow writer, not an inactive memory version", async () => {
@@ -396,7 +436,9 @@ describe("v2 setup", () => {
       pluginOptions.dual_write = false
       const inactive = parseMemoryStatus(await f.rpcHandlers.status())
       expect(inactive).toMatchObject({ activity: baseline.activity, retryAt: null, warnings: baseline.warnings })
-    } finally { await cleanup?.() }
+    } finally {
+      await cleanup?.()
+    }
   })
 
   it("resets memory from the panel only with an explicit confirmation", async () => {
@@ -443,7 +485,9 @@ describe("v2 setup", () => {
   it("rolls back the read toggle if tool reload fails", async () => {
     const f = fakeCtx({ generate_memories: false, use_memories: false })
     const cleanup = await setup(f.ctx)
-    f.ctx.tool.reload = async () => { throw new Error("reload failed") }
+    f.ctx.tool.reload = async () => {
+      throw new Error("reload failed")
+    }
     const handlers = f.rpcHandlers as Record<string, (input?: unknown) => Promise<any>>
     expect(await handlers.setOption({ key: "use_memories", value: true })).toEqual({ ok: false })
     expect(parseMemoryStatus(await handlers.status()).useMemories).toBe(false)
@@ -496,13 +540,21 @@ describe("v2 setup", () => {
     await cleanup?.()
   })
 
-  it("registers tools, hooks and the memorize agent; applies options", async () => {    const f = fakeCtx({ generate_memories: false })
+  it("registers tools, hooks and the memorize agent; applies options", async () => {
+    const f = fakeCtx({ generate_memories: false })
     const cleanup = await setup(f.ctx)
     expect(f.added.map((t) => t.name).sort()).toEqual(
       ["memory_add_note", "memory_inspect", "memory_list", "memory_mode", "memory_read", "memory_search"].sort(),
     )
     expect(f.added.every((t) => t.options?.codemode === false)).toBe(true)
-    expect(Object.keys(f.hooks).sort()).toEqual(["compaction", "context", "execute.before", "generate", "prompt", "title"])
+    expect(Object.keys(f.hooks).sort()).toEqual([
+      "compaction",
+      "context",
+      "execute.before",
+      "generate",
+      "prompt",
+      "title",
+    ])
     expect(f.agentUpdates).toEqual([])
     await (cleanup as () => unknown)?.()
     await waitForV2BackgroundTasks()
@@ -567,7 +619,12 @@ describe("v2 setup", () => {
           role: "assistant",
           content: [{ type: "tool-call", id: "call_done", name: "memory_search", input: { queries: ["x"] } }],
         },
-        { role: "tool", content: [{ type: "tool-result", id: "call_done", name: "memory_search", result: { type: "text", value: "kept" } }] },
+        {
+          role: "tool",
+          content: [
+            { type: "tool-result", id: "call_done", name: "memory_search", result: { type: "text", value: "kept" } },
+          ],
+        },
       ],
     }
     await f.hooks.context[0](ev)
@@ -598,7 +655,9 @@ describe("v2 setup", () => {
         {
           id: "m1",
           role: "assistant",
-          content: [{ type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" }],
+          content: [
+            { type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" },
+          ],
         },
       ],
     }
@@ -613,13 +672,15 @@ describe("v2 setup", () => {
     const ev: any = {
       sessionID: "ses_x",
       system: [],
-      messages: [{
-        role: "assistant",
-        content: [
-          { type: "text", text: "answer" },
-          { type: "text", text: "```memory-citation\nsessions: ses_q\n```" },
-        ],
-      }],
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "answer" },
+            { type: "text", text: "```memory-citation\nsessions: ses_q\n```" },
+          ],
+        },
+      ],
     }
     await f.hooks.context[0](ev)
     expect(ev.messages[0].content).toEqual([{ type: "text", text: "answer" }])
@@ -636,7 +697,9 @@ describe("v2 setup", () => {
         {
           id: "m1",
           role: "assistant",
-          content: [{ type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" }],
+          content: [
+            { type: "text", text: "x <memory-citation><session_ids><id>ses_q</id></session_ids></memory-citation>" },
+          ],
         },
       ],
     }
@@ -647,7 +710,14 @@ describe("v2 setup", () => {
 
   it("session.deleted drops extracted memory like V1", async () => {
     const store = new MemoryStore()
-    store.upsertStage1Output({ session_id: "ses_gone_user", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
+    store.upsertStage1Output({
+      session_id: "ses_gone_user",
+      source_updated_at: 1,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1,
+    })
     const f = fakeCtx({}, [{ type: "session.deleted", data: { info: { id: "ses_gone_user" } } }])
     await setup(f.ctx)
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -656,15 +726,24 @@ describe("v2 setup", () => {
 
   it("accounts citations from durable text.ended events and reconciles later context", async () => {
     const store = new MemoryStore()
-    store.upsertStage1Output({ session_id: "ses_cited", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
-    const f = fakeCtx({}, [{
-      type: "session.text.ended",
-      data: {
-        sessionID: "ses_main",
-        assistantMessageID: "msg_durable",
-        text: "answer\n```memory-citation\nsessions: ses_cited\n```",
+    store.upsertStage1Output({
+      session_id: "ses_cited",
+      source_updated_at: 1,
+      raw_memory: "m",
+      rollout_summary: "s",
+      rollout_slug: null,
+      generated_at: 1,
+    })
+    const f = fakeCtx({}, [
+      {
+        type: "session.text.ended",
+        data: {
+          sessionID: "ses_main",
+          assistantMessageID: "msg_durable",
+          text: "answer\n```memory-citation\nsessions: ses_cited\n```",
+        },
       },
-    }])
+    ])
     await setup(f.ctx)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(new MemoryStore().stage1Outputs().find((row) => row.session_id === "ses_cited")?.usage_count).toBe(1)
@@ -672,35 +751,53 @@ describe("v2 setup", () => {
     const ev: any = {
       sessionID: "ses_main",
       system: [],
-      messages: [{
-        id: "msg_durable",
-        role: "assistant",
-        content: [{ type: "text", text: "answer\n```memory-citation\nsessions: ses_cited\n```" }],
-      }],
+      messages: [
+        {
+          id: "msg_durable",
+          role: "assistant",
+          content: [{ type: "text", text: "answer\n```memory-citation\nsessions: ses_cited\n```" }],
+        },
+      ],
     }
     await f.hooks.context[0](ev)
     expect(new MemoryStore().stage1Outputs().find((row) => row.session_id === "ses_cited")?.usage_count).toBe(1)
   })
 
-  it.each(["context", "compaction", "generate", "title"])("strips id-less %s context without double-counting durable citations", async (hook) => {
-    const text = "answer\n```memory-citation\nsessions: ses_cited\n```"
-    const store = new MemoryStore()
-    store.upsertStage1Output({ session_id: "ses_cited", source_updated_at: 1, raw_memory: "m", rollout_summary: "s", rollout_slug: null, generated_at: 1 })
-    const f = fakeCtx({}, [{ type: "session.text.ended", data: { sessionID: "ses_main", assistantMessageID: "msg_reply", text } }])
-    const cleanup = await setup(f.ctx)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    for (let i = 0; i < 2; i++) {
-      const ev: any = { sessionID: "ses_main", system: [], messages: [
-        { role: "user", content: [{ type: "text", text }] },
-        { role: "tool", content: [{ type: "text", text }] },
-        { role: "assistant", content: [{ type: "text", text }] },
-      ] }
-      await f.hooks[hook][0](ev)
-      expect(ev.messages.map((m: any) => m.content[0].text)).toEqual([text, text, "answer"])
-    }
-    expect(store.stage1Outputs()[0].usage_count).toBe(1)
-    await cleanup?.()
-  })
+  it.each(["context", "compaction", "generate", "title"])(
+    "strips id-less %s context without double-counting durable citations",
+    async (hook) => {
+      const text = "answer\n```memory-citation\nsessions: ses_cited\n```"
+      const store = new MemoryStore()
+      store.upsertStage1Output({
+        session_id: "ses_cited",
+        source_updated_at: 1,
+        raw_memory: "m",
+        rollout_summary: "s",
+        rollout_slug: null,
+        generated_at: 1,
+      })
+      const f = fakeCtx({}, [
+        { type: "session.text.ended", data: { sessionID: "ses_main", assistantMessageID: "msg_reply", text } },
+      ])
+      const cleanup = await setup(f.ctx)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      for (let i = 0; i < 2; i++) {
+        const ev: any = {
+          sessionID: "ses_main",
+          system: [],
+          messages: [
+            { role: "user", content: [{ type: "text", text }] },
+            { role: "tool", content: [{ type: "text", text }] },
+            { role: "assistant", content: [{ type: "text", text }] },
+          ],
+        }
+        await f.hooks[hook][0](ev)
+        expect(ev.messages.map((m: any) => m.content[0].text)).toEqual([text, text, "answer"])
+      }
+      expect(store.stage1Outputs()[0].usage_count).toBe(1)
+      await cleanup?.()
+    },
+  )
 
   it("tool hook marks websearch sessions polluted when the guard is on", async () => {
     const f = fakeCtx()

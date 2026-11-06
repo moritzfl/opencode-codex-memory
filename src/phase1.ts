@@ -4,12 +4,7 @@ import { serializeTieredInput } from "./rollout-input.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
 import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
-import {
-  checkRateLimit,
-  isProviderCapacityBlocked,
-  markRateLimitUsed,
-  ProviderCapacityError,
-} from "./ratelimit.js"
+import { checkRateLimit, isProviderCapacityBlocked, markRateLimitUsed, ProviderCapacityError } from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
 import { currentMemoryVersion, withMemoryVersion } from "./memory-version.js"
@@ -138,9 +133,10 @@ async function runVersionPhase1(
         store.markStage1SucceededNoOutput(sid, claim.ownershipToken, sourceUpdatedAt)
         return
       }
-      const summary = currentMemoryVersion() === "v2"
-        ? truncateToBytes(redact(result.rollout_summary), V2_SUMMARY_MAX_BYTES)
-        : redact(result.rollout_summary)
+      const summary =
+        currentMemoryVersion() === "v2"
+          ? truncateToBytes(redact(result.rollout_summary), V2_SUMMARY_MAX_BYTES)
+          : redact(result.rollout_summary)
       store.markStage1Succeeded(sid, claim.ownershipToken, {
         session_id: sid,
         source_updated_at: sourceUpdatedAt,

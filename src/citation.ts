@@ -38,7 +38,10 @@ export function parseCitationBody(body: string): { entries: MemoryCitationEntry[
     if (!trimmed) continue
     const sessions = trimmed.match(SESSIONS_LINE_RE)
     if (sessions) {
-      for (const id of sessions[1].split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)) {
+      for (const id of sessions[1]
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)) {
         if (!seen.has(id)) {
           seen.add(id)
           sessionIds.push(id)
@@ -120,7 +123,10 @@ export function parseCitations(text: string): ParsedCitation[] {
       }
     } else if (entriesBlock && entries.length === 0) {
       // Legacy format: <citation_entries> held a comma-separated session-id list.
-      for (const id of entriesBlock.split(",").map((s) => s.trim()).filter(Boolean)) {
+      for (const id of entriesBlock
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)) {
         if (!seen.has(id)) {
           seen.add(id)
           sessionIds.push(id)
@@ -149,5 +155,8 @@ export function extractCitedSessionIds(text: string): string[] {
 }
 
 export function stripCitations(text: string): string {
-  return text.replace(CITATION_BLOCK_RE, "").replace(/[ \t]*\n{3,}/g, "\n\n").trimEnd()
+  return text
+    .replace(CITATION_BLOCK_RE, "")
+    .replace(/[ \t]*\n{3,}/g, "\n\n")
+    .trimEnd()
 }

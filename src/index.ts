@@ -140,7 +140,9 @@ export function handleSessionDeleted(
   // attempt could only fail; the row deletion above still happens, and the
   // enqueued job runs when generation is re-enabled (codex: delete only
   // enqueues; the pipeline itself is gated elsewhere).
-  schedulePhase2: () => void = () => { if (pluginOptions.generate_memories) trackBackgroundTask(triggerPhase2()) },
+  schedulePhase2: () => void = () => {
+    if (pluginOptions.generate_memories) trackBackgroundTask(triggerPhase2())
+  },
 ): void {
   const stores = store ? [store] : existingMemoryStores()
   let changed = false
@@ -248,7 +250,13 @@ export function applyPluginOptions(opts: PluginOptions, { modelFallback = false 
       recordConfigWarning(`unknown/unsupported option '${key}' ignored`)
     }
   }
-  for (const key of ["generate_memories", "use_memories", "dedicated_tools", "disable_on_external_context", "dual_write"] as const) {
+  for (const key of [
+    "generate_memories",
+    "use_memories",
+    "dedicated_tools",
+    "disable_on_external_context",
+    "dual_write",
+  ] as const) {
     if (!(key in raw)) continue
     if (typeof raw[key] === "boolean") pluginOptions[key] = raw[key]
     else recordConfigWarning(`${key} must be a boolean; using default ${pluginOptions[key]}`)
@@ -262,7 +270,9 @@ export function applyPluginOptions(opts: PluginOptions, { modelFallback = false 
     if (!(key in raw)) continue
     const models = typeof raw[key] === "string" ? modelList(raw[key]) : []
     if (models.length === 0) {
-      recordConfigWarning(`${key} must be a "provider/model" string or comma-separated list; using the opencode model default`)
+      recordConfigWarning(
+        `${key} must be a "provider/model" string or comma-separated list; using the opencode model default`,
+      )
       continue
     }
     // A shared V1/V2 config is valid: V1 quietly runs the first model only.
@@ -411,7 +421,8 @@ async function mcpToolPrefixes(): Promise<string[] | null> {
         if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
         const prefixes: string[] = []
         for (const [server, status] of Object.entries(servers as Record<string, unknown>)) {
-          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string") continue
+          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string")
+            continue
           // Mirrors OpenCode's McpCatalog.sanitize when constructing tool names.
           prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
         }
@@ -478,230 +489,233 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
 
 function buildHooks() {
   const base = {
-  async config(input: { agent?: Record<string, unknown> }): Promise<void> {
-    try {
-      // The write pipeline is the only consumer of the sub-agents; with
-      // generation off they would just pollute the user's agent list.
-      if (!pluginOptions.generate_memories) {
-        try {
-          recordAgentConfig(input, false, loadBundledAgentDefinitions())
-        } catch (err) {
-          console.warn("[opencode-codex-memory] could not inspect bundled agent definitions:", err)
-        }
-        return
-      }
-      injectAgentDefinitions(input)
-    } catch (err) {
-      console.error("[opencode-codex-memory] config hook error:", err)
-    }
-  },
-
-  async "experimental.chat.system.transform"(
-    input: { sessionID?: string; model: unknown },
-    output: { system: string[] },
-  ): Promise<void> {
-    try {
-      if (!pluginOptions.use_memories) return
-      // OpenCode also invokes this hook while generating agent definitions,
-      // without a session, and while naming a session (hidden `title` agent,
-      // same sessionID; hook has no agent field). Memory belongs only in
-      // real conversation prompts.
-      if (!input.sessionID || isMemorySubSession(input.sessionID)) return
-      if (isTitleGenerationPrompt(output.system)) return
-      const memoryPrompt = withSessionMemoryVersion(input.sessionID, () => {
-        ensureMemoryLayout()
-        return buildMemorySystemPrompt(pluginOptions.dedicated_tools)
-      })
-      if (memoryPrompt) {
-        output.system.push(memoryPrompt)
-      }
-    } catch (err) {
-      console.error("[opencode-codex-memory] system.transform error:", err)
-    }
-  },
-
-  /**
-   * Fires at text-end, before opencode persists the final part text
-   * (session/processor.ts): the returned text replaces the stored one.
-   * Primary citation seam — records usage and strips the block so neither
-   * the UI nor history ever shows citation markup (matches codex, which
-   * strips from the displayed/persisted message). The event and
-   * messages.transform paths below stay as fallbacks for older opencode
-   * hosts and for history persisted before this hook existed.
-   */
-  async "experimental.text.complete"(
-    input: { sessionID: string; messageID: string; partID: string },
-    output: { text: string },
-  ): Promise<void> {
-    try {
-      if (isMemorySubSession(input.sessionID)) return
-      if (!hasCitationMarkup(output.text)) return
+    async config(input: { agent?: Record<string, unknown> }): Promise<void> {
       try {
-        const ids = extractCitedSessionIds(output.text)
-        // Same part key as the event path: whichever hook sees the ids first
-        // records them; the other becomes a no-op.
-        const fresh = takeNewCitations(`${input.sessionID}:${input.partID}`, ids)
-        if (fresh.length > 0) withSessionMemoryVersion(input.sessionID, () => getStore().recordUsage(fresh))
-      } catch (e) {
-        console.error("[opencode-codex-memory] citation recording failed:", e)
+        // The write pipeline is the only consumer of the sub-agents; with
+        // generation off they would just pollute the user's agent list.
+        if (!pluginOptions.generate_memories) {
+          try {
+            recordAgentConfig(input, false, loadBundledAgentDefinitions())
+          } catch (err) {
+            console.warn("[opencode-codex-memory] could not inspect bundled agent definitions:", err)
+          }
+          return
+        }
+        injectAgentDefinitions(input)
+      } catch (err) {
+        console.error("[opencode-codex-memory] config hook error:", err)
       }
-      output.text = stripCitations(output.text)
-    } catch (err) {
-      console.error("[opencode-codex-memory] text.complete error:", err)
-    }
-  },
+    },
 
-  // Fallback strip for history that still carries citation blocks (messages
-  // persisted by plugin versions before the text.complete seam, or hosts
-  // without it). Keeps citation markup out of the model-facing transcript.
-  async "experimental.chat.messages.transform"(
-    _input: unknown,
-    output: { messages: { info: { role?: string }; parts: { type: string; text?: string }[] }[] },
-  ): Promise<void> {
-    try {
-      for (const msg of output.messages) {
-        if (msg.info?.role !== "assistant") continue
-        for (const part of msg.parts) {
-          if (part.type === "text" && typeof part.text === "string" && hasCitationMarkup(part.text)) {
-            const before = part.text
-            part.text = stripCitations(part.text)
-            if (hasCitationMarkup(part.text)) {
-              console.warn("[opencode-codex-memory] citation marker still present after stripCitations — hook contract may have changed")
+    async "experimental.chat.system.transform"(
+      input: { sessionID?: string; model: unknown },
+      output: { system: string[] },
+    ): Promise<void> {
+      try {
+        if (!pluginOptions.use_memories) return
+        // OpenCode also invokes this hook while generating agent definitions,
+        // without a session, and while naming a session (hidden `title` agent,
+        // same sessionID; hook has no agent field). Memory belongs only in
+        // real conversation prompts.
+        if (!input.sessionID || isMemorySubSession(input.sessionID)) return
+        if (isTitleGenerationPrompt(output.system)) return
+        const memoryPrompt = withSessionMemoryVersion(input.sessionID, () => {
+          ensureMemoryLayout()
+          return buildMemorySystemPrompt(pluginOptions.dedicated_tools)
+        })
+        if (memoryPrompt) {
+          output.system.push(memoryPrompt)
+        }
+      } catch (err) {
+        console.error("[opencode-codex-memory] system.transform error:", err)
+      }
+    },
+
+    /**
+     * Fires at text-end, before opencode persists the final part text
+     * (session/processor.ts): the returned text replaces the stored one.
+     * Primary citation seam — records usage and strips the block so neither
+     * the UI nor history ever shows citation markup (matches codex, which
+     * strips from the displayed/persisted message). The event and
+     * messages.transform paths below stay as fallbacks for older opencode
+     * hosts and for history persisted before this hook existed.
+     */
+    async "experimental.text.complete"(
+      input: { sessionID: string; messageID: string; partID: string },
+      output: { text: string },
+    ): Promise<void> {
+      try {
+        if (isMemorySubSession(input.sessionID)) return
+        if (!hasCitationMarkup(output.text)) return
+        try {
+          const ids = extractCitedSessionIds(output.text)
+          // Same part key as the event path: whichever hook sees the ids first
+          // records them; the other becomes a no-op.
+          const fresh = takeNewCitations(`${input.sessionID}:${input.partID}`, ids)
+          if (fresh.length > 0) withSessionMemoryVersion(input.sessionID, () => getStore().recordUsage(fresh))
+        } catch (e) {
+          console.error("[opencode-codex-memory] citation recording failed:", e)
+        }
+        output.text = stripCitations(output.text)
+      } catch (err) {
+        console.error("[opencode-codex-memory] text.complete error:", err)
+      }
+    },
+
+    // Fallback strip for history that still carries citation blocks (messages
+    // persisted by plugin versions before the text.complete seam, or hosts
+    // without it). Keeps citation markup out of the model-facing transcript.
+    async "experimental.chat.messages.transform"(
+      _input: unknown,
+      output: { messages: { info: { role?: string }; parts: { type: string; text?: string }[] }[] },
+    ): Promise<void> {
+      try {
+        for (const msg of output.messages) {
+          if (msg.info?.role !== "assistant") continue
+          for (const part of msg.parts) {
+            if (part.type === "text" && typeof part.text === "string" && hasCitationMarkup(part.text)) {
+              const before = part.text
+              part.text = stripCitations(part.text)
+              if (hasCitationMarkup(part.text)) {
+                console.warn(
+                  "[opencode-codex-memory] citation marker still present after stripCitations — hook contract may have changed",
+                )
+              }
             }
           }
         }
+      } catch (err) {
+        console.error("[opencode-codex-memory] messages.transform error:", err)
       }
-    } catch (err) {
-      console.error("[opencode-codex-memory] messages.transform error:", err)
-    }
-  },
+    },
 
-  /**
-   * Turn start. codex stamps memory_mode at thread creation (session.rs) and
-   * schedules memory work per startup/turn; the first user message is the
-   * closest plugin-visible moment. Stamping here (instead of waiting for the
-   * first idle) means a session created while generate_memories=false keeps
-   * its 'disabled' stamp even if the option flips mid-session, and the
-   * phase-1 pump no longer depends on idle events at all. The idle path
-   * below stays as a second pump trigger; both are cheap (stamp is INSERT OR
-   * IGNORE, the pump is gated by in-flight/rate/claim guards).
-   */
-  async "chat.message"(input: { sessionID?: string }): Promise<void> {
-    try {
-      const sid = input?.sessionID
-      if (!sid || isMemorySubSession(sid)) return
-      sessionMemoryVersion(sid)
-      if (!markTurnSeen(sid)) return
+    /**
+     * Turn start. codex stamps memory_mode at thread creation (session.rs) and
+     * schedules memory work per startup/turn; the first user message is the
+     * closest plugin-visible moment. Stamping here (instead of waiting for the
+     * first idle) means a session created while generate_memories=false keeps
+     * its 'disabled' stamp even if the option flips mid-session, and the
+     * phase-1 pump no longer depends on idle events at all. The idle path
+     * below stays as a second pump trigger; both are cheap (stamp is INSERT OR
+     * IGNORE, the pump is gated by in-flight/rate/claim guards).
+     */
+    async "chat.message"(input: { sessionID?: string }): Promise<void> {
       try {
-        getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
-      } catch (e) {
-        console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
-      }
-      trackBackgroundTask(triggerPhase1(sid))
-    } catch (err) {
-      console.error("[opencode-codex-memory] chat.message error:", err)
-    }
-  },
-
-  /**
-   * Dedicated plugin hook (NOT an event-bus type). Marks the session polluted
-   * at INVOCATION, mirroring codex: mcp_tool_call.rs calls
-   * maybe_mark_thread_memory_mode_polluted inside handle_approved_mcp_tool_call
-   * BEFORE the call runs, and web search marks on the completed response item
-   * (stream_events_utils.rs response_item_may_include_external_context).
-   *
-   * Deliberately not tool.execute.after: opencode does not guarantee that hook
-   * (session/tools.ts awaits execute() with no ensuring/catchAll, and an abort
-   * interrupts the fiber), so a failed or cancelled websearch/webfetch/MCP call
-   * left the session unmarked while its output had already entered the
-   * transcript. Marking early over-marks a permission-denied call, which is the
-   * safe direction for an opt-in guard.
-   *
-   * Pollution remains gated by disable_on_external_context, off by default.
-   */
-  async "tool.execute.before"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
-    try {
-      if (!pluginOptions.disable_on_external_context || !input.sessionID) return
-      // null = MCP status unavailable; websearch/webfetch still classify true
-      // without it, so only MCP-prefixed tools go unmarked.
-      if ((await classifyExternalContextTool(input.tool)) !== true) return
-      getStore().markPolluted(input.sessionID)
-    } catch (err) {
-      console.error("[opencode-codex-memory] tool.execute.before error:", err)
-    }
-  },
-
-  async event(input: { event: { type: string; properties: unknown } }): Promise<void> {
-    try {
-      const ev = input.event
-      if (ev.type === "message.part.updated") {
-        const part = (ev.properties as { part?: { id?: string; type: string; text?: string; sessionID?: string } }).part
-        if (!part || part.type !== "text" || typeof part.text !== "string") return
-        if (part.sessionID && isMemorySubSession(part.sessionID)) return
-        if (!hasCitationMarkup(part.text)) return
-        let ids: string[] = []
+        const sid = input?.sessionID
+        if (!sid || isMemorySubSession(sid)) return
+        sessionMemoryVersion(sid)
+        if (!markTurnSeen(sid)) return
         try {
-          ids = extractCitedSessionIds(part.text)
-        } catch {
+          getStore().stampMemoryModeIfAbsent(sid, pluginOptions.generate_memories ? "enabled" : "disabled")
+        } catch (e) {
+          console.error("[opencode-codex-memory] stampMemoryModeIfAbsent failed:", e)
+        }
+        trackBackgroundTask(triggerPhase1(sid))
+      } catch (err) {
+        console.error("[opencode-codex-memory] chat.message error:", err)
+      }
+    },
+
+    /**
+     * Dedicated plugin hook (NOT an event-bus type). Marks the session polluted
+     * at INVOCATION, mirroring codex: mcp_tool_call.rs calls
+     * maybe_mark_thread_memory_mode_polluted inside handle_approved_mcp_tool_call
+     * BEFORE the call runs, and web search marks on the completed response item
+     * (stream_events_utils.rs response_item_may_include_external_context).
+     *
+     * Deliberately not tool.execute.after: opencode does not guarantee that hook
+     * (session/tools.ts awaits execute() with no ensuring/catchAll, and an abort
+     * interrupts the fiber), so a failed or cancelled websearch/webfetch/MCP call
+     * left the session unmarked while its output had already entered the
+     * transcript. Marking early over-marks a permission-denied call, which is the
+     * safe direction for an opt-in guard.
+     *
+     * Pollution remains gated by disable_on_external_context, off by default.
+     */
+    async "tool.execute.before"(input: { tool: string; sessionID: string; callID: string }): Promise<void> {
+      try {
+        if (!pluginOptions.disable_on_external_context || !input.sessionID) return
+        // null = MCP status unavailable; websearch/webfetch still classify true
+        // without it, so only MCP-prefixed tools go unmarked.
+        if ((await classifyExternalContextTool(input.tool)) !== true) return
+        getStore().markPolluted(input.sessionID)
+      } catch (err) {
+        console.error("[opencode-codex-memory] tool.execute.before error:", err)
+      }
+    },
+
+    async event(input: { event: { type: string; properties: unknown } }): Promise<void> {
+      try {
+        const ev = input.event
+        if (ev.type === "message.part.updated") {
+          const part = (ev.properties as { part?: { id?: string; type: string; text?: string; sessionID?: string } })
+            .part
+          if (!part || part.type !== "text" || typeof part.text !== "string") return
+          if (part.sessionID && isMemorySubSession(part.sessionID)) return
+          if (!hasCitationMarkup(part.text)) return
+          let ids: string[] = []
+          try {
+            ids = extractCitedSessionIds(part.text)
+          } catch {
+            return
+          }
+          const fresh = takeNewCitations(`${part.sessionID ?? ""}:${part.id ?? ""}`, ids)
+          if (fresh.length > 0) {
+            try {
+              withSessionMemoryVersion(part.sessionID, () => getStore().recordUsage(fresh))
+            } catch (e) {
+              console.error("[opencode-codex-memory] recordUsage failed:", e)
+            }
+          }
           return
         }
-        const fresh = takeNewCitations(`${part.sessionID ?? ""}:${part.id ?? ""}`, ids)
-        if (fresh.length > 0) {
-          try {
-            withSessionMemoryVersion(part.sessionID, () => getStore().recordUsage(fresh))
-          } catch (e) {
-            console.error("[opencode-codex-memory] recordUsage failed:", e)
+
+        if (ev.type === "session.deleted") {
+          // Mirrors codex delete_thread_memory: drop the extracted memory and
+          // its job when the session is deleted. If phase 2 had consumed it,
+          // enqueue and attempt consolidation so the diff drives forgetting.
+          const props = ev.properties as { info?: { id?: string } }
+          const sid = props?.info?.id
+          if (sid) {
+            try {
+              handleSessionDeleted(sid)
+            } catch (e) {
+              console.error("[opencode-codex-memory] deleteSessionMemory failed:", e)
+            }
           }
+          return
         }
-        return
-      }
 
-      if (ev.type === "session.deleted") {
-        // Mirrors codex delete_thread_memory: drop the extracted memory and
-        // its job when the session is deleted. If phase 2 had consumed it,
-        // enqueue and attempt consolidation so the diff drives forgetting.
-        const props = ev.properties as { info?: { id?: string } }
-        const sid = props?.info?.id
-        if (sid) {
-          try {
-            handleSessionDeleted(sid)
-          } catch (e) {
-            console.error("[opencode-codex-memory] deleteSessionMemory failed:", e)
-          }
+        // session.idle is deprecated in opencode 1.17 in favor of
+        // session.status {type:"idle"}; both are still emitted. Support both so
+        // the pipeline keeps triggering when the legacy event disappears.
+        if (ev.type === "session.status") {
+          const props = ev.properties as { sessionID?: string; status?: { type?: string } }
+          if (props?.status?.type === "idle" && props.sessionID) handleSessionIdle(props.sessionID)
+          return
         }
-        return
-      }
 
-      // session.idle is deprecated in opencode 1.17 in favor of
-      // session.status {type:"idle"}; both are still emitted. Support both so
-      // the pipeline keeps triggering when the legacy event disappears.
-      if (ev.type === "session.status") {
-        const props = ev.properties as { sessionID?: string; status?: { type?: string } }
-        if (props?.status?.type === "idle" && props.sessionID) handleSessionIdle(props.sessionID)
-        return
+        if (ev.type === "session.idle") {
+          const props = ev.properties as { sessionID?: string }
+          if (props?.sessionID) handleSessionIdle(props.sessionID)
+          return
+        }
+      } catch (err) {
+        console.error("[opencode-codex-memory] event error:", err)
       }
+    },
 
-      if (ev.type === "session.idle") {
-        const props = ev.properties as { sessionID?: string }
-        if (props?.sessionID) handleSessionIdle(props.sessionID)
-        return
+    async dispose(): Promise<void> {
+      // Stop new pumps, abort the consolidator helper if it is mid-write, and
+      // best-effort abort extract sessions so a reload cannot leave two writers.
+      beginPluginShutdown()
+      try {
+        await abortActiveSubSessions()
+      } catch (err) {
+        console.warn("[opencode-codex-memory] dispose abort of sub-sessions failed:", err)
       }
-    } catch (err) {
-      console.error("[opencode-codex-memory] event error:", err)
-    }
-  },
-
-  async dispose(): Promise<void> {
-    // Stop new pumps, abort the consolidator helper if it is mid-write, and
-    // best-effort abort extract sessions so a reload cannot leave two writers.
-    beginPluginShutdown()
-    try {
-      await abortActiveSubSessions()
-    } catch (err) {
-      console.warn("[opencode-codex-memory] dispose abort of sub-sessions failed:", err)
-    }
-    invalidateCache()
-  },
+      invalidateCache()
+    },
   }
 
   function handleSessionIdle(sid: string): void {
