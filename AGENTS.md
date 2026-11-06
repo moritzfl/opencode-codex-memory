@@ -26,7 +26,7 @@ Before changing anything in the memory pipeline:
    record a deliberate divergence in that mapping's `note:`.
 4. Bump `codex_ref` / `codex_ref_date` once re-audited.
 
-Do not put alignment *status* in prose (it rots). Facts live in `codex-map.yaml`;
+Do not put alignment _status_ in prose (it rots). Facts live in `codex-map.yaml`;
 this file only points at the procedure.
 
 ## Design invariant
@@ -40,7 +40,8 @@ via the drift script before proposing structural changes.
 ## Conventions
 
 - `./gradlew` is not used here. Dev commands: `bun install`, `bun test`,
-  `bun run typecheck`, `bun run build`, `bun run smoke`, `bun run contract`.
+  `bun run typecheck`, `bun run format`, `bun run format:check`, `bun run build`,
+  `bun run smoke`, `bun run contract`.
   Live host checks (need `.env` with `OPENCODE_LIVE_API_KEY` /
   `OPENCODE_LIVE_BASE_URL` / `OPENCODE_LIVE_MODEL`, XDG-sandboxed; never
   copy host OpenCode credentials): `bun run live:read`, `bun run live:e2e`.
@@ -59,9 +60,9 @@ via the drift script before proposing structural changes.
   Rules: never edit V1 behavior for V2 needs (adapt
   in `src/v2/`); `opencode.json` stays the V1 `agent` bundle (same D2
   allowlist; V2 agents are provisioned at runtime; V2 action names: `edit`
-  covers write/patch; `tests/v2-agents.test.ts` enforces it); `bun run
-  contract:v2` must pass alongside `bun run contract`. The package `./tui`
-  export is `src/tui.ts` (OpenCode 1.18.29+ requires `default.tui()` and
+  covers write/patch; `tests/v2-agents.test.ts` enforces it);
+  `bun run contract:v2` must pass alongside `bun run contract`. The package
+  `./tui` export is `src/tui.ts` (OpenCode 1.18.29+ requires `default.tui()` and
   must not import the V2 TUI SDK). The sidebar itself is `src/v2/tui.tsx`
   (RPC in `src/v2/status-rpc.ts`), lazy-loaded from that wrapper's
   `setup()`: `setup()` must only claim slots (Solid-scoped APIs like

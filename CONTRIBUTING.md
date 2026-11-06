@@ -53,11 +53,15 @@ runtime. Those are fine **only** when they are deliberate and recorded as a
 bun install
 bun test
 bun run typecheck
+bun run format:check
 bun run build && bun run smoke && bun run contract
 ```
 
-GitHub Actions runs `bun test`, typecheck, build, and smoke on every PR to
-`main`. Live host checks (`contract`, `live:*`) stay manual.
+GitHub Actions runs formatting, typecheck, tests, build, and smoke on every PR
+to `main`. Live host checks (`contract`, `live:*`) stay manual.
+
+Apply formatting with `bun run format` (Prettier). Prompt templates under
+`src/templates/` are intentionally excluded; see `.prettierignore`.
 
 Live checks against the **official** opencode binary (XDG-sandboxed; never
 touches your real memory home or host OpenCode credentials). Copy

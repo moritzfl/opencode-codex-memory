@@ -51,7 +51,9 @@
     "live:e2e": "bun scripts/live-e2e.ts",
     "prepack": "npm run build && npm run smoke",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": [
     "opencode",
@@ -75,9 +77,10 @@
     "@opencode/theme": "2.0.3",
     "@opentui/core": "0.5.10",
     "@opentui/solid": "0.5.10",
+    "@types/bun": "^1.1.0",
+    "prettier": "^3.9.10",
     "solid-js": "1.9.15",
-    "typescript": "^5.5.0",
-    "@types/bun": "^1.1.0"
+    "typescript": "^5.5.0"
   },
   "peerDependencies": {
     "@opencode/client": ">=2.0.3",
@@ -87,11 +90,21 @@
     "solid-js": ">=1.9.0"
   },
   "peerDependenciesMeta": {
-    "@opencode/client": { "optional": true },
-    "@opencode/plugin": { "optional": true },
-    "@opentui/core": { "optional": true },
-    "@opentui/solid": { "optional": true },
-    "solid-js": { "optional": true }
+    "@opencode/client": {
+      "optional": true
+    },
+    "@opencode/plugin": {
+      "optional": true
+    },
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
   },
   "engines": {
     "bun": ">=1.1.0"

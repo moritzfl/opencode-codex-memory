@@ -1,0 +1,9 @@
+node_modules/
+dist/
+bun.lock
+.idea/
+.jolli/
+
+# Prompt templates are ported from codex with deliberate platform adaptations.
+# Formatting them would add noise to the parity diff and can change prompt text.
+src/templates/
