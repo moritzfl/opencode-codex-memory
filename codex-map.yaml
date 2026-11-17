@@ -16,22 +16,24 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 4413deac572eb5d4cdb49295794cbe30f8622935
-codex_ref_date: 2026-11-13
-# Re-audited watched diffs (50 commits, 29 watched files): no port required.
-# Memory dir changes are host plumbing — startup/quota auth moves to the
-# thread's ProviderAuthContext (#60064), consolidation permissions bind to the
-# memory root via PermissionProfile/workspace_roots (#59507, already diverged:
-# the plugin uses the memorize agent allowlist), shared response-item ID
-# generator (#59312), thread metadata builder encapsulation (#60524), rollout
-# trace background worker (#61253), sandbox test profiles (#61133). Runtime
-# auth wiring, model-provider test split, realtime voice and gateway credential
-# export stay host-only. Unchanged: gpt-6-luna / gpt-6.1-terra memory model
-# defaults, MemoryTool stable/off, ExternalAgentMemoryImport under
-# development/off, dual_write=false, git-baseline, memory migrations, memory
-# version and memory_usage. Earlier audit: bounded/versioned git baselines
-# (#57240) ported; consolidation_service_tier (#57568) and telemetry need no
-# port. Codex defaults fresh profiles to v2 since 2026-10-22 (a390571745,
+codex_ref: 5cba3aec84fb7fb13785ab9da330ee6debca21e6
+codex_ref_date: 2026-11-17
+# Re-audited watched diffs (35 commits, 20 watched files): no port required.
+# Memory dir changes are host plumbing — stage-one overlaps a git worktree
+# probe and attaches it to Responses request metadata only (#61939), thread-
+# scoped model info lookup (#61421). MCP admission check before handoff
+# (#62066) runs after the pollution mark, so invocation-time marking still
+# matches. Thread-list included_thread_ids (memory query passes None,
+# #61446), rollout snippet matcher (#62076), provider output normalization
+# (#62095), assistant-text/response-processing refactors (#61577), hook
+# lifecycle (#61562), new default-off feature flags and output-truncation
+# audio accounting stay host-only. Unchanged: gpt-6-luna / gpt-6.1-terra
+# memory model defaults, MemoryTool stable/off, ExternalAgentMemoryImport
+# under development/off, fresh-profile v2 selection, citation recording,
+# templates, git-baseline, memory migrations, memory version and
+# memory_usage. Earlier audits: bounded/versioned git baselines (#57240)
+# ported; consolidation_service_tier (#57568), telemetry, ProviderAuthContext
+# (#60064) and PermissionProfile memory-root binding (#59507) need no port. Codex defaults fresh profiles to v2 since 2026-10-22 (a390571745,
 # #56211); the plugin keeps v1 opt-in and exchange mirrors Codex's
 # unset-version directory signal (see the codex-interop note).
 
