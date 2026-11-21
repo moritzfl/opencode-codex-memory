@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results once, alongside their nested calls and statuses.
 - Timed-out OpenCode 2 history and discovery requests stop fetching pages;
   stalled context reads are shared and bounded.
+- Extraction fits each attempt to the model's reported context and input
+  limits, including when a fallback model has a smaller window.
 - OpenCode 2 now stops consolidation helpers through their creating location
   and uses native removal when available. A missing remote row no longer
   releases a writer whose local shutdown could not be confirmed.

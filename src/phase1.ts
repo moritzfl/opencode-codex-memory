@@ -3,7 +3,7 @@ import { loadTranscript, selectEligibleSessions } from "./capture.js"
 import { serializeTieredInput } from "./rollout-input.js"
 import { redact, isMemoryExcludedFragment } from "./redact.js"
 import { stripCitations } from "./citation.js"
-import { extractViaSubagent, SubagentCancelledError } from "./llm.js"
+import { extractViaSubagent, MAX_TRANSCRIPT_BYTES, SubagentCancelledError } from "./llm.js"
 import { checkRateLimit, isProviderCapacityBlocked, markRateLimitUsed, ProviderCapacityError } from "./ratelimit.js"
 import { isPluginShuttingDown } from "./lifecycle.js"
 import { recordDiagnostic } from "./diagnostics.js"
@@ -30,16 +30,6 @@ export const DEFAULT_PHASE1_OPTIONS: Phase1Options = {
   maxClaimed: 2,
   maxUnusedDays: 30,
 }
-
-// codex serializes the full transcript and truncates at 70% of the model
-// context window, falling back to 150k tokens; ~4 chars/token puts the
-// char-estimate equivalent at 600k.
-const TRANSCRIPT_MAX_CHARS = 600_000
-// When truncating, keep the head and the tail: the start carries the user's
-// framing, the end carries the final outcome and feedback. codex splits the
-// budget 50/50 between head and tail (truncate.rs split_budget).
-const TRANSCRIPT_HEAD_CHARS = 300_000
-const TRANSCRIPT_TAIL_CHARS = 300_000
 
 export async function runPhase1(
   store: MemoryStore,
@@ -105,12 +95,12 @@ async function runVersionPhase1(
     try {
       const session = sessionById.get(sid)
       const sourceUpdatedAt = session?.updated_at ?? Date.now()
-      const transcript = await buildTranscript(sid)
+      const transcript = await prepareTranscript(sid)
       if (isPluginShuttingDown()) {
         store.releaseStage1OnShutdown(sid, claim.ownershipToken)
         return
       }
-      if (!transcript.trim()) {
+      if (!transcript) {
         // A newly empty chat is a legitimate no-output result. An existing
         // extraction plus an empty API success is anomalous: retry instead of
         // permanently forgetting memory because of a transient host glitch.
@@ -161,11 +151,16 @@ async function runVersionPhase1(
 }
 
 export async function buildTranscript(sessionId: string): Promise<string> {
+  return (await prepareTranscript(sessionId))?.(MAX_TRANSCRIPT_BYTES) ?? ""
+}
+
+async function prepareTranscript(sessionId: string): Promise<((limit: number) => string) | null> {
   const msgs = await loadTranscript(sessionId)
-  if (msgs.length === 0) return ""
+  if (msgs.length === 0) return null
   if (currentMemoryVersion() === "v2") {
-    const tiered = serializeTieredInput(msgs, TRANSCRIPT_MAX_CHARS)
-    return redact(stripCitations(tiered))
+    const render = (limit: number) => redact(stripCitations(serializeTieredInput(msgs, limit)))
+    const initial = render(MAX_TRANSCRIPT_BYTES)
+    return initial.trim() ? (limit) => (Buffer.byteLength(initial) <= limit ? initial : render(limit)) : null
   }
   const lines: string[] = []
   for (const m of msgs) {
@@ -183,12 +178,7 @@ export async function buildTranscript(sessionId: string): Promise<string> {
     lines.push(`### ${role}\n${redact(stripCitations(text))}`)
   }
   const full = lines.join("\n\n")
-  if (full.length <= TRANSCRIPT_MAX_CHARS) return full
-  return (
-    full.slice(0, TRANSCRIPT_HEAD_CHARS) +
-    "\n\n[... transcript truncated ...]\n\n" +
-    full.slice(full.length - TRANSCRIPT_TAIL_CHARS)
-  )
+  return full ? (limit) => truncateToBytes(full, limit) : null
 }
 
 async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {

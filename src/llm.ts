@@ -13,7 +13,8 @@ import {
   pluginHttpGet,
   withHostTimeout,
 } from "./host-client.js"
-import { catalogVariantKeys, nearestReasoningVariant } from "./reasoning-variant.js"
+import { catalogModel, catalogVariantKeys, nearestReasoningVariant } from "./reasoning-variant.js"
+import { truncateToBytes } from "./token.js"
 import { isPluginShuttingDown, pluginShutdownSignal } from "./lifecycle.js"
 import { modelList, type MemoryVersion } from "./options.js"
 import { currentMemoryVersion } from "./memory-version.js"
@@ -29,6 +30,8 @@ import {
 import { recordDiagnostic } from "./diagnostics.js"
 
 const EXTRACTION_TIMEOUT_MS = (STAGE1_LEASE_SECONDS - 600) * 1000
+export const MAX_TRANSCRIPT_BYTES = 600_000
+type Transcript = string | ((byteLimit: number) => string)
 
 export interface ExtractionResult {
   raw_memory: string
@@ -553,7 +556,7 @@ const EXTRACTION_SCHEMA_V2 = {
  */
 export async function extractViaSubagent(
   sessionId: string,
-  transcript: string,
+  transcript: Transcript,
   opts: ExtractOptions = {},
 ): Promise<ExtractionResult | null> {
   // Bounded by the stage-1 job lease (1h), minus headroom for transcript
@@ -569,7 +572,7 @@ export async function extractViaSubagent(
 
 async function extractOnce(
   sessionId: string,
-  transcript: string,
+  transcript: Transcript,
   cwd: string | undefined,
   configuredModel: string | undefined,
   timeoutMs: number,
@@ -580,18 +583,36 @@ async function extractOnce(
   const subId = await createSession(`codex-memory-extract-${sessionId}`)
   try {
     const version = currentMemoryVersion()
-    const prompt = buildExtractionInput(sessionId, cwd ?? "unknown", transcript, version)
     // extract_model chain entry > opencode small_model > session default.
     const model = await resolveExtractionModel(configuredModel)
+    const system = readTemplate(version === "v2" ? "stage_one_system_v2.md" : "stage_one_system.md")
+    const schema = version === "v2" ? EXTRACTION_SCHEMA_V2 : EXTRACTION_SCHEMA
+    const ref = model && parseModelRef(model)
+    const limit = ref ? catalogModel(await getProviderCatalog(), ref.providerID, ref.modelID)?.limit : undefined
+    const windows = [limit?.context, limit?.input].filter(
+      (n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0,
+    )
+    // 70% of the effective input window (Codex), reserving template/schema
+    // bytes plus host framing. Token counts are estimates, not provider billing.
+    const overhead =
+      Buffer.byteLength(
+        system + buildExtractionInput(sessionId, cwd ?? "unknown", "", version) + JSON.stringify(schema),
+      ) + 1024
+    const budget = windows.length
+      ? Math.min(MAX_TRANSCRIPT_BYTES, Math.floor(Math.min(...windows) * 0.7) * 4 - overhead)
+      : MAX_TRANSCRIPT_BYTES
+    if (budget < 256) throw new Error(`Model ${model} has insufficient input space for the extraction instructions`)
+    const content = typeof transcript === "string" ? truncateToBytes(transcript, budget) : transcript(budget)
+    const prompt = buildExtractionInput(sessionId, cwd ?? "unknown", content, version)
     const data = await runPrompt(subId, prompt, agent, {
       timeoutMs,
-      system: readTemplate(version === "v2" ? "stage_one_system_v2.md" : "stage_one_system.md"),
+      system,
       model,
       signal,
       // opencode enforces json_schema output via a forced StructuredOutput tool
       // call (toolChoice: required) — which is why memorize-extract must allow
       // that one otherwise-denied tool.
-      format: { type: "json_schema", schema: version === "v2" ? EXTRACTION_SCHEMA_V2 : EXTRACTION_SCHEMA },
+      format: { type: "json_schema", schema },
       // Codex extraction ReasoningEffort::Low. Host maps variant → reasoningEffort.
       // If the model has no `low`, pick the nearest listed effort (host-only).
       variant: await resolveReasoningVariant(EXTRACT_VARIANT, model),

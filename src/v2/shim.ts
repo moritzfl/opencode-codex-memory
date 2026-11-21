@@ -259,6 +259,7 @@ export function adaptProviderCatalog(v2: unknown): unknown {
       }
     }
     ;(providers.get(providerID) as Record<string, unknown>)[modelID] = {
+      ...(m.limit ? { limit: m.limit } : {}),
       ...(m.variants !== undefined ? { variants } : {}),
     }
   }

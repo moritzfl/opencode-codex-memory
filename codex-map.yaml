@@ -328,8 +328,9 @@ mappings:
     theirs: codex-rs/memories/write/src/phase1.rs
     note: >
       transcript build + eligibility + stage1 extraction orchestration.
-      Transcript budget 600k chars, 50/50 head+tail split ~ codex's 150k-token
-      fallback (codex uses 70% of the model context window when known).
+      Transcript budget is recomputed per attempted model: 70% of effective
+      input context with prompt headroom; 600k UTF-8 bytes as fallback and cap.
+      Bytes per token are estimated. V1 preserves head/tail, V2 prioritizes tiers.
       Reasoning parts are excluded like codex (rollout policy Reasoning=false).
       DIVERGENCES: a first-time empty transcript is treated as
       success-with-no-output (codex fails when a rollout cannot be loaded)

@@ -799,6 +799,45 @@ describe("model fallback chain", () => {
     expect(isProviderCapacityBlocked("phase1", "a/one")).toBe(false)
   })
 
+  it("refits multibyte input for the fallback model's smaller input window", async () => {
+    const sizes: number[] = []
+    setPluginInput({
+      client: {
+        provider: {
+          list: async () => ({
+            data: {
+              all: [
+                {
+                  id: "p",
+                  models: {
+                    large: { limit: { context: 100000 } },
+                    small: { limit: { context: 100000, input: 16000 } },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+        session: {
+          create: async () => ({ data: { id: "sub-size" } }),
+          delete: async () => ({}),
+          prompt: async ({ body }: any) => {
+            const text = body.parts[0].text
+            expect(text).toContain("HEAD")
+            expect(text).toContain("TAIL")
+            expect(text).not.toContain("\uFFFD")
+            sizes.push(Buffer.byteLength(text + body.system))
+            return sizes.length === 1 ? AUTH : EXTRACTED
+          },
+        },
+      },
+    } as any)
+    await extractViaSubagent("ses_budget", "HEAD" + "界".repeat(150000) + "TAIL", { model: "p/large,p/small" })
+    expect(sizes).toHaveLength(2)
+    expect(sizes[0]).toBeGreaterThan(sizes[1] * 3)
+    expect(sizes[1]).toBeLessThan(16000 * 0.7 * 4)
+  })
+
   it("falls back when a model returns unusable extraction output", async () => {
     stubChain({
       "a/one": { data: { info: {}, parts: [{ type: "text", text: "no json here" }] } },

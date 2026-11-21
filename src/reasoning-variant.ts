@@ -40,7 +40,11 @@ export function enabledVariantKeys(variants: unknown): string[] {
   return out
 }
 
-export function catalogVariantKeys(data: unknown, providerID: string, modelID: string): string[] | undefined {
+export function catalogModel(
+  data: unknown,
+  providerID: string,
+  modelID: string,
+): { variants?: unknown; limit?: { context?: number; input?: number } } | undefined {
   if (!data || typeof data !== "object") return undefined
   const root = data as { all?: unknown; providers?: unknown }
   const all = Array.isArray(root.all) ? root.all : Array.isArray(root.providers) ? root.providers : undefined
@@ -51,6 +55,12 @@ export function catalogVariantKeys(data: unknown, providerID: string, modelID: s
   if (!provider?.models || typeof provider.models !== "object") return undefined
   const model = provider.models[modelID]
   if (!model || typeof model !== "object" || Array.isArray(model)) return undefined
+  return model
+}
+
+export function catalogVariantKeys(data: unknown, providerID: string, modelID: string): string[] | undefined {
+  const model = catalogModel(data, providerID, modelID)
+  if (!model) return undefined
   if (!Object.prototype.hasOwnProperty.call(model, "variants")) return undefined
   return enabledVariantKeys((model as { variants?: unknown }).variants)
 }
