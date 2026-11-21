@@ -102,8 +102,9 @@ enabled, and sessions must still meet the [idle and age limits](configuration.md
 
 **Reset memory** erases all learned memory and notes, like `memory_reset`.
 Press Enter once to arm it and again to confirm; moving the selection cancels.
-OpenCode 2 cannot ask you to approve a plugin tool call, so the agent does not
-get a reset tool there.
+On OpenCode 2, reset is a panel-only action. Restoring learning for a
+polluted session requires approval, even if learning was disabled in between.
+On older hosts without plugin permission prompts, use the panel to restore it.
 
 On OpenCode 1.x or an interface without the panel, use `memory_inspect`.
 If the panel shows **Unavailable**, see [Troubleshooting](troubleshooting.md).

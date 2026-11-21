@@ -21,6 +21,16 @@ interface V1Tool {
   execute: (args: any, ctx: any) => Promise<string | { output?: string; content?: unknown; metadata?: unknown }>
 }
 
+type CallContext = {
+  sessionID: string
+  messageID: string
+  agent: string
+  id?: string
+  signal?: AbortSignal
+  abort?: AbortSignal
+}
+type Ask = (ctx: CallContext, request: { patterns: string[]; metadata: unknown }) => Promise<void>
+
 interface V2ToolDefinition {
   name: string
   description: string
@@ -32,29 +42,26 @@ interface V2ToolDefinition {
    * `memory` namespace, miss, and skip memory.
    */
   options: { codemode: false }
-  execute: (
-    input: any,
-    ctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal },
-  ) => Promise<{ content: string | unknown[]; metadata?: unknown }>
+  execute: (input: any, ctx: CallContext) => Promise<{ content: string | unknown[]; metadata?: unknown }>
 }
 
-function adaptTool(name: string, v1: V1Tool): V2ToolDefinition {
+function adaptTool(name: string, v1: V1Tool, ask?: Ask): V2ToolDefinition {
   return {
     name,
     description: v1.description,
     input: z.object(v1.args),
     options: { codemode: false },
-    async execute(input: any, tctx: { sessionID: string; messageID: string; agent: string; abort?: AbortSignal }) {
+    async execute(input: any, tctx: CallContext) {
       const v1ctx = {
         sessionID: tctx.sessionID,
         messageID: tctx.messageID,
         agent: tctx.agent,
         directory: "",
         worktree: "",
-        abort: tctx.abort instanceof AbortSignal ? tctx.abort : new AbortController().signal,
+        abort: tctx.signal ?? tctx.abort ?? new AbortController().signal,
         metadata: () => {},
-        // OpenCode 2 gives plugin tools no approval request; fail closed.
-        ask: async () => {
+        ask: async (request: Parameters<Ask>[1]) => {
+          if (ask) return ask(tctx, request)
           throw new Error(
             "User approval is unavailable to plugin tools on OpenCode 2. Use /memory-inspect → Controls instead.",
           )
@@ -102,7 +109,9 @@ const CONTROL_ONLY = new Set(["memory_inspect", "memory_mode"])
  * control tools are always available. memory_reset needs user approval,
  * which V2 plugin tools cannot request: reset lives in the memory panel.
  */
-export function buildV2Tools(): V2ToolDefinition[] {
+export function buildV2Tools(ask?: Ask): V2ToolDefinition[] {
   const full = pluginOptions.use_memories && pluginOptions.dedicated_tools
-  return ALL_MEMORY_TOOLS.filter(([name]) => full || CONTROL_ONLY.has(name)).map(([name, v1]) => adaptTool(name, v1))
+  return ALL_MEMORY_TOOLS.filter(([name]) => full || CONTROL_ONLY.has(name)).map(([name, v1]) =>
+    adaptTool(name, v1, ask),
+  )
 }

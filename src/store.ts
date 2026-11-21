@@ -821,14 +821,18 @@ export class MemoryStore {
     clearJobTables(this.db)
   }
 
-  setMemoryMode(sessionId: string, mode: "enabled" | "disabled" | "polluted"): void {
-    this.meta
+  setMemoryMode(sessionId: string, mode: "enabled" | "disabled" | "polluted", approvedRestore = false): void {
+    if (mode === "polluted") return this.markPolluted(sessionId)
+    const updated = this.meta
       .prepare(
         `INSERT INTO memory_session_meta (session_id, memory_mode, polluted, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET memory_mode=excluded.memory_mode, polluted=excluded.polluted, updated_at=excluded.updated_at`,
+         VALUES (?, ?, 0, ?)
+         ON CONFLICT(session_id) DO UPDATE SET memory_mode=excluded.memory_mode,
+           polluted=CASE WHEN excluded.memory_mode='enabled' THEN 0 ELSE polluted END, updated_at=excluded.updated_at
+         WHERE excluded.memory_mode='disabled' OR polluted=0 OR ?`,
       )
-      .run(sessionId, mode, mode === "polluted" ? 1 : 0, now())
+      .run(sessionId, mode, now(), approvedRestore ? 1 : 0)
+    if (!updated.changes) throw new Error("Restoring learning for this session requires approval.")
   }
 
   /**

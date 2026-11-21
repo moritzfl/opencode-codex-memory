@@ -610,10 +610,12 @@ mappings:
       model) — "reset my memory" in plain language is core plugin UX. Guard
       rails: memory_reset and memory_mode polluted→enabled request user
       approval via ctx.ask (the model-chosen `confirm` is not approval).
-      OpenCode 2 plugin tools cannot request approval, so V2 omits the
+      OpenCode 2 keeps reset panel-only, so V2 omits the
       memory_reset tool and offers the wipe as a confirmed panel RPC
       (resetMemory, closer to codex's client-side reset); V2 memory_mode
-      fails closed when lifting pollution. memory_mode additionally accepts
+      asks through permission.assert when supported and otherwise fails closed
+      when lifting pollution. Disabling learning preserves the pollution bit.
+      memory_mode additionally accepts
       "polluted" (codex protocol: enabled|disabled, polluted is set only
       automatically); memory_inspect is a port addition (read-only status).
       memory_reset wipes memories/ and memories_v2/ plus both job DBs,

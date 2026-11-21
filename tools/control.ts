@@ -487,7 +487,7 @@ export const memory_mode = tool({
     let polluted: boolean
     try {
       store = new MemoryStore()
-      polluted = store.getMemoryMode(sid) === "polluted"
+      polluted = store.isPolluted(sid)
     } catch (err) {
       return { output: `memory_mode error: ${(err as Error).message}` }
     }
@@ -503,7 +503,7 @@ export const memory_mode = tool({
       })
     }
     try {
-      store.setMemoryMode(sid, args.mode)
+      store.setMemoryMode(sid, args.mode, args.mode === "enabled" && polluted)
       return {
         output: `Memory mode for session ${sid} set to '${args.mode}'.`,
         metadata: { sessionId: sid, mode: args.mode },

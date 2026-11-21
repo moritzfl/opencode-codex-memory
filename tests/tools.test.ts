@@ -951,6 +951,8 @@ describe("memory_mode", () => {
     // Tightening never asks.
     await memory_mode.execute({ mode: "disabled", sessionId: "ses_polluted" }, rejecting)
     expect(store.getMemoryMode("ses_polluted")).toBe("disabled")
+    expect(store.isPolluted("ses_polluted")).toBe(true)
+    expect(() => store.setMemoryMode("ses_polluted", "enabled")).toThrow("requires approval")
     asks.length = 0
     store.markPolluted("ses_polluted2")
     await memory_mode.execute({ mode: "enabled", sessionId: "ses_polluted2" }, CTX)

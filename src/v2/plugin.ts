@@ -345,7 +345,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     setSessionMode: async (input: unknown) => {
       const { sessionID, mode } = (input ?? {}) as { sessionID?: unknown; mode?: unknown }
       if (typeof sessionID !== "string" || (mode !== "enabled" && mode !== "disabled")) return { ok: false }
-      getStore().setMemoryMode(sessionID, mode)
+      getStore().setMemoryMode(sessionID, mode, mode === "enabled")
       notifyStatusChanged()
       return { ok: true }
     },
@@ -369,9 +369,37 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     })
   }
 
+  // Only offer model-initiated restore when the host can require a one-time
+  // permission decision. A general tool allow rule isn't consent to restore.
+  const permission = ctx.permission as unknown as
+    | {
+        hook?(name: "evaluate", cb: (event: { action: string; effect: string }) => void): Promise<unknown>
+        assert?(input: Record<string, unknown>): Promise<void>
+      }
+    | undefined
+  const restoreAction = "memory_restore_learning"
+  const canAsk = !!permission?.assert && !!permission.hook
+  if (canAsk)
+    await permission.hook!("evaluate", (event) => {
+      if (event.action === restoreAction && event.effect === "allow") event.effect = "ask"
+    })
   await ctx.tool.transform((editor: any) => {
     guardMemorySearchTools(editor, (sessionID) => ctx.session.get({ sessionID } as any))
-    for (const t of buildV2Tools()) editor.add(t)
+    for (const t of buildV2Tools(
+      canAsk
+        ? (call, req) =>
+            permission.assert!({
+              sessionID: call.sessionID,
+              agent: call.agent,
+              action: restoreAction,
+              resources: req.patterns,
+              metadata: req.metadata,
+              save: [],
+              source: { type: "tool", messageID: call.messageID, id: call.id },
+            })
+        : undefined,
+    ))
+      editor.add(t)
   })
 
   await ctx.session.hook("prompt", (ev: any) => {

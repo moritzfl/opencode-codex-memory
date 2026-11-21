@@ -89,6 +89,19 @@ describe("buildV2Tools gating", () => {
 })
 
 describe("adapted tool execution", () => {
+  it("propagates a denied restore and clears pollution only after authorization", async () => {
+    const store = new MemoryStore()
+    store.markPolluted(TCTX.sessionID)
+    store.setMemoryMode(TCTX.sessionID, "disabled")
+    const mode = (allowed: boolean) =>
+      buildV2Tools(async () => {
+        if (!allowed) throw new Error("declined")
+      }).find((t) => t.name === "memory_mode")!
+    await expect(mode(false).execute({ mode: "enabled" }, TCTX)).rejects.toThrow("declined")
+    expect(store.isPolluted(TCTX.sessionID)).toBe(true)
+    await mode(true).execute({ mode: "enabled" }, TCTX)
+    expect(store.isPolluted(TCTX.sessionID)).toBe(false)
+  })
   it("memory_read returns content through the V2 shape", async () => {
     fs.writeFileSync(path.join(TEST_ROOT, "memories", "READ.md"), "# hi\n")
     const def = buildV2Tools().find((t) => t.name === "memory_read")!

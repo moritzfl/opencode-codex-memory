@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Disabling learning preserves a session's pollution flag. Restoring learning
+  requires approval, including on OpenCode 2 hosts with permission prompts.
+
 ## [0.10.1] - 2026-11-01
 
 ### Fixed
