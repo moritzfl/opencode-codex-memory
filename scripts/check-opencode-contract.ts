@@ -4,7 +4,7 @@
  * No LLM, no auth, no Docker. Safe for every PR / pre-release ritual.
  *
  * Checks:
- *   1. opencode binary version ≥ floor (OPENCODE_MIN_VERSION, default 1.17.0)
+ *   1. OpenCode 1.x binary version ≥ floor (OPENCODE_MIN_VERSION, default 1.18.0)
  *   2. Live OpenAPI (/doc): session.list query params, prompt format,
  *      AssistantMessage.structured, session.status idle variant
  *   3. Built plugin loads like opencode does and registers required hooks/tools
@@ -28,7 +28,7 @@ import {
   whichOpencode,
 } from "./lib/harness.js"
 
-const MIN_VERSION = process.env.OPENCODE_MIN_VERSION?.trim() || "1.17.0"
+const MIN_VERSION = process.env.OPENCODE_MIN_VERSION?.trim() || "1.18.0"
 
 const REQUIRED_SESSION_LIST_PARAMS = ["scope", "roots", "limit", "directory"] as const
 const REQUIRED_HOOKS = [
@@ -115,6 +115,7 @@ async function main() {
     fail("setup", e instanceof Error ? e.message : String(e))
   }
   log("bin", `${bin} @ ${version}`)
+  if (!version.startsWith("1.")) fail("setup", "V1 contract requires OpenCode 1.x; set OPENCODE_BIN to its executable")
   note(semverGte(version, MIN_VERSION), `opencode ${version} ≥ ${MIN_VERSION}`)
 
   // --- OpenAPI via live serve ---
@@ -127,68 +128,62 @@ async function main() {
     const healthVer = (health.json as { version?: string } | null)?.version
     if (healthVer) note(healthVer === version, `health.version ${healthVer} matches CLI ${version}`)
 
-    if (version.startsWith("2.")) {
-      // OpenCode 2 moved its machine-readable contract to /openapi.json and
-      // is checked by contract:v2; /doc is the V1-only surface.
-      log("skip", "/doc is a V1-only surface on OpenCode 2; see contract:v2")
+    const docRes = await api(serve, sandbox, "GET", "/doc")
+    note(docRes.status === 200, `GET /doc → ${docRes.status}`)
+    const doc = docRes.json as OpenAPI
+    if (!doc?.paths) {
+      note(false, "/doc missing paths")
     } else {
-      const docRes = await api(serve, sandbox, "GET", "/doc")
-      note(docRes.status === 200, `GET /doc → ${docRes.status}`)
-      const doc = docRes.json as OpenAPI
-      if (!doc?.paths) {
-        note(false, "/doc missing paths")
-      } else {
-        const listOp = getPathOp(doc, "/session", "get")
-        note(!!listOp, "GET /session present")
-        if (listOp) {
-          const params = Array.isArray(listOp.parameters) ? listOp.parameters : []
-          const names = new Set(params.map((p) => asRecord(p)?.name).filter((n): n is string => typeof n === "string"))
-          for (const p of REQUIRED_SESSION_LIST_PARAMS) {
-            note(names.has(p), `session.list query param '${p}'`)
-          }
+      const listOp = getPathOp(doc, "/session", "get")
+      note(!!listOp, "GET /session present")
+      if (listOp) {
+        const params = Array.isArray(listOp.parameters) ? listOp.parameters : []
+        const names = new Set(params.map((p) => asRecord(p)?.name).filter((n): n is string => typeof n === "string"))
+        for (const p of REQUIRED_SESSION_LIST_PARAMS) {
+          note(names.has(p), `session.list query param '${p}'`)
         }
+      }
 
-        const msgOp = getPathOp(doc, "/session/{sessionID}/message", "post")
-        note(!!msgOp, "POST /session/{sessionID}/message present")
-        if (msgOp) {
-          const body = requestBodySchema(doc, msgOp)
-          note(schemaHasProperty(body, "format"), "prompt body has 'format' (structured extraction)")
-          note(schemaHasProperty(body, "variant"), "prompt body has 'variant' (reasoning effort)")
-          note(schemaHasProperty(body, "parts"), "prompt body has 'parts'")
-        }
+      const msgOp = getPathOp(doc, "/session/{sessionID}/message", "post")
+      note(!!msgOp, "POST /session/{sessionID}/message present")
+      if (msgOp) {
+        const body = requestBodySchema(doc, msgOp)
+        note(schemaHasProperty(body, "format"), "prompt body has 'format' (structured extraction)")
+        note(schemaHasProperty(body, "variant"), "prompt body has 'variant' (reasoning effort)")
+        note(schemaHasProperty(body, "parts"), "prompt body has 'parts'")
+      }
 
-        const msgsOp = getPathOp(doc, "/session/{sessionID}/message", "get")
-        note(!!msgsOp, "GET /session/{sessionID}/message present (transcript)")
+      const msgsOp = getPathOp(doc, "/session/{sessionID}/message", "get")
+      note(!!msgsOp, "GET /session/{sessionID}/message present (transcript)")
 
-        const schemas = doc.components?.schemas ?? {}
-        note(!!schemas.AssistantMessage, "schema AssistantMessage present")
-        note(
-          schemaHasProperty(schemas.AssistantMessage, "structured"),
-          "AssistantMessage.structured present (extraction capture)",
-        )
-        note(!!schemas.OutputFormat || !!schemas.OutputFormatJsonSchema, "OutputFormat schema present")
-        note(!!schemas.SessionStatus, "SessionStatus schema present")
-        if (schemas.SessionStatus) {
-          const idle = JSON.stringify(schemas.SessionStatus).includes('"idle"')
-          note(idle, "SessionStatus includes idle variant")
-        }
-        note(!!schemas.Session, "schema Session present")
-        if (schemas.Session) {
-          const t = asRecord(asRecord(schemas.Session)?.properties)?.time
-          note(schemaHasProperty(t, "updated"), "Session.time.updated present (eligibility watermark)")
-        }
+      const schemas = doc.components?.schemas ?? {}
+      note(!!schemas.AssistantMessage, "schema AssistantMessage present")
+      note(
+        schemaHasProperty(schemas.AssistantMessage, "structured"),
+        "AssistantMessage.structured present (extraction capture)",
+      )
+      note(!!schemas.OutputFormat || !!schemas.OutputFormatJsonSchema, "OutputFormat schema present")
+      note(!!schemas.SessionStatus, "SessionStatus schema present")
+      if (schemas.SessionStatus) {
+        const idle = JSON.stringify(schemas.SessionStatus).includes('"idle"')
+        note(idle, "SessionStatus includes idle variant")
+      }
+      note(!!schemas.Session, "schema Session present")
+      if (schemas.Session) {
+        const t = asRecord(asRecord(schemas.Session)?.properties)?.time
+        note(schemaHasProperty(t, "updated"), "Session.time.updated present (eligibility watermark)")
+      }
 
-        // global discovery used by Phase 1 (D4)
-        const expSess = getPathOp(doc, "/experimental/session", "get")
-        note(!!expSess, "GET /experimental/session present (global discovery)")
-        if (expSess) {
-          const params = Array.isArray(expSess.parameters) ? expSess.parameters : []
-          const names = new Set(params.map((p) => asRecord(p)?.name).filter((n): n is string => typeof n === "string"))
-          note(names.has("roots"), "experimental.session.list query param 'roots'")
-          note(names.has("limit"), "experimental.session.list query param 'limit'")
-          note(names.has("cursor"), "experimental.session.list query param 'cursor'")
-          note(names.has("search"), "experimental.session.list query param 'search'")
-        }
+      // global discovery used by Phase 1 (D4)
+      const expSess = getPathOp(doc, "/experimental/session", "get")
+      note(!!expSess, "GET /experimental/session present (global discovery)")
+      if (expSess) {
+        const params = Array.isArray(expSess.parameters) ? expSess.parameters : []
+        const names = new Set(params.map((p) => asRecord(p)?.name).filter((n): n is string => typeof n === "string"))
+        note(names.has("roots"), "experimental.session.list query param 'roots'")
+        note(names.has("limit"), "experimental.session.list query param 'limit'")
+        note(names.has("cursor"), "experimental.session.list query param 'cursor'")
+        note(names.has("search"), "experimental.session.list query param 'search'")
       }
     }
   } finally {

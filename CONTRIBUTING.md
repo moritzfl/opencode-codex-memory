@@ -54,11 +54,15 @@ bun install
 bun test
 bun run typecheck
 bun run format:check
-bun run build && bun run smoke && bun run contract
+bun run build && bun run smoke
+OPENCODE_BIN=/path/to/opencode-1.x bun run contract
+bun run contract:v2 # requires opencode2 on PATH
 ```
 
-GitHub Actions runs formatting, typecheck, tests, build, and smoke on every PR
-to `main`. Live host checks (`contract`, `live:*`) stay manual.
+GitHub Actions runs formatting, typecheck, tests, build, smoke and isolated
+host contracts on every PR to `main`. Both host generations run at their floor
+and a pinned recent release. The weekly job also checks the latest release
+within each major. Credentialed `live:*` checks stay manual.
 
 Apply formatting with `bun run format` (Prettier). Prompt templates under
 `src/templates/` are intentionally excluded; see `.prettierignore`.

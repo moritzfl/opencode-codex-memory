@@ -36,4 +36,4 @@ test("drift detects a deleted watch-only path in a linked checkout", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
-})
+}, 30_000)

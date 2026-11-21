@@ -209,11 +209,13 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   fs.mkdirSync(project, { recursive: true })
   fs.writeFileSync(path.join(project, "README.md"), "# live test project\n")
 
-  const live = resolveLiveEnv()
-  const models = {
-    model: opts.model ?? live?.model ?? resolveHostModels().model,
-    smallModel: opts.smallModel ?? live?.smallModel ?? resolveHostModels().smallModel,
-  }
+  const live = opts.bare ? undefined : resolveLiveEnv()
+  const models = opts.bare
+    ? {}
+    : {
+        model: opts.model ?? live?.model ?? resolveHostModels().model,
+        smallModel: opts.smallModel ?? live?.smallModel ?? resolveHostModels().smallModel,
+      }
 
   const pluginOptions = {
     test: true,
@@ -285,6 +287,7 @@ export function createSandbox(opts: CreateSandboxOpts = {}): Sandbox {
   delete env.OPENCODE
   delete env.OPENCODE_PID
   delete env.OPENCODE_PRINT_LOGS
+  if (opts.bare) for (const key of Object.keys(env)) if (key.startsWith("OPENCODE_LIVE_")) delete env[key]
 
   const keep = opts.keep === true || process.env.OPENCODE_LIVE_KEEP === "1"
   const cleanup = () => {

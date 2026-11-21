@@ -57,6 +57,7 @@ export async function probeFilePermissions(
   sessionID: string,
   directory: string,
   probes: { tool: "read" | "write"; input: { path: string; content?: string } }[],
+  commandKey: "name" | "command",
 ): Promise<{ ok: boolean; error?: string }[]> {
   const output = path.join(sandbox.root, "file-probe-result.json")
   fs.rmSync(output, { force: true })
@@ -66,7 +67,7 @@ export async function probeFilePermissions(
     "POST",
     `/api/session/${sessionID}/command`,
     {
-      name: "file-permission-probe",
+      [commandKey]: "file-permission-probe",
       text: JSON.stringify({ probes, output }),
     },
     { directory },

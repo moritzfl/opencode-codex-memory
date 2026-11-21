@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "15 5 * * 1"
 
 jobs:
   test:
@@ -30,3 +32,39 @@ jobs:
 
       - name: Build + smoke
         run: bun run build && bun run smoke
+
+  host-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: opencode-ai
+            floor: 1.18.0
+            pinned: 1.19.6
+            major: 1
+            check: contract
+          - package: "@opencode/cli"
+            floor: 2.0.3
+            pinned: 2.3.0
+            major: 2
+            check: contract:v2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile && bun run build
+      - name: Test supported floor and current host
+        env:
+          HOST_PACKAGE: ${{ matrix.package }}
+          HOST_FLOOR: ${{ matrix.floor }}
+          HOST_CURRENT: ${{ github.event_name == 'schedule' && matrix.major || matrix.pinned }}
+          CHECK: ${{ matrix.check }}
+        run: |
+          for version in "$HOST_FLOOR" "$HOST_CURRENT"; do
+            host="$RUNNER_TEMP/opencode-$version"
+            npm install --prefix "$host" --no-save "$HOST_PACKAGE@$version"
+            PATH="$host/node_modules/.bin:$PATH" bun run "$CHECK"
+          done

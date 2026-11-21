@@ -3,7 +3,10 @@ import path from "node:path"
 import { api, createSandbox, repoRoot, startServe, type ServeHandle } from "./harness.js"
 
 /** Cold host + delayed provider registration, no external inference or credentials. */
-export async function probeV2ModelReadiness(): Promise<{ failures: number; inferenceCalls: number }> {
+export async function probeV2ModelReadiness(
+  generationPath: string,
+): Promise<{ failures: number; inferenceCalls: number }> {
+  const delayed = generationPath !== "/api/generate" // 2.0.3 has no provider.activation transform.
   const { retryModelSelection } = await import(path.join(repoRoot(), "dist/src/v2/model-readiness.js"))
   let inferenceCalls = 0
   const upstream = Bun.serve({
@@ -53,11 +56,11 @@ export default { id: "delayed-provider", async setup(ctx) {
     fs.writeFileSync(
       path.join(sandbox.configHome, "opencode/opencode.json"),
       JSON.stringify({
-        plugins: [pluginDir],
+        plugins: delayed ? [pluginDir] : [],
         providers: {
           delayed: {
             name: "Delayed",
-            disabled: true,
+            ...(delayed ? { disabled: true } : {}),
             package: "@opencode/ai/providers/openai-compatible",
             settings: { baseURL: upstream.url.href + "v1", apiKey: "test-only" },
             models: { m1: { name: "m1" } },
@@ -69,7 +72,7 @@ export default { id: "delayed-provider", async setup(ctx) {
     let failures = 0
     const output = await retryModelSelection(
       async () => {
-        const response = await api(serve!, sandbox, "POST", "/api/experimental/generate", {
+        const response = await api(serve!, sandbox, "POST", generationPath, {
           model: { providerID: "delayed", id: "m1" },
           prompt: "Reply OK",
         })
@@ -83,7 +86,11 @@ export default { id: "delayed-provider", async setup(ctx) {
       { providerID: "delayed", id: "m1" },
       AbortSignal.timeout(20_000),
     )
-    if ((output as { data?: { text?: string } })?.data?.text !== "OK" || failures === 0 || inferenceCalls !== 1) {
+    if (
+      (output as { data?: { text?: string } })?.data?.text !== "OK" ||
+      (delayed && failures === 0) ||
+      inferenceCalls !== 1
+    ) {
       throw new Error(
         `model readiness probe failed: failures=${failures}, inferenceCalls=${inferenceCalls}, output=${JSON.stringify(output)}`,
       )

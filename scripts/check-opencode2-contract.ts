@@ -109,6 +109,7 @@ async function main(): Promise<void> {
     failSetup("opencode2 binary not found on PATH")
   }
   log("bin", `opencode2 @ ${version}`)
+  if (!version.startsWith("2.")) failSetup("V2 contract requires OpenCode 2.x on PATH")
   note(versionGte(version, MIN_VERSION), `opencode2 ${version} ≥ ${MIN_VERSION}`)
 
   // --- OpenAPI from an isolated host, using its own sandbox auth ---
@@ -215,12 +216,21 @@ async function main(): Promise<void> {
         const outside = path.join(other, "probe.md")
         fs.mkdirSync(other, { recursive: true })
         fs.writeFileSync(outside, "outside")
-        const results = await probeFilePermissions(serve, sandbox, sessionID, directory, [
-          { tool: "write", input: { path: target, content: "inside" } },
-          { tool: "read", input: { path: target } },
-          { tool: "write", input: { path: outside, content: "forbidden" } },
-          { tool: "read", input: { path: outside } },
-        ])
+        const results = await probeFilePermissions(
+          serve,
+          sandbox,
+          sessionID,
+          directory,
+          [
+            { tool: "write", input: { path: target, content: "inside" } },
+            { tool: "read", input: { path: target } },
+            { tool: "write", input: { path: outside, content: "forbidden" } },
+            { tool: "read", input: { path: outside } },
+          ],
+          doc.paths?.["/api/session/{sessionID}/command"]?.post?.operationId === "v2.session.command"
+            ? "command"
+            : "name",
+        )
         note(
           results[0]?.ok === true && results[1]?.ok === true,
           `native memory write/read from ${directory}: ${JSON.stringify(results)}`,
@@ -232,7 +242,7 @@ async function main(): Promise<void> {
       }
     }
   } catch (e) {
-    throw new Error(`could not fetch /openapi.json: ${e instanceof Error ? e.message : String(e)}`)
+    throw new Error(`host contract probe failed: ${e instanceof Error ? e.message : String(e)}`)
   } finally {
     await serve?.stop()
     sandbox.cleanup()
@@ -250,10 +260,14 @@ async function main(): Promise<void> {
   }
 
   // --- native model startup race ---
-  const readiness = await probeV2ModelReadiness()
+  const generationPath = Object.entries(doc.paths ?? {}).find(([, methods]) =>
+    REQUIRED_OPS.find((op) => op.name === "generate.text")!.ids.includes(methods.post?.operationId ?? ""),
+  )?.[0]
+  if (!generationPath) throw new Error("generate.text path missing")
+  const readiness = await probeV2ModelReadiness(generationPath)
   note(
     true,
-    `cold model startup recovers after ${readiness.failures} startup failure(s), exactly ${readiness.inferenceCalls} inference request`,
+    `model startup: ${readiness.failures} startup retries, exactly ${readiness.inferenceCalls} inference request`,
   )
 
   // --- built plugin dual export ---
