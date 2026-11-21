@@ -205,14 +205,7 @@ function renderAgentHealth(): string[] {
 
 function resetBlockedReason(): string | null {
   if (isSymlinkedRoot()) return "Reset refused: memory root is a symlink. Remove it manually to be safe."
-  // A consolidation running in THIS process would recreate files right
-  // after the wipe (the sub-agent edits live artifacts and resets the git
-  // baseline). Refuse instead of racing it. clearMemoryData also leaves a
-  // phase-2 cooldown marker so the next idle/chat hook cannot first-run-claim
-  // phase 2 and re-seed the root via ensureLayout. Cross-process consolidators
-  // already in flight remain ownership-guarded (their final mark becomes a
-  // no-op once the row is replaced) but may leave stray files — same window
-  // codex has between CLI clear and a running daemon.
+  // Cheap preflight. The DB barrier checks both writers again after approval.
   if (isPhase2InFlight()) return "Reset refused: memory consolidation is currently running. Try again in a few minutes."
   return null
 }
@@ -225,8 +218,7 @@ export function performMemoryReset(): { ok: boolean; message: string } {
   const blocked = resetBlockedReason()
   if (blocked) return { ok: false, message: blocked }
   try {
-    clearAllVersionMemoryData()
-    wipeMemoriesDir()
+    clearAllVersionMemoryData(wipeMemoriesDir)
     // codex keeps its state DB pool open across resets (clear_memory_roots_contents
     // only wipes directories); closing here would strand cached handles elsewhere.
     invalidateCache()

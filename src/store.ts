@@ -1,8 +1,8 @@
 import fs from "fs"
 import os from "os"
 import type { Database } from "bun:sqlite"
-import { openDb, openSessionMetaDb, openTransientDb } from "./db.js"
-import { allJobDbPaths, sessionMetaDbPath, memoryDbPath } from "./paths.js"
+import { openDb, openSessionMetaDb } from "./db.js"
+import { memoryDbPath } from "./paths.js"
 import { currentMemoryVersion, MEMORY_VERSIONS, withMemoryVersion } from "./memory-version.js"
 import { isProviderCapacityError } from "./ratelimit.js"
 
@@ -62,16 +62,22 @@ function clearJobTables(db: Database): void {
 }
 
 /** Wipe jobs/outputs in every versioned DB. Leaves memory_session_meta on memory.db. */
-export function clearAllVersionMemoryData(): void {
-  for (const dbPath of allJobDbPaths()) {
-    if (dbPath !== sessionMetaDbPath() && !fs.existsSync(dbPath)) continue
-    const db = openTransientDb(dbPath)
-    try {
-      clearJobTables(db)
-    } finally {
-      db.close()
-    }
-  }
+export function clearAllVersionMemoryData(wipeWorkspace: () => void): void {
+  const catalog = openSessionMetaDb()
+  catalog
+    .transaction(() => {
+      const stores = existingMemoryStores()
+      for (const store of stores) {
+        const job = store.phase2JobSnapshot()
+        if (job?.status === "running" && (job.lease_until === null || job.lease_until > nowSec())) {
+          throw new Error(`Reset refused: ${store.version} memory consolidation has an active lease.`)
+        }
+      }
+      // No peer can claim either version until the filesystem wipe finishes.
+      wipeWorkspace()
+      for (const store of stores) store.clearMemoryData()
+    })
+    .immediate()
 }
 
 /** Include inactive existing stores for deletion, reset guards and diagnostics. */
@@ -474,6 +480,14 @@ export class MemoryStore {
   }
 
   claimGlobalPhase2Job(opts: { bypassCooldown?: boolean } = {}): Phase2ClaimResult {
+    // V1 already claims under the shared catalog write lock. Take that same
+    // lock first for V2, including its very first claim after a reset.
+    return this.meta === this.db
+      ? this.claimPhase2(opts)
+      : this.meta.transaction(() => this.claimPhase2(opts)).immediate()
+  }
+
+  private claimPhase2(opts: { bypassCooldown?: boolean }): Phase2ClaimResult {
     const workerId = phase2WorkerId()
     const ownershipToken = newId()
     const tNow = nowSec()

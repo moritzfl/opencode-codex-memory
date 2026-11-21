@@ -416,6 +416,28 @@ describe("memory_reset", () => {
     expect(phase2.isPhase2InFlight()).toBe(false)
   })
 
+  it.each(["v1", "v2"])("refuses to wipe while a peer owns the %s lease", async (version) => {
+    const result = Bun.spawnSync(
+      [
+        process.execPath,
+        "-e",
+        `
+      import { MemoryStore } from "./src/store"
+      import { withMemoryVersion } from "./src/memory-version"
+      const claim = withMemoryVersion("${version}", () => new MemoryStore().claimGlobalPhase2Job())
+      if (claim.type !== "claimed") process.exit(1)
+    `,
+      ],
+      { cwd: path.join(import.meta.dir, ".."), env: { ...process.env, OPENCODE_CODEX_MEMORY_TEST_ROOT: TEST_ROOT } },
+    )
+    expect(result.exitCode).toBe(0)
+    const { performMemoryReset } = require("../tools/control.js")
+    const file = path.join(TEST_ROOT, "memories", "MEMORY.md")
+    const before = fs.readFileSync(file, "utf8")
+    expect(performMemoryReset()).toMatchObject({ ok: false, message: expect.stringContaining("active lease") })
+    expect(fs.readFileSync(file, "utf8")).toBe(before)
+  })
+
   it("wipes both version roots and job DBs but keeps session modes", async () => {
     const { MemoryStore } = require("../src/store.js")
     const { closeDb } = require("../src/db.js")

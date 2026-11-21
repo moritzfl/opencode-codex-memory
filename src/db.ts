@@ -80,11 +80,6 @@ export function openDb(version?: MemoryVersion): Database {
   return connection(memoryDbPath(version))
 }
 
-/** One-shot connection for reset across versioned files. Caller must close. */
-export function openTransientDb(dbPath: string): Database {
-  return openSqlite(dbPath)
-}
-
 /** Always memory.db — shared session_meta catalog across versions. */
 export function openSessionMetaDb(): Database {
   return connection(sessionMetaDbPath())

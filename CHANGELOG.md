@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - On OpenCode 2, opening another location can no longer redirect an active
   memory job to a different home or close its database handles.
+- Reset checks both writers' leases and blocks new consolidation claims until
+  the wipe finishes, including when another OpenCode process shares the home.
 
 - Disabling learning preserves a session's pollution flag. Restoring learning
   requires approval, including on OpenCode 2 hosts with permission prompts.

@@ -222,7 +222,7 @@ describe("Codex memory migration", () => {
     fs.writeFileSync(path.join(memoryRoot("v2"), "memory_summary.md"), "invalid")
     expect(readMigrationStatus().v2Ready).toBe(false)
     v2.setMemoryMode("ses_disabled", "disabled")
-    clearAllVersionMemoryData()
+    clearAllVersionMemoryData(() => {})
     expect(v2.maxConsolidatedThreadCount()).toBe(0)
     expect(v2.getMemoryMode("ses_disabled")).toBe("disabled")
     expect(() => readMigrationStatus(0)).toThrow("between 1 and 4096")
