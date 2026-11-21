@@ -510,7 +510,12 @@ async function attach(ctx: V2Context): Promise<() => void> {
   void (async () => {
     while (!eventAbort.signal.aborted && !isPluginShuttingDown()) {
       try {
-        for await (const raw of ctx.event.subscribe({ signal: eventAbort.signal })) {
+        // Older hosts ignore the type filter and deliver the full stream.
+        const subscription = {
+          signal: eventAbort.signal,
+          types: ["session.text.ended", "session.execution.succeeded", "session.deleted"],
+        }
+        for await (const raw of ctx.event.subscribe(subscription)) {
           const e = raw as { type?: string } & Record<string, any>
           try {
             const data = (e as { data?: Record<string, any> }).data ?? e

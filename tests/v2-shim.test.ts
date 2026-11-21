@@ -773,6 +773,22 @@ describe("V1 client shim", () => {
     ])
   })
 
+  it("passes cancellation into message.list and never starts a subsequent page", async () => {
+    const service = (await ownServiceClient())!
+    const controller = new AbortController()
+    let calls = 0
+    service.message!.list = async (_input, options) => {
+      calls++
+      expect(options?.signal).toBe(controller.signal)
+      controller.abort()
+      return { data: [], cursor: { next: "another" } }
+    }
+    const client = buildV1ClientShim() as any
+    const result = await client.session.messages({ path: { id: "ses_read" }, signal: controller.signal })
+    expect(result.error).toBeDefined()
+    expect(calls).toBe(1)
+  })
+
   it("rejects an unavailable or malformed transcript instead of returning empty", async () => {
     messagePageResponses = [{ data: { not: "an array" } }]
     const client = buildV1ClientShim() as any

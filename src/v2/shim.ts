@@ -300,14 +300,40 @@ function responseNextCursor(response: unknown): string | undefined {
   return typeof next === "string" && next.length > 0 ? next : undefined
 }
 
+// Some host context methods don't accept request options. Share identical
+// reads and keep the slot until the actual call settles, even if its caller
+// has timed out. Retries can't grow an unbounded queue on a stalled host.
+const localReads = new WeakMap<V2Context, Map<string, Promise<unknown>>>()
+function localRead(
+  owner: V2Context,
+  key: string,
+  signal: AbortSignal | undefined,
+  read: () => Promise<unknown>,
+): Promise<unknown> {
+  signal?.throwIfAborted()
+  let reads = localReads.get(owner)
+  if (!reads) localReads.set(owner, (reads = new Map()))
+  let request = reads.get(key)
+  if (!request) {
+    if (reads.size >= 32) throw new Error("OpenCode context read limit reached")
+    request = Promise.resolve()
+      .then(read)
+      .finally(() => reads.delete(key))
+    reads.set(key, request)
+  }
+  return signal ? raceAbort(request, signal) : request
+}
+
 /** Read durable messages in source order, including terminal errors/idle rows. */
 async function loadV2Messages(sessionID: string, context?: V2Context, signal?: AbortSignal): Promise<any[]> {
+  signal?.throwIfAborted()
   const client = await ownServiceClient()
   if (typeof client?.message?.list === "function") {
     const messages: unknown[] = []
     const seenCursors = new Set<string>()
     let cursor: string | undefined
     while (true) {
+      signal?.throwIfAborted()
       const response = await serviceRequest(client, () =>
         client.message!.list(
           cursor ? { sessionID, cursor } : { sessionID, order: "asc" },
@@ -328,7 +354,8 @@ async function loadV2Messages(sessionID: string, context?: V2Context, signal?: A
   // on, not the full transcript: the originals before it are gone here, so
   // the compaction summary is the only record of them. (message.list above
   // keeps the originals; there the summary would duplicate them.)
-  const raw = await (context ?? ctx()).session.context({ sessionID } as any)
+  const owner = context ?? ctx()
+  const raw = await localRead(owner, `messages:${sessionID}`, signal, () => owner.session.context({ sessionID }))
   const rows = responseRows(raw)
   if (!rows) throw new Error("session context returned an invalid message list")
   return rows.map((m: any) =>
@@ -534,6 +561,7 @@ export function buildV1ClientShim(): unknown {
     limit: number,
     cursor?: string | number,
     search?: string,
+    signal?: AbortSignal,
   ): Promise<{ data: unknown[] }> {
     const pageSize = Math.min(Math.max(limit, 1), 5000)
     const out: unknown[] = []
@@ -541,6 +569,7 @@ export function buildV1ClientShim(): unknown {
     const timestampCursor = typeof cursor === "number" ? cursor : undefined
     let next = typeof cursor === "string" ? cursor : undefined
     while (out.length < limit) {
+      signal?.throwIfAborted()
       const response = (await listFn({
         limit: pageSize,
         order: "desc",
@@ -574,20 +603,30 @@ export function buildV1ClientShim(): unknown {
     limit: number,
     cursor?: string | number,
     search?: string,
+    signal?: AbortSignal,
   ): Promise<{ data: unknown[] }> {
-    const localList = v2ctx ? (v2ctx.session as { list?: unknown }).list : undefined
+    signal?.throwIfAborted()
+    const owner = v2ctx
+    const localList = owner ? (owner.session as { list?: unknown }).list : undefined
     if (typeof localList === "function") {
-      const result = await paginateSessionList((input) => localList(input), limit, cursor, search)
+      const result = await paginateSessionList(
+        (input) => localRead(owner!, `list:${JSON.stringify(input)}`, signal, () => localList(input)),
+        limit,
+        cursor,
+        search,
+        signal,
+      )
       discoveryStatus = { source: "context", warning: null }
       return result
     }
     const client = await ownServiceClient()
     if (client && typeof client.session.list === "function") {
       const result = await paginateSessionList(
-        (input) => serviceRequest(client, () => client.session.list(input)),
+        (input) => serviceRequest(client, () => client.session.list(input, { signal })),
         limit,
         cursor,
         search,
+        signal,
       )
       discoveryStatus = { source: "service", warning: null }
       return result
@@ -646,11 +685,11 @@ export function buildV1ClientShim(): unknown {
         return { error: { message: e.message, ...(typeof status === "number" ? { statusCode: status } : {}) } }
       }
     },
-    messages: async (opts: { path: { id: string } }) => {
+    messages: async (opts: { path: { id: string }; signal?: AbortSignal }) => {
       try {
         if (isReleasedSubSession(opts.path.id))
           throw Object.assign(new Error("SessionNotFound"), { _tag: "SessionNotFoundError" })
-        return { data: adaptV2Messages(await loadV2Messages(opts.path.id)) }
+        return { data: adaptV2Messages(await loadV2Messages(opts.path.id, undefined, opts.signal)) }
       } catch (e) {
         return { error: e }
       }
@@ -719,7 +758,7 @@ export function buildV1ClientShim(): unknown {
       markReleased(id)
       return {}
     },
-    get: async (opts: { path: { id: string } }) => {
+    get: async (opts: { path: { id: string }; signal?: AbortSignal }) => {
       try {
         if (isReleasedSubSession(opts.path.id)) {
           return { response: { status: 404 }, error: { _tag: "SessionNotFoundError" } }
@@ -727,14 +766,24 @@ export function buildV1ClientShim(): unknown {
         const client = await ownServiceClient()
         if (client?.session?.get) {
           try {
-            const info = und(await serviceRequest(client, () => client.session.get({ sessionID: opts.path.id })))
+            opts.signal?.throwIfAborted()
+            const info = und(
+              await serviceRequest(client, () =>
+                client.session.get({ sessionID: opts.path.id }, { signal: opts.signal }),
+              ),
+            )
             return { data: info }
           } catch (e) {
             if (isNotFoundError(e)) return { response: { status: 404 }, error: e }
             return { error: e }
           }
         }
-        const info = und(await ctx().session.get({ sessionID: opts.path.id }))
+        const owner = ctx()
+        const info = und(
+          await localRead(owner, `get:${opts.path.id}`, opts.signal, () =>
+            owner.session.get({ sessionID: opts.path.id }),
+          ),
+        )
         return { data: info }
       } catch (e) {
         if (isNotFoundError(e)) return { response: { status: 404 }, error: e }
@@ -764,11 +813,11 @@ export function buildV1ClientShim(): unknown {
     },
   }
   const config = {
-    get: async () => {
+    get: async (opts?: { signal?: AbortSignal }) => {
       try {
         const client = await serviceOrThrow()
         const response = await serviceRequest(client, async () =>
-          client.config?.get({ location: { directory: ctx().location.directory } }),
+          client.config?.get({ location: { directory: ctx().location.directory } }, opts),
         )
         const documents = und(response)
         const candidates = Array.isArray(documents) ? documents : documents?.type === "document" ? [documents] : []
@@ -794,12 +843,12 @@ export function buildV1ClientShim(): unknown {
     },
   }
   const provider = {
-    list: async () => {
+    list: async (opts?: { signal?: AbortSignal }) => {
       try {
         const c = ctx() as V2Context & { model?: { list(): Promise<unknown> } }
         const models = c.model ?? (c as any).catalog?.model
         if (typeof models?.list !== "function") throw new Error("host does not support model.list")
-        const res = await models.list()
+        const res = await localRead(c, "models", opts?.signal, () => models.list())
         return { data: adaptProviderCatalog(res) }
       } catch (e) {
         return { error: e }
@@ -807,9 +856,10 @@ export function buildV1ClientShim(): unknown {
     },
   }
   const mcp = {
-    status: async () => {
+    status: async (opts?: { signal?: AbortSignal }) => {
       try {
-        const res = await (ctx().mcp as any).list()
+        const owner = ctx()
+        const res = await localRead(owner, "mcp", opts?.signal, () => owner.mcp.list())
         return { data: adaptMcpStatus(res) }
       } catch (e) {
         return { error: e }
@@ -817,7 +867,7 @@ export function buildV1ClientShim(): unknown {
     },
   }
   const _client = {
-    get: async (opts: { url: string; query?: Record<string, unknown> }) => {
+    get: async (opts: { url: string; query?: Record<string, unknown>; signal?: AbortSignal }) => {
       if (opts.url === "/experimental/session") {
         const q = opts.query ?? {}
         const cursor = typeof q.cursor === "number" || typeof q.cursor === "string" ? q.cursor : undefined
@@ -825,10 +875,11 @@ export function buildV1ClientShim(): unknown {
           typeof q.limit === "number" ? q.limit : 5000,
           cursor,
           typeof q.search === "string" ? q.search : undefined,
+          opts.signal,
         )
       }
       if (opts.url === "/provider") {
-        return provider.list()
+        return provider.list(opts)
       }
       return { error: { message: `unsupported shim route ${opts.url}` } }
     },

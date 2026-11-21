@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next workspace diff, including the content that needs to be forgotten.
 - OpenCode 2 extraction preserves structured tool errors and records Code Mode
   results once, alongside their nested calls and statuses.
+- Timed-out OpenCode 2 history and discovery requests stop fetching pages;
+  stalled context reads are shared and bounded.
 - OpenCode 2 now stops consolidation helpers through their creating location
   and uses native removal when available. A missing remote row no longer
   releases a writer whose local shutdown could not be confirmed.
