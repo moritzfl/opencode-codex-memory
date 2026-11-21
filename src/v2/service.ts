@@ -285,6 +285,11 @@ export async function discoverOwnService(
       `[opencode-codex-memory] registered OpenCode service PID ${String(health.pid)} is a different local process than plugin host PID ${process.pid}; using it for global session list`,
     )
   }
+  // The bundled 2.0.5 client posts to /api/experimental/generate. 2.0.3
+  // serves /api/generate instead. Use that host's native context generator
+  // rather than trying a mismatched route or replaying a generation.
+  if (health.version === "2.0.3" && client.generate)
+    return { endpoint, client: { ...client, generate: undefined }, health }
   return { endpoint, client, health }
 }
 

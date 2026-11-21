@@ -281,6 +281,32 @@ describe("catalog/mcp adapters", () => {
 })
 
 describe("V1 client shim", () => {
+  it("uses context generation when the registered floor host predates the client's generation route", async () => {
+    const { ctx, calls } = fakeCtx()
+    setV2Context(ctx)
+    setV2ServiceDependenciesForTest({
+      service: { discover: async () => ({ url: "http://localhost" }), headers: () => undefined },
+      make: () => ({
+        session: {},
+        generate: {
+          text: async () => {
+            throw new Error("wrong route")
+          },
+        },
+      }),
+      probe: async () => ({ version: "2.0.3", pid: process.pid }),
+    })
+    const reply = await (buildV1ClientShim() as any).session.prompt({
+      path: { id: EXTRACT_STUB_SESSION_ID },
+      body: {
+        agent: "memorize-extract",
+        format: { type: "json_schema" },
+        parts: [{ type: "text", text: "transcript" }],
+      },
+    })
+    expect(reply.error).toBeUndefined()
+    expect(calls.map((c) => c.name)).toEqual(["generate"])
+  })
   it("restricts concurrent consolidators to their own versioned workspace", async () => {
     const { ctx, calls } = fakeCtx()
     setV2Context(ctx)

@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results once, alongside their nested calls and statuses.
 - Timed-out OpenCode 2 history and discovery requests stop fetching pages;
   stalled context reads are shared and bounded.
+- Extraction on OpenCode 2.0.3 uses the host's native generator rather than
+  the newer HTTP generation route.
 - Extraction fits each attempt to the model's reported context and input
   limits, including when a fallback model has a smaller window.
 - Memory search bounds snippets and page size, yields during large searches,
