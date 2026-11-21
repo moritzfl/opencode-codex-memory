@@ -16,8 +16,11 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: db72403243ee3ba63ab7d258e6b3c80545fc423d
+codex_ref: 553c7f8ea63a921308b4b30ddaaef7730fd22bba
 codex_ref_date: 2026-11-21
+# Since db724032: concurrent reasoning summaries are stable/on (#62903);
+# the TUI defaults to automatic summaries for OpenAI providers (#62904).
+# Memory extraction still excludes reasoning items. No port required.
 # Since 5cba3aec: Git-root discovery for the worktree metadata probe, thread
 # context IDs and visibility of the unchanged 64 KiB persisted MCP result cap
 # are host plumbing. No local memory algorithm/template/migration changed.
