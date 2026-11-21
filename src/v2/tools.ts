@@ -63,7 +63,7 @@ function adaptTool(name: string, v1: V1Tool, ask?: Ask): V2ToolDefinition {
         ask: async (request: Parameters<Ask>[1]) => {
           if (ask) return ask(tctx, request)
           throw new Error(
-            "User approval is unavailable to plugin tools on OpenCode 2. Use /memory-inspect → Controls instead.",
+            "User approval is unavailable to plugin tools on this host. Use /memory-inspect → Controls instead.",
           )
         },
       }
@@ -106,8 +106,7 @@ const CONTROL_ONLY = new Set(["memory_inspect", "memory_mode"])
 /**
  * Same gating as the V1 entry: the read/search/list/add-note tools require
  * BOTH use_memories and dedicated_tools (codex MemoriesExtension); the
- * control tools are always available. memory_reset needs user approval,
- * which V2 plugin tools cannot request: reset lives in the memory panel.
+ * control tools are always available. Destructive reset lives in the panel.
  */
 export function buildV2Tools(ask?: Ask): V2ToolDefinition[] {
   const full = pluginOptions.use_memories && pluginOptions.dedicated_tools

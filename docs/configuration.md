@@ -157,11 +157,16 @@ cooldown; sessions must still meet extraction eligibility rules.
 
 ## Storage and integrations
 
-| Option          | Default                                | Details                                                                                                                                                                                                                                                                           |
-| --------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `home`          | OpenCode data directory                | Absolute directory for all plugin databases and memory workspaces. See [Relocating memory](storage-and-privacy.md#relocating-memory).                                                                                                                                             |
-| `codex_interop` | `{ "import": false, "export": false }` | Exchange consolidated memory with Codex CLI. Runs for each active writer. Reads `$CODEX_HOME/config.toml` `memories.version` (`memories/` or `memories_v2/`; unset follows Codex's directory signal). See [Codex CLI sharing](integrations.md#sharing-memory-with-the-codex-cli). |
-| `claude_import` | `{ "enabled": false }`                 | Import Claude Code project memories. See [Claude Code import](integrations.md#importing-memory-from-claude-code).                                                                                                                                                                 |
+OpenCode 2 shares one memory pipeline per process. Configure the same memory
+home and plugin options for all simultaneously open locations, preferably in
+global configuration. A conflicting location fails setup without changing the
+running pipeline.
+
+| Option          | Default                                | Details                                                                                                                                                                                                |
+| --------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `home`          | OpenCode data directory                | Absolute directory for all plugin databases and memory workspaces. See [Relocating memory](storage-and-privacy.md#relocating-memory).                                                                  |
+| `codex_interop` | `{ "import": false, "export": false }` | Import into every active writer; export only the configured read version. The receiver follows Codex's `memories.version`. See [Codex CLI sharing](integrations.md#sharing-memory-with-the-codex-cli). |
+| `claude_import` | `{ "enabled": false }`                 | Import Claude Code project memories. See [Claude Code import](integrations.md#importing-memory-from-claude-code).                                                                                      |
 
 ## File-based access
 
@@ -178,7 +183,3 @@ is why this plugin enables them by default even though Codex defaults them off.
 `memory_inspect`, `memory_mode`, and (on OpenCode 1.x) `memory_reset` remain available with
 dedicated tools disabled. Setting `use_memories: false` hides the retrieval
 and note tools regardless of `dedicated_tools`.
-OpenCode 2 shares one memory pipeline per process. Configure the same memory
-home and plugin options for all simultaneously open locations, preferably in
-global configuration. A conflicting location fails setup without changing the
-running pipeline.

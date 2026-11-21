@@ -175,7 +175,10 @@ mappings:
       path scoping (file or dir), integer-cursor pagination with
       next_cursor/truncated, context_lines, normalized (alphanumeric-only)
       comparison, case-sensitive default, 200-result cap, (path,line)
-      ordering, binary-file skip. DIVERGENCES: match_mode is flattened for
+      ordering, binary-file skip. Window matches use the oldest last-seen
+      query for a linear scan; total counts remain exact. Pages have a byte
+      budget and snippets are bounded to protect the shared host event loop.
+      DIVERGENCES: match_mode is flattened for
       the zod schema (enum + separate line_count instead of codex's
       internally-tagged {type, line_count}); max_results is the arg name for
       codex's max_results (was `limit` pre-0.2); queries[] is optional
@@ -317,7 +320,9 @@ mappings:
       selection limit. Success atomically advances consolidation_progress using
       a distinct-session high-water count; stale ownership cannot advance it.
       Pruning preserves progress; reset clears it and citation dedupe in both
-      stores without closing live handles. Session deletion covers both stores.
+      stores without closing live handles. The shared catalog's write lock
+      serializes reset with consolidation claims in both stores. Session
+      deletion covers both stores.
       Port-only orphan sweep (no codex equivalent; codex waits out the lease):
       a running phase-2 row tagged `pid:<pid>@<host>:` is released when the
       pid is dead on this host AND the heartbeat is stale (3 missed beats);
