@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory job to a different home or close its database handles.
 - Reset checks both writers' leases and blocks new consolidation claims until
   the wipe finishes, including when another OpenCode process shares the home.
+- OpenCode 2 now stops consolidation helpers through their creating location
+  and uses native removal when available. A missing remote row no longer
+  releases a writer whose local shutdown could not be confirmed.
 
 - Disabling learning preserves a session's pollution flag. Restoring learning
   requires approval, including on OpenCode 2 hosts with permission prompts.

@@ -1067,6 +1067,34 @@ describe("V1 client shim", () => {
     expect(calls.map((call) => call.name)).toEqual(["interrupt"])
   })
 
+  it("keeps write ownership if the creating host cannot confirm idle", async () => {
+    const { ctx } = fakeCtx()
+    ctx.session.wait = async () => {
+      throw new Error("local wait failed")
+    }
+    setV2Context(ctx)
+    const client = buildV1ClientShim() as any
+    const {
+      data: { id },
+    } = await client.session.create({ body: { title: "codex-memory-consolidate" } })
+    setV2Context(fakeCtx().ctx)
+    let removed = false
+    serviceRemove = async () => {
+      removed = true
+    }
+    expect((await client.session.delete({ path: { id } })).error.message).toBe("local wait failed")
+    expect(removed).toBe(false)
+    ctx.session.wait = async () => {}
+    ctx.session.remove = async () => {
+      removed = true
+    }
+    ctx.session.get = async () => {
+      throw { _tag: "SessionNotFoundError" }
+    }
+    await expect(client.session.delete({ path: { id } })).resolves.toEqual({})
+    expect(removed).toBe(true)
+  })
+
   it("does not treat interrupt as delete success while the session still exists", async () => {
     const { ctx, calls } = fakeCtx()
     serviceRemove = async () => {

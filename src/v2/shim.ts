@@ -72,18 +72,10 @@ function isNotFoundError(e: unknown): boolean {
   return false
 }
 
-async function sessionGoneOnService(client: V2ServiceClient, sessionID: string): Promise<boolean> {
-  if (typeof client.session.get !== "function") return false
+async function confirmRemoval(get: () => Promise<unknown>): Promise<boolean> {
   try {
-    const info = await serviceRequest(client, () => client.session.get({ sessionID }))
-    if (
-      (info as { error?: unknown } | null | undefined)?.error &&
-      isNotFoundError((info as { error: unknown }).error)
-    ) {
-      return true
-    }
-    const data = und(info)
-    return !data || typeof data !== "object"
+    const info = await get()
+    return isNotFoundError((info as { error?: unknown })?.error)
   } catch (e) {
     return isNotFoundError(e)
   }
@@ -91,9 +83,11 @@ async function sessionGoneOnService(client: V2ServiceClient, sessionID: string):
 
 /** Sub-session ids released via delete(): report 404 from get(). */
 const releasedSubSessions = new Set<string>()
+const helperOwners = new Map<string, V2Context>()
 const RELEASED_CAP = 500
 
 function markReleased(id: string): void {
+  helperOwners.delete(id)
   releasedSubSessions.add(id)
   if (releasedSubSessions.size > RELEASED_CAP) {
     const oldest = releasedSubSessions.values().next().value
@@ -155,6 +149,7 @@ function listObservedSessions(limit: number, cursor?: string | number, search?: 
 
 /** Test seam. */
 export function resetV2ShimStateForTest(): void {
+  helperOwners.clear()
   releasedSubSessions.clear()
   observedSessions.clear()
   discoveryStatus = null
@@ -428,7 +423,7 @@ async function v2promptWithWait(
   },
   signal?: AbortSignal,
 ): Promise<{ error?: unknown; data?: unknown }> {
-  const c = ctx()
+  const c = helperOwners.get(sessionID) ?? ctx()
   const text = body.parts.map((p) => p.text ?? "").join("\n")
   // Structured-output extraction: V2 prompts carry text only, so run the
   // turn through generate.text (inherently tool-less, like the V1
@@ -483,7 +478,8 @@ async function v2promptWithWait(
     const gen = und(
       await retryModelSelection(
         async () => {
-          const genP = (c as any).generate.text(payload)
+          const generation = (c as any).experimental?.generate ?? c.generate
+          const genP = generation.text(payload)
           const result = signal ? await raceAbort(genP, signal) : await genP
           if (result?.error) throw result.error
           return result
@@ -630,7 +626,8 @@ export function buildV1ClientShim(): unknown {
           return { data: { id: EXTRACT_STUB_SESSION_ID } }
         }
         const directory = opts?.query?.directory ?? memoryRoot()
-        const res = await (ctx().session as any).create({
+        const owner = ctx()
+        const res = await (owner.session as any).create({
           ...(opts?.body?.title ? { title: opts.body.title } : {}),
           ...(opts?.body?.metadata ? { metadata: opts.body.metadata } : {}),
           ...(opts?.body?.title === "codex-memory-consolidate"
@@ -638,7 +635,9 @@ export function buildV1ClientShim(): unknown {
             : {}),
           location: { directory },
         })
-        return { data: { id: und(res)?.id } }
+        const id = und(res)?.id
+        if (typeof id === "string") helperOwners.set(id, owner)
+        return { data: { id } }
       } catch (e) {
         return { error: e }
       }
@@ -676,14 +675,23 @@ export function buildV1ClientShim(): unknown {
       // Interrupt where the helper runs first. With a loopback PID mismatch the
       // service is another process: removing the row there alone would leave
       // this process's consolidator editing after the lease is released.
-      let interruptError: unknown
       try {
-        const session = ctx().session as any
-        const interrupt = await session.interrupt({ sessionID: id })
+        const local = (helperOwners.get(id) ?? ctx()).session as any
+        const interrupt = await local.interrupt({ sessionID: id })
         if (interrupt?.error) throw interrupt.error
-        if (typeof session.wait === "function") await session.wait({ sessionID: id })
+        const idle = await local.wait({ sessionID: id })
+        if (idle?.error) throw idle.error
+        opts.signal?.throwIfAborted()
+        if (typeof local.remove === "function") {
+          const result = await local.remove({ sessionID: id })
+          if (result?.error) throw result.error
+          if (!(await confirmRemoval(() => local.get({ sessionID: id }))))
+            throw new Error("local session still exists after remove")
+          markReleased(id)
+          return {}
+        }
       } catch (error) {
-        interruptError = error ?? new Error("session interrupt failed")
+        return { error: error ?? new Error("local session shutdown failed") }
       }
       let client: V2ServiceClient | null = null
       let removeError: unknown
@@ -702,13 +710,18 @@ export function buildV1ClientShim(): unknown {
         removeError = error
       }
       if (client && typeof client.session.get === "function") {
-        if (await sessionGoneOnService(client, id)) {
+        const service = client
+        if (
+          await confirmRemoval(() =>
+            serviceRequest(service, () => service.session.get({ sessionID: id }, { signal: opts.signal })),
+          )
+        ) {
           markReleased(id)
           return {}
         }
-        return { error: removeError ?? interruptError ?? new Error("session still exists after remove") }
+        return { error: removeError ?? new Error("session still exists after remove") }
       }
-      if (interruptError !== undefined) return { error: removeError ?? interruptError }
+      if (removeError !== undefined) return { error: removeError }
       // Isolated serve: no session.remove on plugin ctx. interrupt+wait already
       // finished, so the helper is idle. Holding the phase-2 lease until it
       // expires would block consolidation for an hour.
@@ -741,7 +754,9 @@ export function buildV1ClientShim(): unknown {
       if (opts.path.id === EXTRACT_STUB_SESSION_ID) return {}
       // Local first: the helper runs in this process (see delete above).
       try {
-        const result = await (ctx().session as any).interrupt({ sessionID: opts.path.id })
+        const result = await ((helperOwners.get(opts.path.id) ?? ctx()).session as any).interrupt({
+          sessionID: opts.path.id,
+        })
         if (!result?.error) return {}
       } catch {
         // Fall through to the registered service.
