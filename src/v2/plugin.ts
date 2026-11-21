@@ -30,9 +30,9 @@ import {
   isMemorySubSession,
   abortActiveSubSessions,
 } from "../llm.js"
-import { pluginOptions, clearConfigWarnings, resetPluginOptions } from "../options.js"
-import { dataRoot } from "../paths.js"
-import { closeDb } from "../db.js"
+import { pluginOptions } from "../options.js"
+import { resolveDataRoot, resolveHomePath } from "../paths.js"
+import { isDeepStrictEqual } from "node:util"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "../lifecycle.js"
 import { hostMcpStatus } from "../host-client.js"
 import { recordDiagnostic } from "../diagnostics.js"
@@ -60,9 +60,8 @@ const statusListeners = new Set<() => void>()
  * whichever location booted or disposed last.
  */
 const liveInstances: V2Context[] = []
-type RuntimeOptionKey = "use_memories" | "generate_memories"
-/** Panel toggles; survive later location setups until the last instance disposes. */
-const runtimeOverrides: Partial<Record<RuntimeOptionKey, boolean>> = {}
+let activeConfig: { home: string; options: Record<string, unknown> } | undefined
+let draining: Promise<void> | undefined
 const eventLoops = new Set<AbortController>()
 
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -115,9 +114,10 @@ export function resetV2ModuleStateForTest(): void {
   seenTurnSessions.clear()
   mcpStatusInFlight = null
   liveInstances.length = 0
+  activeConfig = undefined
+  draining = undefined
   for (const loop of eventLoops) loop.abort()
   eventLoops.clear()
-  for (const key of Object.keys(runtimeOverrides) as RuntimeOptionKey[]) delete runtimeOverrides[key]
 }
 
 function getStore(): MemoryStore {
@@ -274,28 +274,44 @@ async function consolidateNow(): Promise<string> {
 }
 
 export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
-  // Later locations join a running process: resetting the lifecycle would
-  // abort the live consolidator, and resetting stats/health would erase state
-  // the other locations still report.
-  if (liveInstances.length === 0) {
+  if (draining) await draining
+  const { home, ...options } = ctx.options ?? {}
+  const config = {
+    home: resolveDataRoot(typeof home === "string" ? (resolveHomePath(home) ?? undefined) : undefined),
+    options,
+  }
+  // Reserve synchronously: setups can overlap before either finishes registering.
+  if (activeConfig && !isDeepStrictEqual(activeConfig, config)) {
+    throw new Error(
+      `Conflicting memory configuration for ${ctx.location.directory}. Configure one memory home and options for all locations in this OpenCode process.`,
+    )
+  }
+  if (!activeConfig) {
     resetPluginLifecycle()
     resetInjectionStats()
     resetAgentHealth()
+    applyPluginOptions(ctx.options ?? {}, { modelFallback: true })
+    activeConfig = config
+    setV2Context(ctx)
+    shimClient = buildV1ClientShim()
+    setPluginInput({ client: shimClient } as any)
+    setSubSessionDirectory(ctx.location.directory)
+    mcpStatusInFlight = null
   }
-  setV2Context(ctx)
-  shimClient = buildV1ClientShim()
-  setPluginInput({ client: shimClient } as any)
-  setSubSessionDirectory(ctx.location.directory)
-  mcpStatusInFlight = null
-  clearConfigWarnings()
-  const rawOptions = ctx.options as Record<string, unknown> | undefined
-  if (rawOptions && Object.keys(rawOptions).length > 0) applyPluginOptions(rawOptions, { modelFallback: true })
-  else {
-    const previousDb = dataRoot()
-    resetPluginOptions()
-    if (dataRoot() !== previousDb) closeDb()
+  liveInstances.push(ctx)
+  try {
+    const detach = await attach(ctx)
+    return () => {
+      detach()
+      return releaseLocation(ctx)
+    }
+  } catch (error) {
+    await releaseLocation(ctx)
+    throw error
   }
-  Object.assign(pluginOptions, runtimeOverrides)
+}
+
+async function attach(ctx: V2Context): Promise<() => void> {
   await ensureV2Agents(ctx as any)
 
   const statusRegistration = await ctx.rpc.register(MemoryStatusRpc, {
@@ -337,7 +353,6 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
           return { ok: false }
         }
       }
-      runtimeOverrides[key] = value
       invalidateCache()
       notifyStatusChanged()
       return { ok: true }
@@ -547,28 +562,31 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     .finally(() => eventLoops.delete(eventAbort))
   eventLoops.add(eventAbort)
 
-  liveInstances.push(ctx)
   return () => {
     statusListeners.delete(publishStatus)
     eventAbort.abort()
-    const index = liveInstances.indexOf(ctx)
-    if (index >= 0) liveInstances.splice(index, 1)
-    const survivor = liveInstances.at(-1)
-    if (survivor) {
-      // Only the newest location owns the shim; re-point when it leaves.
-      if (index === liveInstances.length) {
-        setV2Context(survivor)
-        setSubSessionDirectory(survivor.location.directory)
-      }
-      return
+  }
+}
+
+function releaseLocation(ctx: V2Context): Promise<void> | void {
+  const index = liveInstances.indexOf(ctx)
+  if (index < 0) return
+  liveInstances.splice(index, 1)
+  const survivor = liveInstances[0]
+  if (survivor) {
+    if (index === 0) {
+      setV2Context(survivor)
+      setSubSessionDirectory(survivor.location.directory)
     }
-    for (const key of Object.keys(runtimeOverrides) as RuntimeOptionKey[]) delete runtimeOverrides[key]
-    beginPluginShutdown()
+    return
+  }
+  beginPluginShutdown()
+  draining = Promise.allSettled([abortActiveSubSessions(), waitForV2BackgroundTasks()]).then(() => {
     setSubSessionDirectory()
     setV2Context(null)
-    void abortActiveSubSessions().catch((err) => {
-      console.warn("[opencode-codex-memory] v2 dispose abort of sub-sessions failed:", err)
-    })
+    activeConfig = undefined
+    draining = undefined
     invalidateCache()
-  }
+  })
+  return draining
 }

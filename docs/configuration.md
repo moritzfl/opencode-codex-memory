@@ -178,3 +178,7 @@ is why this plugin enables them by default even though Codex defaults them off.
 `memory_inspect`, `memory_mode`, and (on OpenCode 1.x) `memory_reset` remain available with
 dedicated tools disabled. Setting `use_memories: false` hides the retrieval
 and note tools regardless of `dedicated_tools`.
+OpenCode 2 shares one memory pipeline per process. Configure the same memory
+home and plugin options for all simultaneously open locations, preferably in
+global configuration. A conflicting location fails setup without changing the
+running pipeline.

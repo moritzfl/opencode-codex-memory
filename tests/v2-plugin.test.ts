@@ -494,6 +494,22 @@ describe("v2 setup", () => {
     await cleanup?.()
   })
 
+  it("reserves a single home even while the first location is still registering", async () => {
+    delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    const home = path.join(TEST_ROOT, "one")
+    const a = fakeCtx({ home })
+    const first = setup(a.ctx)
+    const store = new MemoryStore()
+    await expect(setup(fakeCtx({ home: path.join(TEST_ROOT, "two") }).ctx)).rejects.toThrow("Conflicting memory")
+    store.setMemoryMode("ses_original", "disabled")
+    expect(store.getMemoryMode("ses_original")).toBe("disabled")
+    expect(fs.existsSync(path.join(home, "memory.db"))).toBe(true)
+    expect(fs.existsSync(path.join(TEST_ROOT, "two"))).toBe(false)
+    await (
+      await first
+    )?.()
+  })
+
   it("keeps other locations alive when one location instance disposes", async () => {
     const { isPluginShuttingDown, pluginShutdownSignal } = require("../src/lifecycle.js")
     fs.writeFileSync(path.join(TEST_ROOT, "memories", "memory_summary.md"), "- shared memory [[ses_x]]\n")

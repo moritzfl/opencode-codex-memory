@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On OpenCode 2, opening another location can no longer redirect an active
+  memory job to a different home or close its database handles.
+
 - Disabling learning preserves a session's pollution flag. Restoring learning
   requires approval, including on OpenCode 2 hosts with permission prompts.
 

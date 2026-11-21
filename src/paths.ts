@@ -57,9 +57,13 @@ export function setConfiguredHome(home: string | undefined): void {
 }
 
 export function dataRoot(): string {
+  return resolveDataRoot(configuredHome)
+}
+
+export function resolveDataRoot(home: string | undefined): string {
   const testRoot = process.env[TEST_ROOT_ENV]
   if (testRoot) return testRoot
-  if (configuredHome) return configuredHome
+  if (home) return home
   const envHome = process.env[HOME_ENV]
   if (envHome) {
     const resolved = resolveHomePath(envHome)
