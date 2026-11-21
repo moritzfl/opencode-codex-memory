@@ -42,7 +42,7 @@ if [[ -z "$CODEX_REPO" ]]; then
   exit 2
 fi
 
-if [[ ! -d "$CODEX_REPO/.git" ]]; then
+if ! CODEX_REPO="$(git -C "$CODEX_REPO" rev-parse --show-toplevel 2>/dev/null)"; then
   err "CODEX_REPO ($CODEX_REPO) is not a git checkout."
   exit 2
 fi
@@ -78,8 +78,8 @@ yaml_theirs() {
     | sed -E "s/^[[:space:]]*theirs:[[:space:]]*//" | tr -d '"'
 }
 
-CODEX_REF="$(yaml_scalar codex_ref)"
-CODEX_REF_DATE="$(yaml_scalar codex_ref_date)"
+CODEX_REF="$(yaml_scalar codex_ref)" || exit 2
+CODEX_REF_DATE="$(yaml_scalar codex_ref_date)" || exit 2
 
 if [[ -z "$CODEX_REF" ]]; then
   err "codex_ref missing from codex-map.yaml"
@@ -88,7 +88,7 @@ fi
 
 info "codex checkout : $CODEX_REPO"
 info "pinned ref     : $CODEX_REF ($CODEX_REF_DATE)"
-CODEX_HEAD="$(git -C "$CODEX_REPO" rev-parse HEAD)"
+CODEX_HEAD="$(git -C "$CODEX_REPO" rev-parse --verify HEAD)" || exit 2
 info "codex HEAD     : $CODEX_HEAD"
 # The diff below runs against the local HEAD; a stale checkout reports a
 # false "aligned". Compare with the last fetched upstream (no network here).
@@ -96,6 +96,7 @@ if CODEX_UPSTREAM="$(git -C "$CODEX_REPO" rev-parse --abbrev-ref --symbolic-full
   behind="$(git -C "$CODEX_REPO" rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)"
   if [[ "$behind" -gt 0 ]]; then
     warn "checkout is $behind commit(s) behind $CODEX_UPSTREAM — pull before trusting this report."
+    exit 2
   fi
 fi
 echo
@@ -116,7 +117,7 @@ info "== Mapped path existence =="
 missing=0
 while IFS= read -r theirs; do
   [[ -z "$theirs" ]] && continue
-  if [[ -e "$CODEX_REPO/$theirs" ]]; then
+  if git -C "$CODEX_REPO" cat-file -e "HEAD:$theirs" 2>/dev/null; then
     :
   else
     err "MISSING  $theirs"
@@ -140,34 +141,28 @@ while IFS= read -r line; do
   [[ -n "$line" ]] && WATCH+=("$line")
 done < <(yaml_list watch_paths)
 
-if [[ "${#WATCH[@]}" -eq 0 ]]; then
-  warn "No watch_paths defined in codex-map.yaml; skipping diff."
+if [[ -z "${WATCH[0]:-}" ]]; then
+  err "No watch_paths defined in codex-map.yaml."
+  exit 2
 elif ! git -C "$CODEX_REPO" cat-file -e "${CODEX_REF}^{commit}" 2>/dev/null; then
   warn "Cannot diff: pinned ref not present in checkout (see above)."
 else
-  # Only diff watch_paths that still exist at HEAD, to avoid pathspec errors.
-  existing=()
   for p in "${WATCH[@]}"; do
-    if git -C "$CODEX_REPO" cat-file -e "HEAD:$p" 2>/dev/null \
-       || [[ -e "$CODEX_REPO/$p" ]]; then
-      existing+=("$p")
+    if ! git -C "$CODEX_REPO" cat-file -e "HEAD:$p" 2>/dev/null &&
+       ! git -C "$CODEX_REPO" cat-file -e "$CODEX_REF:$p" 2>/dev/null; then
+      err "Invalid watch path (absent at both refs): $p"
+      exit 2
     fi
   done
-
-  if [[ "${#existing[@]}" -eq 0 ]]; then
-    warn "None of the watch_paths exist at HEAD."
+  stat="$(git -C "$CODEX_REPO" diff --stat "${CODEX_REF}..HEAD" -- "${WATCH[@]}")" || exit 2
+  if [[ -z "$stat" ]]; then
+    ok "No changes in watched memory code since $CODEX_REF."
   else
-    stat="$(git -C "$CODEX_REPO" diff --stat "${CODEX_REF}..HEAD" -- "${existing[@]}" || true)"
-    if [[ -z "$stat" ]]; then
-      ok "No changes in watched memory code since $CODEX_REF."
-    else
-      warn "Watched memory code changed upstream:"
-      echo "$stat"
-      echo
-      info "Review with:"
-      info "  git -C \"$CODEX_REPO\" diff ${CODEX_REF}..HEAD -- ${existing[*]}"
-      drift=1
-    fi
+    warn "Watched memory code changed upstream:"
+    echo "$stat"
+    info "Review with:"
+    info "  git -C \"$CODEX_REPO\" diff ${CODEX_REF}..HEAD -- ${WATCH[*]}"
+    drift=1
   fi
 fi
 echo
