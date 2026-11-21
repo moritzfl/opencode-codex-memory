@@ -325,6 +325,10 @@ function localRead(
   return signal ? raceAbort(request, signal) : request
 }
 
+export async function localMcpStatus(owner: V2Context, signal?: AbortSignal) {
+  return { data: adaptMcpStatus(await localRead(owner, "mcp", signal, () => owner.mcp.list())) }
+}
+
 /** Read durable messages in source order, including terminal errors/idle rows. */
 async function loadV2Messages(sessionID: string, context?: V2Context, signal?: AbortSignal): Promise<any[]> {
   signal?.throwIfAborted()
@@ -859,9 +863,7 @@ export function buildV1ClientShim(): unknown {
   const mcp = {
     status: async (opts?: { signal?: AbortSignal }) => {
       try {
-        const owner = ctx()
-        const res = await localRead(owner, "mcp", opts?.signal, () => owner.mcp.list())
-        return { data: adaptMcpStatus(res) }
+        return await localMcpStatus(ctx(), opts?.signal)
       } catch (e) {
         return { error: e }
       }

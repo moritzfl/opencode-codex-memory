@@ -157,7 +157,7 @@ cooldown; sessions must still meet extraction eligibility rules.
 
 ## Storage and integrations
 
-OpenCode 2 shares one memory pipeline per process. Configure the same memory
+OpenCode shares one memory pipeline per process. Configure the same memory
 home and plugin options for all simultaneously open locations, preferably in
 global configuration. A conflicting location fails setup without changing the
 running pipeline.

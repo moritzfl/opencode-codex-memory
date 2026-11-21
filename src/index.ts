@@ -10,15 +10,24 @@ import { writeMemoryVersions } from "./memory-version.js"
 import { sessionMemoryVersion, withSessionMemoryVersion } from "./session-version.js"
 import { existingMemoryStores } from "./store.js"
 import { setPluginInput, cleanupOldSubSessions, isMemorySubSession, abortActiveSubSessions } from "./llm.js"
-import { pluginOptions, recordConfigWarning, clearConfigWarnings, resetPluginOptions, modelList } from "./options.js"
+import {
+  pluginOptions,
+  recordConfigWarning,
+  clearConfigWarnings,
+  resetPluginOptions,
+  modelList,
+  reserveMemoryConfig,
+} from "./options.js"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "./lifecycle.js"
-import { hostMcpStatus } from "./host-client.js"
+import { externalContextClassifier, hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
 import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from "./agent-health.js"
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
 import path from "path"
 
-let pluginClient: PluginInput["client"] | null = null
+const hosts: PluginInput[] = []
+let hostConfig: ReturnType<typeof reserveMemoryConfig> | undefined
+let draining: Promise<void> | undefined
 const backgroundTasks = new Set<Promise<void>>()
 
 function trackBackgroundTask(task: Promise<void>): void {
@@ -37,9 +46,6 @@ export async function waitForBackgroundTasks(): Promise<void> {
     await Promise.all([...backgroundTasks])
   }
 }
-// Single-flight guard for mcp.status(); see mcpToolPrefixes below.
-let mcpStatusInFlight: Promise<string[] | null> | null = null
-const MCP_STATUS_TIMEOUT_MS = 1_000
 
 // Deliberately uncached: openDb() is already a singleton, and caching a store
 // here would hold a stale handle across closeDb() (e.g. after memory_reset).
@@ -156,22 +162,16 @@ export default {
   // Added additively: V1 hosts keep calling server() exactly as before.
   setup: setupV2,
   async server(input: PluginInput, opts?: PluginOptions) {
-    // A reload after dispose must be able to run the pipeline again.
-    resetPluginLifecycle()
-    setPluginInput(input)
-    pluginClient = input.client
-    resetAgentHealth()
-    mcpStatusInFlight = null
-    // Unconditional, like the caches above: a boot WITHOUT options must not
-    // inherit the previous boot's warnings (opencode can host several
-    // instances in one process — see the ARCHITECTURE known-gaps table).
-    clearConfigWarnings()
-    if (opts) applyPluginOptions(opts)
-    else {
-      const previousDb = dataRoot()
-      resetPluginOptions()
-      if (dataRoot() !== previousDb) closeDb()
+    if (draining) await draining
+    const config = reserveMemoryConfig(hostConfig, opts, input.directory)
+    if (!hostConfig) {
+      resetPluginLifecycle()
+      setPluginInput(input)
+      resetAgentHealth()
+      applyPluginOptions(opts ?? {})
+      hostConfig = config
     }
+    hosts.push(input)
     // Finish bounded reseeding before hooks can see a surviving memory
     // sub-session after a plugin reload.
     await cleanupOldSubSessions()
@@ -184,7 +184,31 @@ export default {
     } catch (err) {
       console.warn("[opencode-codex-memory] orphaned phase2 sweep failed:", err)
     }
-    return buildHooks()
+    const hooks = buildHooks(input.client)
+    let released = false
+    return {
+      ...hooks,
+      async dispose() {
+        if (released) return
+        released = true
+        const idx = hosts.indexOf(input)
+        hosts.splice(idx, 1)
+        if (hosts.length) {
+          if (idx === 0) {
+            setPluginInput(hosts[0])
+          }
+          return
+        }
+        draining = hooks
+          .dispose()
+          .then(waitForBackgroundTasks)
+          .finally(() => {
+            hostConfig = undefined
+            draining = undefined
+          })
+        await draining
+      },
+    }
   },
 }
 
@@ -385,70 +409,6 @@ export function applyPluginOptions(opts: PluginOptions, { modelFallback = false 
   if (dataRoot() !== previousDb) closeDb()
 }
 
-/**
- * codex marks every MCP server as memory-polluting unconditionally
- * (codex-mcp server.rs pollutes_memory: true). opencode registers MCP tools
- * as "<server>_<tool>", so match tool names against the configured server
- * list. Query live status so runtime MCP changes cannot escape pollution
- * marking. Falls back to the web-tools-only check when status is unavailable.
- *
- * Concurrent tool calls coalesce on one in-flight status fetch. Deliberately
- * NOT cached with a TTL: a stale list would miss servers connected
- * mid-session and silently stop marking their calls as polluting, which is
- * the failure this classification exists to prevent. The accepted cost is one
- * status round trip per tool call — bounded to sessions that opt in with
- * disable_on_external_context (off by default), and paid only in
- * tool.execute.before.
- */
-async function mcpToolPrefixes(): Promise<string[] | null> {
-  if (!pluginClient) return null
-  if (!mcpStatusInFlight) {
-    mcpStatusInFlight = (async () => {
-      const controller = new AbortController()
-      let timer: ReturnType<typeof setTimeout> | undefined
-      try {
-        const res = await Promise.race([
-          hostMcpStatus(pluginClient, controller.signal),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              controller.abort()
-              reject(new Error(`mcp.status timed out after ${MCP_STATUS_TIMEOUT_MS}ms`))
-            }, MCP_STATUS_TIMEOUT_MS)
-          }),
-        ])
-        if (!res || res.error) return null
-        const servers = res.data
-        if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
-        const prefixes: string[] = []
-        for (const [server, status] of Object.entries(servers as Record<string, unknown>)) {
-          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string")
-            continue
-          // Mirrors OpenCode's McpCatalog.sanitize when constructing tool names.
-          prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
-        }
-        return prefixes
-      } catch {
-        // MCP status unavailable (older OpenCode); keep web-tools-only checks.
-        return null
-      } finally {
-        clearTimeout(timer)
-        mcpStatusInFlight = null
-      }
-    })()
-  }
-  return mcpStatusInFlight
-}
-
-async function classifyExternalContextTool(toolName: string): Promise<boolean | null> {
-  if (toolName === "websearch" || toolName === "webfetch") return true
-  const prefixes = await mcpToolPrefixes()
-  if (prefixes === null) return null
-  for (const prefix of prefixes) {
-    if (toolName.startsWith(`${prefix}_`)) return true
-  }
-  return false
-}
-
 const TITLE_GENERATOR_MARKER = "You are a title generator. You output ONLY a thread title."
 
 function isTitleGenerationPrompt(system: string[]): boolean {
@@ -487,7 +447,8 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
   recordAgentConfig(config, true, defs)
 }
 
-function buildHooks() {
+function buildHooks(client: PluginInput["client"]) {
+  const classifyExternalContextTool = externalContextClassifier((signal) => hostMcpStatus(client, signal))
   const base = {
     async config(input: { agent?: Record<string, unknown> }): Promise<void> {
       try {

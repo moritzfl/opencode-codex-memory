@@ -181,6 +181,7 @@ describe("extractCitedSessionIds", () => {
 })
 
 describe("experimental.text.complete hook", () => {
+  let dispose: (() => Promise<void>) | undefined
   const TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "codex-memory-citation-"))
   beforeEach(() => {
     fs.mkdirSync(TEST_ROOT, { recursive: true })
@@ -188,6 +189,9 @@ describe("experimental.text.complete hook", () => {
     require("../src/db.js").closeDb()
   })
   afterEach(async () => {
+    await dispose?.()
+    dispose = undefined
+    require("../src/lifecycle.js").resetPluginLifecycle()
     await waitForBackgroundTasks()
     require("../src/db.js").closeDb()
     delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
@@ -199,6 +203,7 @@ describe("experimental.text.complete hook", () => {
     const plugin = require("../src/index.js").default
     const { MemoryStore } = require("../src/store.js")
     const hooks = await plugin.server({ client: {} } as any, undefined)
+    dispose = hooks.dispose
     expect(typeof hooks["experimental.text.complete"]).toBe("function")
 
     const store = new MemoryStore()
@@ -238,6 +243,7 @@ describe("experimental.text.complete hook", () => {
     process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
     const plugin = require("../src/index.js").default
     const hooks = await plugin.server({ client: {} } as any, undefined)
+    dispose = hooks.dispose
     const output = { text: "plain answer" }
     await hooks["experimental.text.complete"]({ sessionID: "s", messageID: "m", partID: "p" }, output)
     expect(output.text).toBe("plain answer")

@@ -1,6 +1,28 @@
 import type { CodexInteropOptions } from "./codex-interop.js"
 import type { ClaudeImportOptions } from "./claude-import.js"
-import { setConfiguredHome } from "./paths.js"
+import { resolveDataRoot, resolveHomePath, setConfiguredHome } from "./paths.js"
+import { isDeepStrictEqual } from "node:util"
+
+type SharedConfig = { home: string; options: Record<string, unknown> }
+
+/** Check the effective home before applying options or touching DB handles. */
+export function reserveMemoryConfig(
+  active: SharedConfig | undefined,
+  raw: Record<string, unknown> | undefined,
+  directory: string,
+): SharedConfig {
+  const { home, ...options } = raw ?? {}
+  const config = {
+    home: resolveDataRoot(typeof home === "string" ? (resolveHomePath(home) ?? undefined) : undefined),
+    options,
+  }
+  if (active && !isDeepStrictEqual(active, config)) {
+    throw new Error(
+      `Conflicting memory configuration for ${directory}. Configure one memory home and options for all locations in this OpenCode process.`,
+    )
+  }
+  return active ?? config
+}
 
 /**
  * Effective plugin options + configuration diagnostics, owned by a leaf

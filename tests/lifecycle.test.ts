@@ -9,9 +9,53 @@ import {
   isPluginShuttingDown,
   resetPluginLifecycle,
 } from "../src/lifecycle.js"
-import plugin from "../src/index.js"
+import hostPlugin from "../src/index.js"
+
+const disposers: (() => Promise<void>)[] = []
+const plugin = {
+  setup: hostPlugin.setup,
+  async server(...args: Parameters<typeof hostPlugin.server>) {
+    const hooks = await hostPlugin.server(...args)
+    disposers.push(hooks.dispose)
+    return hooks
+  },
+}
+
+let testHome: string
+let previousHome: string | undefined
+beforeEach(() => {
+  previousHome = process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+  testHome = fs.mkdtempSync(path.join(os.tmpdir(), "ocm-host-lifecycle-"))
+  process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = testHome
+})
+afterEach(async () => {
+  for (const dispose of disposers.splice(0)) await dispose()
+  resetPluginLifecycle()
+  require("../src/db.js").closeDb()
+  if (previousHome === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+  else process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = previousHome
+  fs.rmSync(testHome, { recursive: true, force: true })
+})
 
 describe("hook wiring", () => {
+  it("rejects a conflicting V1 home and keeps the surviving instance usable", async () => {
+    delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
+    const home = path.join(testHome, "one")
+    const first = await plugin.server({ client: {}, directory: "/a" } as any, { home })
+    const second = await plugin.server({ client: {}, directory: "/b" } as any, { home })
+    await expect(
+      plugin.server({ client: {}, directory: "/c" } as any, { home: path.join(testHome, "two") }),
+    ).rejects.toThrow("Conflicting memory")
+    await first.dispose()
+    expect(isPluginShuttingDown()).toBe(false)
+    const { MemoryStore } = require("../src/store.js")
+    const store = new MemoryStore()
+    store.setMemoryMode("ses_live", "disabled")
+    expect(fs.existsSync(path.join(home, "memory.db"))).toBe(true)
+    expect(fs.existsSync(path.join(testHome, "two"))).toBe(false)
+    await second.dispose()
+    expect(isPluginShuttingDown()).toBe(true)
+  })
   it("registers tool.execute.before as a top-level hook (not an event-bus type)", async () => {
     // Regression: pollution marking once lived inside the event() bus handler
     // under a nonexistent "tool.execute.*" event type and never fired.
@@ -73,7 +117,6 @@ describe("hook wiring", () => {
       const { MemoryStore } = require("../src/store.js")
       expect(new MemoryStore().getMemoryMode("ses_failed_fetch")).toBe("polluted")
     } finally {
-      await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
       await waitForBackgroundTasks()
       require("../src/db.js").closeDb()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
@@ -118,7 +161,6 @@ describe("hook wiring", () => {
       await hooks["tool.execute.before"]({ tool: "error_tool", sessionID: "ses_error", callID: "call_5" })
       expect(new MemoryStore().getMemoryMode("ses_error")).toBeNull()
     } finally {
-      await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
       await waitForBackgroundTasks()
       require("../src/db.js").closeDb()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT
@@ -154,7 +196,6 @@ describe("hook wiring", () => {
       expect(Date.now() - started).toBeLessThan(2_000)
       expect(statusSignal?.aborted).toBe(true)
     } finally {
-      await plugin.server({ client: {} } as any, { disable_on_external_context: false } as any)
       await waitForBackgroundTasks()
       require("../src/db.js").closeDb()
       if (previousRoot === undefined) delete process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT

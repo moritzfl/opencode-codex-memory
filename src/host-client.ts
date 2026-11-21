@@ -164,6 +164,34 @@ export async function hostMcpStatus(
   return (await mcp.status({ signal })) as { error?: unknown; data?: unknown }
 }
 
+/** Coalesce concurrent reads within one location; never reuse a stale MCP catalog. */
+export function externalContextClassifier(
+  status: (signal: AbortSignal) => Promise<{ data?: unknown; error?: unknown } | null>,
+  legacyPrefix = false,
+) {
+  let inFlight: Promise<string[]> | undefined
+  return async (tool: string): Promise<boolean> => {
+    if (tool === "websearch" || tool === "webfetch") return true
+    if (!inFlight) {
+      const controller = new AbortController()
+      inFlight = withHostTimeout(status(controller.signal), 1000, "mcp.status", controller)
+        .then((result) => {
+          if (result?.error || !result?.data || typeof result.data !== "object" || Array.isArray(result.data)) return []
+          return Object.entries(result.data)
+            .filter(([, server]) => typeof server?.status === "string")
+            .map(([name]) => name.replace(/[^a-zA-Z0-9_-]/g, "_"))
+        })
+        .catch(() => [])
+        .finally(() => {
+          inFlight = undefined
+        })
+    }
+    return (await inFlight).some(
+      (name) => tool.startsWith(`${name}_`) || (legacyPrefix && tool.startsWith(`mcp_${name}_`)),
+    )
+  }
+}
+
 /** session.messages — weakly typed parts; centralize the cast. */
 export async function hostSessionMessages(
   client: PluginInput["client"] | null | undefined,

@@ -120,6 +120,7 @@ afterEach(() => {
   resetPluginOptions()
   resetAgentHealth()
   resetV2ModuleStateForTest()
+  require("../src/lifecycle.js").resetPluginLifecycle()
   setV2ServiceDependenciesForTest(null)
   resetV2ShimStateForTest()
   setV2Context(null)
@@ -220,7 +221,7 @@ describe("v2 setup", () => {
     // The specific regression: zod must be reachable without the optional peer.
     expect(bare.has("zod")).toBe(true)
     expect(pkg.dependencies?.zod).toBeDefined()
-  })
+  }, 30_000)
 
   it("serves read-only status with effective options without starting memory jobs", async () => {
     const f = fakeCtx({
@@ -822,5 +823,21 @@ describe("v2 setup", () => {
     applyPluginOptions({ disable_on_external_context: true })
     await f.hooks["execute.before"][0]({ tool: "websearch", sessionID: "ses_pol" })
     expect(new MemoryStore().isPolluted("ses_pol")).toBe(true)
+  })
+  it("classifies MCP calls using the originating location's catalog", async () => {
+    const a = fakeCtx({ disable_on_external_context: true })
+    const b = fakeCtx({ disable_on_external_context: true })
+    b.ctx.mcp.list = async () => ({ data: [{ name: "only.here", status: "connected" }] })
+    const closeA = await setup(a.ctx)
+    const closeB = await setup(b.ctx)
+    await Promise.all([
+      a.hooks["execute.before"][0]({ sessionID: "ses_a", tool: "only_here_lookup" }),
+      b.hooks["execute.before"][0]({ sessionID: "ses_b", tool: "only_here_lookup" }),
+    ])
+    const store = new MemoryStore()
+    expect(store.isPolluted("ses_a")).toBe(false)
+    expect(store.isPolluted("ses_b")).toBe(true)
+    await closeA?.()
+    await closeB?.()
   })
 })

@@ -30,15 +30,13 @@ import {
   isMemorySubSession,
   abortActiveSubSessions,
 } from "../llm.js"
-import { pluginOptions } from "../options.js"
-import { resolveDataRoot, resolveHomePath } from "../paths.js"
-import { isDeepStrictEqual } from "node:util"
+import { pluginOptions, reserveMemoryConfig } from "../options.js"
 import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from "../lifecycle.js"
-import { hostMcpStatus } from "../host-client.js"
+import { externalContextClassifier } from "../host-client.js"
 import { recordDiagnostic } from "../diagnostics.js"
 import { resetAgentHealth } from "../agent-health.js"
 import { applyPluginOptions, handleSessionDeleted } from "../index.js"
-import { setV2Context, buildV1ClientShim, rememberV2Session, type V2Context } from "./shim.js"
+import { setV2Context, buildV1ClientShim, rememberV2Session, localMcpStatus, type V2Context } from "./shim.js"
 import { ensureV2Agents } from "./agents.js"
 import { buildV2Tools } from "./tools.js"
 import { performMemoryReset } from "../../tools/control.js"
@@ -49,7 +47,6 @@ import { recordInjection, resetInjectionStats } from "./injection.js"
 import { overlayV2CitationInstructions } from "./citation-overlay.js"
 import { estimateTokens } from "../token.js"
 
-let shimClient: unknown = null
 const backgroundTasks = new Set<Promise<void>>()
 const statusListeners = new Set<() => void>()
 
@@ -60,7 +57,7 @@ const statusListeners = new Set<() => void>()
  * whichever location booted or disposed last.
  */
 const liveInstances: V2Context[] = []
-let activeConfig: { home: string; options: Record<string, unknown> } | undefined
+let activeConfig: ReturnType<typeof reserveMemoryConfig> | undefined
 let draining: Promise<void> | undefined
 const eventLoops = new Set<AbortController>()
 
@@ -112,7 +109,6 @@ export function resetV2ModuleStateForTest(): void {
   statusNotifyTimer = null
   backgroundTasks.clear()
   seenTurnSessions.clear()
-  mcpStatusInFlight = null
   liveInstances.length = 0
   activeConfig = undefined
   draining = undefined
@@ -185,56 +181,6 @@ export function markV2TurnSeen(sessionId: string): boolean {
   return first === undefined
 }
 
-let mcpStatusInFlight: Promise<string[] | null> | null = null
-const MCP_STATUS_TIMEOUT_MS = 1_000
-
-async function mcpToolPrefixes(): Promise<string[] | null> {
-  if (!shimClient) return null
-  if (!mcpStatusInFlight) {
-    mcpStatusInFlight = (async () => {
-      const controller = new AbortController()
-      let timer: ReturnType<typeof setTimeout> | undefined
-      try {
-        const res = await Promise.race([
-          hostMcpStatus(shimClient as any, controller.signal),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              controller.abort()
-              reject(new Error(`mcp status timed out after ${MCP_STATUS_TIMEOUT_MS}ms`))
-            }, MCP_STATUS_TIMEOUT_MS)
-          }),
-        ])
-        if (!res || (res as { error?: unknown }).error) return null
-        const servers = (res as { data?: unknown }).data
-        if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null
-        const prefixes: string[] = []
-        for (const [server, status] of Object.entries(servers as Record<string, unknown>)) {
-          if (!status || typeof status !== "object" || typeof (status as { status?: unknown }).status !== "string")
-            continue
-          prefixes.push(server.replace(/[^a-zA-Z0-9_-]/g, "_"))
-        }
-        return prefixes
-      } catch {
-        return null
-      } finally {
-        clearTimeout(timer)
-        mcpStatusInFlight = null
-      }
-    })()
-  }
-  return mcpStatusInFlight
-}
-
-async function classifyExternalContextTool(toolName: string): Promise<boolean | null> {
-  if (toolName === "websearch" || toolName === "webfetch") return true
-  const prefixes = await mcpToolPrefixes()
-  if (prefixes === null) return null
-  for (const prefix of prefixes) {
-    if (toolName.startsWith(`${prefix}_`) || toolName.startsWith(`mcp_${prefix}_`)) return true
-  }
-  return false
-}
-
 function stampAndPump(sid: string, directory?: string | null): void {
   rememberV2Session(sid, directory ?? null)
   try {
@@ -275,17 +221,8 @@ async function consolidateNow(): Promise<string> {
 
 export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>) | void> {
   if (draining) await draining
-  const { home, ...options } = ctx.options ?? {}
-  const config = {
-    home: resolveDataRoot(typeof home === "string" ? (resolveHomePath(home) ?? undefined) : undefined),
-    options,
-  }
   // Reserve synchronously: setups can overlap before either finishes registering.
-  if (activeConfig && !isDeepStrictEqual(activeConfig, config)) {
-    throw new Error(
-      `Conflicting memory configuration for ${ctx.location.directory}. Configure one memory home and options for all locations in this OpenCode process.`,
-    )
-  }
+  const config = reserveMemoryConfig(activeConfig, ctx.options, ctx.location.directory)
   if (!activeConfig) {
     resetPluginLifecycle()
     resetInjectionStats()
@@ -293,10 +230,8 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
     applyPluginOptions(ctx.options ?? {}, { modelFallback: true })
     activeConfig = config
     setV2Context(ctx)
-    shimClient = buildV1ClientShim()
-    setPluginInput({ client: shimClient } as any)
+    setPluginInput({ client: buildV1ClientShim() } as any)
     setSubSessionDirectory(ctx.location.directory)
-    mcpStatusInFlight = null
   }
   liveInstances.push(ctx)
   try {
@@ -312,6 +247,7 @@ export async function setup(ctx: V2Context): Promise<(() => void | Promise<void>
 }
 
 async function attach(ctx: V2Context): Promise<() => void> {
+  const classifyExternalContextTool = externalContextClassifier((signal) => localMcpStatus(ctx, signal), true)
   await ensureV2Agents(ctx as any)
 
   const statusRegistration = await ctx.rpc.register(MemoryStatusRpc, {
