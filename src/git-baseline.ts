@@ -1,4 +1,3 @@
-import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
 import { memoryRoot } from "./paths.js"
@@ -38,25 +37,13 @@ export interface WorkspaceDiff {
   changes: WorkspaceChange[]
   unifiedDiff: string
   /**
-   * Content hash of every `extensions/` file at capture time. Notes written
-   * while the consolidator runs are not in this diff; resetBaseline keeps
-   * them out of the new baseline so the next run still sees them.
+   * Git blob for each extension input seen by the consolidator. The new
+   * baseline stages these exact bytes even if a file has since disappeared.
    */
   extensionSnapshot?: ReadonlyMap<string, string>
 }
 
 const EXTENSIONS_PREFIX = "extensions/"
-
-function workdirHash(dir: string, filepath: string): string | null {
-  try {
-    const file = safeResolveUnderRoot(dir, filepath)
-    if (fs.lstatSync(file).size > MAX_BASELINE_FILE_BYTES) return null
-    const content = readRegularFileNoFollow(file).content
-    return createHash("sha1").update(content).digest("hex")
-  } catch {
-    return null
-  }
-}
 
 function removeDiffArtifact(dir: string): void {
   try {
@@ -89,10 +76,11 @@ function isOversizedFile(dir: string, filepath: string): boolean {
   }
 }
 
-function statusMatrix(dir: string) {
+function statusMatrix(dir: string, gitdir?: string) {
   return isogit.statusMatrix({
     fs,
     dir,
+    gitdir,
     filter: (filepath) => !isHiddenBaselinePath(filepath) && !isOversizedFile(dir, filepath),
   })
 }
@@ -124,32 +112,6 @@ async function initEmptyBaseline(dir: string): Promise<void> {
 
 async function ensureVersionedBaseline(dir: string): Promise<void> {
   if (!(await hasVersionedBaseline(dir))) await initEmptyBaseline(dir)
-}
-
-// statusMatrix rows are [filepath, head, workdir, stage]; head !== workdir
-// means the working tree differs from HEAD (added, modified, or deleted).
-async function stageAll(dir: string, skip?: (filepath: string) => boolean): Promise<number> {
-  const matrix = await statusMatrix(dir)
-  let changes = 0
-  for (const [filepath, head, workdir, stage] of matrix) {
-    if (head === 1 && workdir === 1 && stage === 1) continue
-    if (workdir !== 0 && skip?.(filepath)) continue
-    if (workdir === 0) {
-      // isogit.add throws on deleted files; they must be staged via remove
-      await isogit.remove({ fs, dir, filepath })
-    } else {
-      await isogit.add({ fs, dir, filepath })
-    }
-    if (head !== workdir) changes++
-  }
-  return changes
-}
-
-async function commitBaseline(dir: string, skip?: (filepath: string) => boolean): Promise<string> {
-  await stageAll(dir, skip)
-  const oid = await isogit.commit({ fs, dir, message: "memory baseline", author: AUTHOR })
-  fs.writeFileSync(baselineVersionPath(dir), BASELINE_VERSION)
-  return oid
 }
 
 /**
@@ -190,12 +152,12 @@ async function readBaselineText(dir: string, headOid: string, filepath: string):
   }
 }
 
-function readWorkdirText(dir: string, filepath: string): string {
+function readWorkingFile(dir: string, filepath: string): Buffer {
   const file = safeResolveUnderRoot(dir, filepath)
   if (fs.lstatSync(file).size > MAX_BASELINE_FILE_BYTES) {
     throw new Error(`file grew beyond the snapshot file limit during diff: ${filepath}`)
   }
-  return readRegularFileNoFollow(file).content.toString("utf8")
+  return readRegularFileNoFollow(file).content
 }
 
 /**
@@ -271,19 +233,23 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
     // no commits yet — every file diffs against empty
   }
   const patches: string[] = []
+  const extensionSnapshot = new Map<string, string>()
   for (const [filepath, head, workdir] of changedRows) {
     const oldText = head === 1 && headOid ? await readBaselineText(dir, headOid, filepath) : ""
-    const newText = workdir === 0 ? "" : readWorkdirText(dir, filepath)
+    const content = workdir === 0 ? null : readWorkingFile(dir, filepath)
+    const newText = content?.toString("utf8") ?? ""
+    if (content && filepath.startsWith(EXTENSIONS_PREFIX))
+      extensionSnapshot.set(filepath, await isogit.writeBlob({ fs, dir, blob: content }))
     // Per-file patches render in full; only the global 4 MiB truncation in
     // writeWorkspaceDiff caps the rendered diff. Files above the baseline
     // snapshot limit never reach this loop.
     patches.push(createPatch(filepath, oldText, newText))
   }
-  const extensionSnapshot = new Map<string, string>()
   for (const [filepath, , workdir] of matrix) {
-    if (workdir === 0 || !filepath.startsWith(EXTENSIONS_PREFIX)) continue
-    const hash = workdirHash(dir, filepath)
-    if (hash) extensionSnapshot.set(filepath, hash)
+    if (workdir === 1 && filepath.startsWith(EXTENSIONS_PREFIX) && headOid) {
+      // Unchanged at status capture: use HEAD, not a second live read.
+      extensionSnapshot.set(filepath, (await isogit.readBlob({ fs, dir, oid: headOid, filepath })).oid)
+    }
   }
   return { changes, unifiedDiff: patches.join("\n"), extensionSnapshot }
 }
@@ -293,24 +259,40 @@ export async function captureWorkspaceDiff(): Promise<WorkspaceDiff> {
  * single-commit baseline so deleted/redacted memory content is not retained
  * in unreachable git objects (history is intentionally dropped).
  *
- * Divergence: `extensions/` files added or edited after `captured` (e.g. a
- * memory_add_note during the consolidator turn) stay out of the baseline, so
- * they appear as added in the next diff instead of never being consolidated.
+ * Stage captured extension blobs alongside live consolidator outputs. This
+ * preserves concurrent additions, edits AND deletions for the next diff.
  */
 export async function resetBaseline(captured?: ReadonlyMap<string, string>): Promise<boolean> {
   try {
     const dir = memoryRoot()
     removeDiffArtifact(dir)
-    fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true })
-    await isogit.init({ fs, dir })
-    const skip = captured
-      ? (filepath: string) => {
-          if (!filepath.startsWith(EXTENSIONS_PREFIX)) return false
-          const hash = workdirHash(dir, filepath)
-          return hash !== null && captured.get(filepath) !== hash
-        }
-      : undefined
-    await commitBaseline(dir, skip)
+    await ensureVersionedBaseline(dir)
+    const old = path.join(dir, ".git")
+    // Inside plugin-owned metadata: a crash while building leaves the old
+    // baseline valid, and the next attempt discards the unfinished staging dir.
+    const gitdir = path.join(old, "codex-next")
+    fs.rmSync(gitdir, { recursive: true, force: true })
+    await isogit.init({ fs, dir, gitdir })
+    for (const [filepath, , workdir] of await statusMatrix(dir, gitdir)) {
+      if (workdir !== 0 && !(captured && filepath.startsWith(EXTENSIONS_PREFIX))) {
+        await isogit.add({ fs, dir, gitdir, filepath })
+      }
+    }
+    for (const [filepath, oid] of captured ?? []) {
+      const { blob } = await isogit.readBlob({ fs, dir, oid })
+      await isogit.writeBlob({ fs, dir, gitdir, blob })
+      await isogit.updateIndex({ fs, dir, gitdir, filepath, oid, mode: 0o100644, add: true })
+    }
+    await isogit.commit({ fs, dir, gitdir, message: "memory baseline", author: AUTHOR })
+    // The version marker brackets promotion: interrupted promotions recover
+    // as an empty baseline instead of trusting a partial repository.
+    fs.unlinkSync(baselineVersionPath(dir))
+    for (const name of fs.readdirSync(old)) {
+      if (name !== "codex-next") fs.rmSync(path.join(old, name), { recursive: true, force: true })
+    }
+    for (const name of fs.readdirSync(gitdir)) fs.renameSync(path.join(gitdir, name), path.join(old, name))
+    fs.rmdirSync(gitdir)
+    fs.writeFileSync(baselineVersionPath(dir), BASELINE_VERSION)
     return true
   } catch (err) {
     console.error("[opencode-codex-memory] resetBaseline error:", err)

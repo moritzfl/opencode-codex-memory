@@ -43,9 +43,12 @@ describe("git-baseline", () => {
     fs.writeFileSync(memFile("MEMORY.md"), "v2\n")
     fs.writeFileSync(memFile(path.join(notes, "late.md")), "late\n")
     fs.writeFileSync(memFile(path.join(notes, "edited.md")), "after\n")
+    fs.unlinkSync(memFile(path.join(notes, "seen.md")))
     expect(await resetBaseline(diff.extensionSnapshot)).toBe(true)
 
-    expect(statusLines(await captureWorkspaceDiff())).toEqual([`A ${notes}/edited.md`, `A ${notes}/late.md`])
+    const next = await captureWorkspaceDiff()
+    expect(statusLines(next)).toEqual([`A ${notes}/late.md`, `D ${notes}/seen.md`, `M ${notes}/edited.md`])
+    expect(next.unifiedDiff).toContain("-seen")
   })
 
   it("ignores hidden files such as .DS_Store instead of failing the diff", async () => {
