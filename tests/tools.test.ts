@@ -115,6 +115,22 @@ describe("memory_search time filters", () => {
 })
 
 describe("memory_search match modes (codex parity)", () => {
+  it("counts a large repetitive corpus but materializes only the requested window", async () => {
+    fs.writeFileSync(path.join(TEST_ROOT, "memories", "large.md"), "a\nb\n".repeat(50_000))
+    const result = await search({
+      path: "large.md",
+      queries: ["a", "b"],
+      match_mode: "all_within_lines",
+      line_count: 100000,
+      context_lines: 100000,
+      cursor: "90000",
+      max_results: 1,
+    })
+    expect(result.output).toContain("1 of 99999")
+    expect(Buffer.byteLength(result.output)).toBeLessThan(17000)
+    expect(result.metadata.matches[0].match_line_number).toBe(90001)
+    expect(result.metadata.next_cursor).toBe("90001")
+  })
   it("any: a line matching any query counts, with matched_queries reported", async () => {
     const r = await search({ queries: ["blue-green", "does-not-exist-anywhere"] })
     expect(r.output).toContain("MEMORY.md")

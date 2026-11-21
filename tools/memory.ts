@@ -1,7 +1,9 @@
 import fs from "fs"
 import path from "path"
+import { setImmediate as yieldToHost } from "node:timers/promises"
 import {
   safeResolveMemoryPath,
+  safeResolveUnderRoot,
   assertMemoryRootSafe,
   readRegularFileNoFollow,
   writeRegularFileNoFollow,
@@ -273,6 +275,8 @@ function firstContentLine(content: string): string {
 // --- search engine, ported from codex ext/memories/src/local/search.rs ---
 
 const SEARCH_MAX_RESULTS = 200 // codex MAX_SEARCH_RESULTS (= default)
+const SEARCH_PAGE_BYTES = 128 * 1024
+const SNIPPET_BYTES = 16 * 1024
 
 interface SearchMatch {
   path: string
@@ -293,72 +297,64 @@ function prepareComparable(value: string, caseSensitive: boolean, normalized: bo
 
 type MatchMode = "any" | "all_on_same_line" | "all_within_lines"
 
-/**
- * Per-file matching, all three codex modes. Window mode extends from every
- * line matching at least one query until all queries are covered (bounded by
- * lineCount), then drops windows that strictly contain another window so only
- * minimal windows are reported.
- */
-function searchFileContent(
-  file: CandidateFile,
+/** A minimal covering window ends exactly when the oldest last-seen query moves forward. */
+async function searchFileContent(
   lines: string[],
-  queries: string[],
   preparedQueries: string[],
   mode: MatchMode,
   lineCount: number,
-  contextLines: number,
   caseSensitive: boolean,
   normalized: boolean,
-  out: SearchMatch[],
-): void {
-  const lineFlags = lines.map((line) => {
-    const prepared = prepareComparable(line, caseSensitive, normalized)
-    return preparedQueries.map((q) => prepared.includes(q))
-  })
-  const matchedQueries = (flags: boolean[]) => queries.filter((_, i) => flags[i])
-  const push = (start: number, end: number, flags: boolean[]) => {
-    const contentStart = Math.max(0, start - contextLines)
-    const contentEnd = Math.min(lines.length, end + contextLines + 1)
-    out.push({
-      path: file.rel,
-      match_line_number: start + 1,
-      content_start_line_number: contentStart + 1,
-      content: lines.slice(contentStart, contentEnd).join("\n"),
-      matched_queries: matchedQueries(flags),
-    })
-  }
-
-  if (mode === "any" || mode === "all_on_same_line") {
-    for (let i = 0; i < lines.length; i++) {
-      const flags = lineFlags[i]
-      const hit = mode === "any" ? flags.some(Boolean) : flags.every(Boolean)
-      if (hit) push(i, i, flags)
+  signal: AbortSignal,
+  hit: (start: number, end: number, flags?: boolean[]) => void,
+): Promise<void> {
+  const last = preparedQueries.map(() => -1)
+  let previous = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (i && i % 2048 === 0) {
+      await yieldToHost()
+      signal?.throwIfAborted()
     }
-    return
-  }
-
-  // all_within_lines
-  const windows: { start: number; end: number; flags: boolean[] }[] = []
-  for (let start = 0; start < lines.length; start++) {
-    if (!lineFlags[start].some(Boolean)) continue
-    const lastAllowed = Math.min(start + lineCount - 1, lines.length - 1)
-    const flags = new Array<boolean>(preparedQueries.length).fill(false)
-    for (let end = start; end <= lastAllowed; end++) {
-      for (let q = 0; q < flags.length; q++) flags[q] = flags[q] || lineFlags[end][q]
-      if (flags.every(Boolean)) {
-        windows.push({ start, end, flags })
-        break
-      }
+    const line = prepareComparable(lines[i], caseSensitive, normalized)
+    const flags = preparedQueries.map((q) => line.includes(q))
+    if (mode !== "all_within_lines") {
+      if (mode === "any" ? flags.some(Boolean) : flags.every(Boolean)) hit(i, i, flags)
+      continue
     }
+    for (let q = 0; q < flags.length; q++) if (flags[q]) last[q] = i
+    const start = Math.min(...last)
+    if (start > previous && i - start < lineCount) hit(start, i)
+    previous = start
   }
-  for (let i = 0; i < windows.length; i++) {
-    const w = windows[i]
-    const containsAnother = windows.some(
-      (o, j) => i !== j && w.start <= o.start && w.end >= o.end && (w.start !== o.start || w.end !== o.end),
-    )
-    if (containsAnother) continue
-    push(w.start, w.end, w.flags)
+}
+
+/** Materialize only returned matches. Keep the hit visible even with huge leading context. */
+function searchSnippet(lines: string[], start: number, end: number, context: number) {
+  let first = start
+  let bytes = 0
+  while (first > Math.max(0, start - context)) {
+    const extra = Buffer.byteLength(lines[first - 1]) + 1
+    if (bytes + extra > SNIPPET_BYTES / 4) break
+    bytes += extra
+    first--
   }
+  const chunks = lines.slice(first, start)
+  for (let i = start; i <= Math.min(end + context, lines.length - 1); i++) {
+    const line = lines[i]
+    const room = SNIPPET_BYTES - bytes - 32
+    if (line.length > room || Buffer.byteLength(line) > room) {
+      chunks.push(
+        Buffer.from(line.slice(0, Math.max(0, room)))
+          .subarray(0, Math.max(0, room))
+          .toString("utf8")
+          .replace(/\uFFFD$/, "") + " […truncated]",
+      )
+      break
+    }
+    chunks.push(line)
+    bytes += Buffer.byteLength(line) + 1
+  }
+  return { content_start_line_number: first + 1, content: chunks.join("\n") }
 }
 
 function renderMatch(m: SearchMatch): string {
@@ -433,6 +429,8 @@ export const memory_search = tool({
       if (!fs.existsSync(root)) return { output: "Memory workspace is empty." }
 
       const queries = (args.queries ?? []).map((q) => q.trim())
+      if (queries.length > 64 || queries.reduce((sum, q) => sum + Buffer.byteLength(q), 0) > 8192)
+        return { output: "memory_search error: at most 64 queries and 8192 query bytes are supported." }
       if (args.queries && (queries.length === 0 || queries.some((q) => q.length === 0))) {
         return { output: "memory_search error: queries must be non-empty strings." }
       }
@@ -528,51 +526,68 @@ export const memory_search = tool({
         return { output: "memory_search error: a query is empty after normalization." }
       }
 
-      // codex: collect ALL matches, sort by (path, line), then page by cursor.
-      const all: SearchMatch[] = []
+      const startIndex = args.cursor === undefined ? 0 : Number(args.cursor)
+      if (
+        !Number.isSafeInteger(startIndex) ||
+        startIndex < 0 ||
+        (args.cursor !== undefined && String(startIndex) !== args.cursor.trim())
+      )
+        return { output: `memory_search error: invalid cursor "${args.cursor}" (must be a non-negative integer).` }
+      const pageMatches: SearchMatch[] = []
+      const pageSize = args.max_results ?? SEARCH_MAX_RESULTS
+      let count = 0
+      let pageBytes = 0
+      let pageFull = false
+      files.sort((a, b) => comparePathNames(a.rel, b.rel))
       for (const f of files) {
+        await yieldToHost()
+        ctx.abort?.throwIfAborted()
         let content: string
         try {
-          content = readRegularFileNoFollow(f.abs).content.toString("utf8")
+          content = readRegularFileNoFollow(safeResolveUnderRoot(root, f.rel)).content.toString("utf8")
         } catch {
           continue
         }
         if (content.includes("\u0000")) continue // binary, like codex's InvalidData skip
-        searchFileContent(
-          f,
-          content.split(/\r?\n/),
-          queries,
+        const lines = content.split(/\r?\n/)
+        await searchFileContent(
+          lines,
           preparedQueries,
           mode,
           args.line_count ?? 1,
-          args.context_lines ?? 0,
           caseSensitive,
           normalized,
-          all,
+          ctx.abort,
+          (start, end, flags) => {
+            if (count++ < startIndex || pageFull || pageMatches.length >= pageSize) return
+            const match = {
+              path: f.rel,
+              match_line_number: start + 1,
+              ...searchSnippet(lines, start, end, args.context_lines ?? 0),
+              matched_queries: flags ? queries.filter((_, i) => flags[i]) : queries,
+            }
+            // Account for both the display text and persisted match metadata.
+            const size = Buffer.byteLength(JSON.stringify(match)) + Buffer.byteLength(renderMatch(match)) + 1
+            if (pageMatches.length && pageBytes + size > SEARCH_PAGE_BYTES) {
+              pageFull = true
+              return
+            }
+            pageBytes += size
+            pageMatches.push(match)
+          },
         )
       }
-      all.sort((a, b) => comparePathNames(a.path, b.path) || a.match_line_number - b.match_line_number)
-
-      let startIndex = 0
-      if (args.cursor !== undefined) {
-        startIndex = Number.parseInt(args.cursor, 10)
-        if (!Number.isInteger(startIndex) || startIndex < 0 || String(startIndex) !== args.cursor.trim()) {
-          return { output: `memory_search error: invalid cursor "${args.cursor}" (must be a non-negative integer).` }
-        }
-        if (startIndex > all.length) {
-          return { output: `memory_search error: cursor ${startIndex} exceeds result count ${all.length}.` }
-        }
-      }
-      const endIndex = Math.min(startIndex + (args.max_results ?? SEARCH_MAX_RESULTS), all.length)
-      const pageMatches = all.slice(startIndex, endIndex)
-      const nextCursor = endIndex < all.length ? String(endIndex) : null
+      if (startIndex > count)
+        return { output: `memory_search error: cursor ${startIndex} exceeds result count ${count}.` }
+      const endIndex = startIndex + pageMatches.length
+      const nextCursor = endIndex < count ? String(endIndex) : null
       const truncated = nextCursor !== null
 
       const label = queries.map((q) => `"${q}"`).join(", ")
-      if (all.length === 0) return { output: `No matches for ${label}${rangeLabel}.` }
+      if (count === 0) return { output: `No matches for ${label}${rangeLabel}.` }
       return {
         output:
-          `${pageMatches.length} of ${all.length} match(es) for ${label}${rangeLabel}` +
+          `${pageMatches.length} of ${count} match(es) for ${label}${rangeLabel}` +
           `${truncated ? ` (more available; pass cursor=${nextCursor})` : ""}:\n` +
           pageMatches.map(renderMatch).join("\n"),
         metadata: {
