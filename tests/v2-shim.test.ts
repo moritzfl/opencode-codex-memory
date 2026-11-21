@@ -44,7 +44,12 @@ const ASSISTANT_TOOL_MSG = {
         status: "completed",
         input: { code: 'return await tools.memory_read({path: "MEMORY.md"});' },
         content: [{ type: "text", text: "# memories" }],
-        metadata: { toolCalls: [{ tool: "memory_read", status: "completed", input: { path: "MEMORY.md" } }] },
+        metadata: {
+          toolCalls: [
+            { tool: "memory_read", status: "completed", input: { path: "MEMORY.md" } },
+            { tool: "search", status: "error", input: { query: "x" } },
+          ],
+        },
       },
     },
     { type: "text", text: "done <memory-citation><session_ids><id>ses_abc</id></session_ids></memory-citation>" },
@@ -166,11 +171,20 @@ describe("adaptV2Messages", () => {
     expect(rows[0]).toEqual({ info: { role: "user" }, parts: [{ type: "text", text: "hello" }] })
     expect(rows[2].info?.role).toBe("system")
     const parts = rows[1].parts as any[]
-    // execute wrapper expands to per-tool rows; text kept; reasoning dropped.
+    // One program result, two nested calls with independently recorded statuses.
     expect(parts[0]).toEqual({
       type: "tool",
-      tool: "memory_read",
-      state: { input: { path: "MEMORY.md" }, output: "# memories" },
+      tool: "execute",
+      state: {
+        input: {
+          program: { code: 'return await tools.memory_read({path: "MEMORY.md"});' },
+          nestedCalls: [
+            { tool: "memory_read", status: "completed", input: { path: "MEMORY.md" } },
+            { tool: "search", status: "error", input: { query: "x" } },
+          ],
+        },
+        output: "# memories",
+      },
     })
     expect(parts[1]).toEqual({
       type: "text",
@@ -181,6 +195,24 @@ describe("adaptV2Messages", () => {
 
   it("returns [] for non-arrays", () => {
     expect(adaptV2Messages(null)).toEqual([])
+  })
+
+  it("retains the structured failure message without copying the raw provider response", () => {
+    const [row] = adaptV2Messages([
+      {
+        type: "assistant",
+        content: [
+          {
+            type: "tool",
+            name: "read",
+            state: {
+              error: { type: "Tool.Error", message: "file missing", response: { body: "raw response" } },
+            },
+          },
+        ],
+      },
+    ])
+    expect(row.parts).toEqual([{ type: "tool", tool: "read", state: { error: "file missing" } }])
   })
 })
 

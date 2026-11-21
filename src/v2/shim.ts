@@ -202,35 +202,26 @@ export function adaptV2Messages(msgs: unknown): Array<{ info?: { role?: string }
         if (p.type === "text") parts.push({ type: "text", text: p.text })
         else if (p.type === "reasoning") parts.push({ type: "reasoning" })
         else if (p.type === "tool") {
-          // The codemode `execute` wrapper runs code that calls the real
-          // tools; expand its toolCalls so the transcript keeps V1's
-          // per-tool granularity ([tool: name] input/output).
-          const calls = (p.state as any)?.metadata?.toolCalls ?? (p as any)?.metadata?.toolCalls
-          if (p.name === "execute" && Array.isArray(calls) && calls.length > 0) {
-            const outputText = joinTextParts((p.state as any)?.content)
-            for (const c of calls) {
-              parts.push({
-                type: "tool",
-                tool: c.tool ?? "execute",
-                state: {
-                  input: c.input ?? (p.state as any)?.input,
-                  ...(outputText ? { output: outputText } : {}),
-                },
-              })
-            }
-          } else {
-            const st = (p.state as any) ?? {}
-            const outputText = joinTextParts(st.content)
-            parts.push({
-              type: "tool",
-              tool: p.name ?? "unknown",
-              state: {
-                ...(st.input !== undefined ? { input: st.input } : {}),
-                ...(outputText ? { output: outputText } : {}),
-                ...(typeof st.error === "string" ? { error: st.error } : {}),
-              },
-            })
-          }
+          const st = p.state ?? {}
+          const calls = st.metadata?.toolCalls ?? p.metadata?.toolCalls
+          // Code Mode stores one program result. Nested calls only have a
+          // name, inputs and status; the result cannot be attributed to them.
+          const input =
+            p.name === "execute" && Array.isArray(calls) && calls.length
+              ? { program: st.input, nestedCalls: calls.map(({ tool, input, status }) => ({ tool, input, status })) }
+              : st.input
+          const message = typeof st.error === "string" ? st.error : st.error?.message
+          const error = typeof message === "string" ? message.slice(0, 4000) : undefined
+          const content = joinTextParts(st.content)
+          parts.push({
+            type: "tool",
+            tool: p.name ?? "unknown",
+            state: {
+              ...(input !== undefined ? { input } : {}),
+              ...(content ? { output: error ? `${content}\n[error] ${error}` : content } : {}),
+              ...(error ? { error } : {}),
+            },
+          })
         }
       }
       rows.push({ info: { role: "assistant" }, parts })

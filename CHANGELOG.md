@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import no longer erases the previous good copy.
 - Consolidation preserves extension notes deleted or edited during a run in
   the next workspace diff, including the content that needs to be forgotten.
+- OpenCode 2 extraction preserves structured tool errors and records Code Mode
+  results once, alongside their nested calls and statuses.
 - OpenCode 2 now stops consolidation helpers through their creating location
   and uses native removal when available. A missing remote row no longer
   releases a writer whose local shutdown could not be confirmed.
