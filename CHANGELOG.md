@@ -7,31 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-21
+
 ### Fixed
 
-- Opening another location can no longer redirect an active
-  memory job to a different home or close its database handles.
-- Reset checks both writers' leases and blocks new consolidation claims until
-  the wipe finishes, including when another OpenCode process shares the home.
-- Dual-write exports only the configured memory version to Codex. An unreadable
-  import no longer erases the previous good copy.
-- Consolidation preserves extension notes deleted or edited during a run in
-  the next workspace diff, including the content that needs to be forgotten.
-- OpenCode 2 extraction preserves structured tool errors and records Code Mode
-  results once, alongside their nested calls and statuses.
-- Timed-out OpenCode 2 history and discovery requests stop fetching pages;
-  stalled context reads are shared and bounded.
-- Extraction on OpenCode 2.0.3 uses the host's native generator rather than
-  the newer HTTP generation route.
-- Extraction fits each attempt to the model's reported context and input
-  limits, including when a fallback model has a smaller window.
-- Memory search bounds snippets and page size, yields during large searches,
-  and counts overlapping query windows without retaining every match.
-- OpenCode 2 now stops consolidation helpers through their creating location
-  and uses native removal when available. A missing remote row no longer
-  releases a writer whose local shutdown could not be confirmed.
-- Disabling learning preserves a session's pollution flag. Restoring learning
-  requires approval, including on OpenCode 2 hosts with permission prompts.
+- Opening a location with conflicting memory settings no longer redirects an
+  active job or closes its database. OpenCode 2 stops consolidation helpers
+  through their original location before releasing the writer lease.
+- Reset refuses to run while either memory version has an active consolidation
+  lease, even in another process. New writers wait until the wipe finishes.
+- With dual-write enabled, only the configured read version exports to Codex.
+  An unreadable import keeps its last good copy. Extension notes edited or
+  deleted during consolidation remain visible to the next run.
+- A session excluded after external tool use still requires approval to resume
+  learning, even if learning was disabled in between. MCP tools are checked
+  against the calling location's server list.
+- Extraction fits transcripts to each model's input window, including smaller
+  fallback models. On OpenCode 2 it preserves structured tool errors, records
+  each Code Mode result once, and uses native generation on 2.0.3.
+- Timed-out OpenCode 2 history and discovery requests stop fetching pages.
+  Large memory searches yield to the host and return bounded snippets while
+  preserving exact match counts and pagination.
 
 ## [0.10.1] - 2026-11-01
 
@@ -1084,7 +1080,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public development release. All stages (0–5) implemented and tested. Ready for manual end-to-end testing against the official opencode release.
 
-[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.12...v0.10.0
 [0.9.12]: https://github.com/moritzfl/opencode-codex-memory/compare/v0.9.11...v0.9.12
