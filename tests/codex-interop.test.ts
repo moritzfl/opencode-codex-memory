@@ -168,6 +168,19 @@ describe("syncCodexImport", () => {
     expect(fs.readdirSync(resDir).sort()).toEqual(["MEMORY.md", "memory_summary.md"])
   })
 
+  it("preserves the entire last import when an artifact cannot be read", () => {
+    const { syncCodexImport } = interop()
+    seedCodexMemory()
+    syncCodexImport(CODEX_MEM, "v1")
+    fs.unlinkSync(path.join(CODEX_MEM, "MEMORY.md"))
+    fs.unlinkSync(path.join(CODEX_MEM, "memory_summary.md"))
+    fs.mkdirSync(path.join(CODEX_MEM, "memory_summary.md"))
+    expect(() => syncCodexImport(CODEX_MEM, "v1")).toThrow()
+    const res = path.join(pluginMemoryRoot(), "extensions/codex_import/resources/codex")
+    expect(fs.readFileSync(path.join(res, "MEMORY.md"), "utf8")).toContain("codex fact")
+    expect(fs.readFileSync(path.join(res, "memory_summary.md"), "utf8")).toContain("codex summary")
+  })
+
   it("replaces a symlink at a target path instead of writing through it", () => {
     const { syncCodexImport } = interop()
     seedCodexMemory()
@@ -531,6 +544,29 @@ describe("plugin Memory V2 writer", () => {
     const { applyPluginOptions } = require("../src/index.js")
     applyPluginOptions({ version: "v2" })
   }
+
+  it.each(["v1", "v2"] as const)("exports only the %s read default regardless of writer order", (version) => {
+    const { applyPluginOptions } = require("../src/index.js")
+    const { withMemoryVersion } = require("../src/memory-version.js")
+    const { exportToCodexMemory } = interop()
+    applyPluginOptions({ version, dual_write: true })
+    fs.mkdirSync(CODEX_MEM, { recursive: true })
+    for (const writer of ["v1", "v2"])
+      withMemoryVersion(writer, () => {
+        fs.mkdirSync(pluginMemoryRoot(), { recursive: true })
+        fs.writeFileSync(path.join(pluginMemoryRoot(), "memory_summary.md"), VALID_V2 + writer)
+        if (writer === "v1") fs.writeFileSync(path.join(pluginMemoryRoot(), "MEMORY.md"), "handbook")
+      })
+    for (const order of [
+      ["v1", "v2"],
+      ["v2", "v1"],
+    ]) {
+      for (const writer of order) withMemoryVersion(writer, () => exportToCodexMemory(CODEX_MEM, "v1"))
+      const dest = path.join(CODEX_MEM, "extensions/opencode_import/resources/opencode")
+      expect(fs.readFileSync(path.join(dest, "memory_summary.md"), "utf8")).toBe(VALID_V2 + version)
+      expect(fs.existsSync(path.join(dest, "MEMORY.md"))).toBe(version === "v1")
+    }
+  })
 
   it("copies a Codex v1 handbook into the v2 workspace without converting it", () => {
     const { syncCodexImport } = interop()

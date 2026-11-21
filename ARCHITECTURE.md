@@ -352,7 +352,7 @@ schema change.
 
 Two-way exchange of _consolidated_ global memory:
 
-Exchange runs for each active writer. A Memory V2 writer receives the same
+Imports run for each active writer; only the configured read version exports. A Memory V2 writer receives the same
 byte copies under `memories_v2/extensions/` and is instructed to fold them
 into `memory_summary.md` rather than create a handbook. Dual-write runs the
 copy in both workspaces. Claude import below works the same way.

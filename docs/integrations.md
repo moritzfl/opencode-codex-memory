@@ -11,7 +11,8 @@ have learned. Both are off by default.
 | Codex CLI sharing  | Import, export, or both   | Memory V1 and Memory V2 |
 | Claude Code import | Claude Code → this plugin | Memory V1 and Memory V2 |
 
-With dual-write enabled, Codex exchange runs for each active writer.
+With dual-write enabled, both writers import, but only the configured read
+version exports to the shared Codex destination.
 A Memory V2 writer folds the copies into its summary and does not create a
 handbook. Claude imports run for each active writer.
 
@@ -74,11 +75,11 @@ either side, to fold claims into `memory_summary.md` and not to create
 
 All fields are inside `codex_interop`:
 
-| Option       | Default                             | Meaning                                                               |
-| ------------ | ----------------------------------- | --------------------------------------------------------------------- |
-| `import`     | `false`                             | Bring Codex's selected memory store into each active writer.          |
-| `export`     | `false`                             | Offer each active writer's validated memory to that same Codex store. |
-| `codex_home` | `$CODEX_HOME`, otherwise `~/.codex` | Codex CLI's data location.                                            |
+| Option       | Default                             | Meaning                                                        |
+| ------------ | ----------------------------------- | -------------------------------------------------------------- |
+| `import`     | `false`                             | Bring Codex's selected memory store into each active writer.   |
+| `export`     | `false`                             | Offer the configured read version's validated memory to Codex. |
+| `codex_home` | `$CODEX_HOME`, otherwise `~/.codex` | Codex CLI's data location.                                     |
 
 The exchange instructions use `[from codex]` / `[from opencode]` tags and tell
 each consolidator to skip re-importing the other side's content, limiting

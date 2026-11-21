@@ -141,9 +141,9 @@ Keep `dual_write: true` while evaluating Memory V2 if you want Memory V1 to
 continue learning too. Once you want only Memory V2 to learn, set
 `dual_write: false` and restart the server.
 
-**Codex CLI sharing** and [Claude Code import](integrations.md) both run for
+**Codex CLI imports** and [Claude Code import](integrations.md) both run for
 each active writer. A Memory V2 writer receives copies under its extensions
-folder and folds them into the summary. It does not create a handbook.
+folder and folds them into the summary. Only the configured `version` exports.
 
 ## Start directly with Memory V2
 

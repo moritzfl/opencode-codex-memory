@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory job to a different home or close its database handles.
 - Reset checks both writers' leases and blocks new consolidation claims until
   the wipe finishes, including when another OpenCode process shares the home.
+- Dual-write exports only the configured memory version to Codex. An unreadable
+  import no longer erases the previous good copy.
 - OpenCode 2 now stops consolidation helpers through their creating location
   and uses native removal when available. A missing remote row no longer
   releases a writer whose local shutdown could not be confirmed.

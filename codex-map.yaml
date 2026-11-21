@@ -537,7 +537,9 @@ mappings:
       instruction-level, matching codex's own all-instruction content rules
       (see ARCHITECTURE.md D6). Default-off via the opencode-specific
       codex_interop plugin option.
-      Each active writer exchanges. A V2 writer copies the same Codex artifacts
+      Each active writer imports; only the configured read version exports to
+      the shared destination. Only confirmed source absence signals forgetting.
+      A V2 writer copies the same Codex artifacts
       into memories_v2/extensions and is instructed to fold them into
       memory_summary.md; it does not create MEMORY.md. Export from a V2 writer
       offers a valid summary only. The Codex side may be v1 or v2. No

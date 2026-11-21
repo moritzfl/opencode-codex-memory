@@ -2,6 +2,7 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 import { currentMemoryVersion } from "./memory-version.js"
+import { pluginOptions } from "./options.js"
 import { memoryRoot } from "./paths.js"
 import { isValidV2Summary } from "./workspace.js"
 import { readRegularFileNoFollow, safeResolveUnderRoot, writeRegularFileNoFollow } from "./path-guard.js"
@@ -491,7 +492,7 @@ function classifyCodexInterop(opts: CodexInteropOptions, warn: boolean): CodexIn
       codexMemoryRoot,
       codexVersion: version.version,
       importEnabled: opts.import,
-      exportEnabled: opts.export,
+      exportEnabled: opts.export && currentMemoryVersion() === pluginOptions.version,
     },
   }
 }
@@ -520,6 +521,16 @@ function readIfFile(file: string): Buffer | null {
     return readRegularFileNoFollow(file).content
   } catch {
     return null
+  }
+}
+
+/** Only a confirmed missing artifact authorizes forgetting its previous copy. */
+function readSource(file: string): Buffer | null {
+  try {
+    return readRegularFileNoFollow(file).content
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+    throw error
   }
 }
 
@@ -575,8 +586,9 @@ function syncExtension(
   const extensionDir = safeResolveUnderRoot(targetRoot, path.join("extensions", extension))
   const resDir = safeResolveUnderRoot(targetRoot, path.join("extensions", extension, "resources", subdir))
 
-  const sourceAvailable = artifacts.some((name) => readIfFile(path.join(sourceRoot, name)) !== null)
-  if (!sourceAvailable) {
+  const sources = artifacts.map((name) => [name, readSource(path.join(sourceRoot, name))] as const)
+  if (!fs.statSync(sourceRoot).isDirectory()) return false
+  if (sources.every(([, content]) => content === null)) {
     // Root exists but the artifacts for this store are gone (e.g. codex memory
     // cleared, or a v2 root with no summary). Drop our copies so the workspace
     // diff carries the deletion signal. Keep instructions.md — prune and
@@ -589,8 +601,7 @@ function syncExtension(
   let changed = false
   if (writeIfChanged(path.join(extensionDir, "instructions.md"), instructions)) changed = true
   const active = new Set(artifacts)
-  for (const name of artifacts) {
-    const source = readIfFile(path.join(sourceRoot, name))
+  for (const [name, source] of sources) {
     const target = path.join(resDir, name)
     if (source === null) {
       if (removeIfPresent(target)) changed = true
@@ -654,6 +665,7 @@ function exportPlan(codexVersion: CodexMemoryVersion): { artifacts: readonly str
 }
 
 export function exportToCodexMemory(codexMemoryRoot: string, version: CodexMemoryVersion): boolean {
+  if (currentMemoryVersion() !== pluginOptions.version) return false
   let rootStat
   try {
     rootStat = fs.statSync(codexMemoryRoot)
