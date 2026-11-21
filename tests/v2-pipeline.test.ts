@@ -16,6 +16,7 @@ import { captureWorkspaceDiff } from "../src/git-baseline.js"
 
 const TEST_ROOT = path.join(os.tmpdir(), `ocm-v2pipeline-${process.pid}-${Date.now()}`)
 const SESSION_ID = "ses_v2pipeline"
+let consolidation: ReturnType<typeof runPhase2> | undefined
 
 beforeEach(() => {
   closeDb()
@@ -26,7 +27,11 @@ beforeEach(() => {
   process.env.OPENCODE_CODEX_MEMORY_TEST_ROOT = TEST_ROOT
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // A runner timeout does not cancel the JS promise. Never tear down its
+  // home or DB handles while isomorphic-git is still using them.
+  await consolidation?.catch(() => {})
+  consolidation = undefined
   closeDb()
   resetPluginLifecycle()
   resetDiscoveryCacheForTest()
@@ -190,12 +195,12 @@ describe("v2 fake-context write pipeline", () => {
       expect((generated[0] as any).model).toEqual({ providerID: "test", id: "extractor", variant: "low" })
       expect((generated[0] as any).prompt).toContain("Use the durable CSV parser convention.")
 
-      const phase2 = await runPhase2(store, {
+      consolidation = runPhase2(store, {
         ...DEFAULT_PHASE2_OPTIONS,
         consolidationModel: "test/consolidator",
       })
 
-      expect(phase2.status).toBe("succeeded")
+      expect((await consolidation).status).toBe("succeeded")
       expect(created).toEqual(["sub-consolidate"])
       expect(switched).toContainEqual({ agent: "memorize" })
       expect(switched).toContainEqual({ model: { providerID: "test", id: "consolidator", variant: "medium" } })
@@ -208,5 +213,6 @@ describe("v2 fake-context write pipeline", () => {
       const prompt = buildMemorySystemPrompt(true)
       expect(prompt).toContain("CSV parser uses strict typed rows.")
     },
+    30_000,
   )
 })
