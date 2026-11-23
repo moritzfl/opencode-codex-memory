@@ -449,7 +449,7 @@ async function attach(ctx: V2Context): Promise<() => void> {
         // Older hosts ignore the type filter and deliver the full stream.
         const subscription = {
           signal: eventAbort.signal,
-          types: ["session.text.ended", "session.execution.succeeded", "session.deleted"],
+          types: ["session.text.ended", "session.execution.succeeded", "session.deleted"] as const,
         }
         for await (const raw of ctx.event.subscribe(subscription)) {
           const e = raw as { type?: string } & Record<string, any>
