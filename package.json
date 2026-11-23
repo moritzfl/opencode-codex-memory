@@ -79,7 +79,7 @@
     "@opentui/solid": "0.5.10",
     "@types/bun": "^1.1.0",
     "prettier": "^3.9.10",
-    "solid-js": "1.9.15",
+    "solid-js": "1.9.20",
     "typescript": "^5.5.0"
   },
   "peerDependencies": {
