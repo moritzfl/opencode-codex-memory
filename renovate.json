@@ -1,4 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"]
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "matchManagers": ["bun"],
+      "matchDepTypes": ["dependencies", "devDependencies"],
+      "matchPackageNames": ["@opencode/client", "@opencode/plugin", "@opencode/theme"],
+      "groupName": "OpenCode 2 SDK"
+    },
+    {
+      "matchManagers": ["bun"],
+      "matchDepTypes": ["devDependencies"],
+      "matchPackageNames": ["@opentui/core", "@opentui/solid"],
+      "groupName": "OpenTUI"
+    }
+  ]
 }

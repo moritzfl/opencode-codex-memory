@@ -4,6 +4,12 @@ import { isModelSelectionUnavailable, retryModelSelection } from "../src/v2/mode
 
 const model = { providerID: "openai", id: "gpt-6-luna" }
 const unavailable = { _tag: "InvalidRequestError", message: "Model unavailable: openai/gpt-6-luna" }
+const notFound = {
+  _tag: "ModelNotFoundError",
+  providerID: model.providerID,
+  modelID: model.id,
+  message: "Model not found: openai/gpt-6-luna",
+}
 
 beforeEach(resetDiagnosticsForTest)
 
@@ -34,6 +40,12 @@ describe("V2 model startup readiness", () => {
     expect(isModelSelectionUnavailable(new Error("SDK error", { cause: pending }))).toBe(true)
   })
 
+  it("recognizes OpenCode 2.4 model-not-found errors only for the requested model", () => {
+    expect(isModelSelectionUnavailable({ error: notFound }, model)).toBe(true)
+    expect(isModelSelectionUnavailable({ ...notFound, _tag: "Generate.ModelNotFoundError" }, model)).toBe(true)
+    expect(isModelSelectionUnavailable(notFound)).toBe(false)
+  })
+
   it.each([
     new Error("fetch failed"),
     { _tag: "ServiceUnavailableError", message: unavailable.message },
@@ -42,6 +54,9 @@ describe("V2 model startup readiness", () => {
     { ...unavailable, message: "Variant unavailable for openai/gpt-6-luna: low" },
     { ...unavailable, message: "Model unavailable: openai/different" },
     { ...unavailable, message: "Bad schema" },
+    { ...notFound, providerID: "other" },
+    { ...notFound, modelID: "different" },
+    { ...notFound, _tag: "ProviderRequestError", status: 404 },
     { status: 429, message: "Rate limit" },
     { status: 401, message: "Unauthorized" },
   ])("does not replay transport/provider/config errors (%j)", async (error) => {

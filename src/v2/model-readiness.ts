@@ -22,6 +22,14 @@ export function isModelSelectionUnavailable(error: unknown, model?: ModelRef): b
     const tag = current._tag ?? current.name
     if (["InvalidRequestError", "Generate.ModelSelectionError"].includes(tag) && current.message === message)
       return true
+    // OpenCode 2.4 reports missing explicit models separately from provider failures.
+    if (
+      model &&
+      (tag === "ModelNotFoundError" || tag === "Generate.ModelNotFoundError") &&
+      current.providerID === model.providerID &&
+      current.modelID === model.id
+    )
+      return true
     if (
       tag === "ServiceUnavailableError" &&
       current.service === "plugin" &&

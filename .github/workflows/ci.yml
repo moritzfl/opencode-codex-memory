@@ -47,7 +47,7 @@ jobs:
             check: contract
           - package: "@opencode/cli"
             floor: 2.0.3
-            pinned: 2.3.0
+            pinned: 2.4.1
             major: 2
             check: contract:v2
     steps:

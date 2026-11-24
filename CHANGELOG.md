@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On OpenCode 2.4, memory extraction waits for the requested model to register
+  at startup instead of failing on the host's new model-not-found error.
+
 ## [0.10.2] - 2026-11-21
 
 ### Fixed

@@ -75,8 +75,8 @@
   "devDependencies": {
     "@opencode/plugin": "2.4.1",
     "@opencode/theme": "2.4.1",
-    "@opentui/core": "0.5.10",
-    "@opentui/solid": "0.5.10",
+    "@opentui/core": "0.9.9",
+    "@opentui/solid": "0.9.9",
     "@types/bun": "^1.1.0",
     "prettier": "^3.9.10",
     "solid-js": "1.9.20",
