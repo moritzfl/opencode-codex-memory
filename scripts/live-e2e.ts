@@ -58,6 +58,7 @@ const FACTS = [
   {
     title: "e2e-csv-util",
     fact: "E2E_FACT_CSV: built a TypeScript CSV parser returning typed rows under strict mode",
+    recalled: /\b000742\b|\bCSV\b[\s\S]*\bleading zero(?:e?s)?\b|\bleading zero(?:e?s)?\b[\s\S]*\bCSV\b/i,
     prompt:
       "Implement src/csv.ts and tests/csv.test.ts using TypeScript and bun:test. Export parseCsv(text: string): string[][], supporting commas, newlines, quoted fields, doubled quotes, and CRLF. Project decision E2E_FACT_CSV: warehouse identifiers such as 000742 must always remain strings with leading zeroes; never infer numbers, trim fields, or silently repair malformed quotes. Throw on unterminated quotes. Add regression tests and run them. Use file/shell tools for this implementation, but do not call memory tools; background learning handles this conversation.",
     followup:
@@ -67,6 +68,7 @@ const FACTS = [
   {
     title: "e2e-result-type",
     fact: "E2E_FACT_RESULT: refactored error handling to a Result type instead of throwing",
+    recalled: /\bLEDGER_(?:NEGATIVE_AMOUNT|INVALID_AMOUNT)\b/i,
     prompt:
       "Implement src/result.ts and tests/result.test.ts using TypeScript and bun:test. Export Result<T,E> = {ok:true,value:T}|{ok:false,error:E} and parseAmount(text:string): Result<number,string>. Project decision E2E_FACT_RESULT: negative amounts return error code LEDGER_NEGATIVE_AMOUNT, malformed amounts return LEDGER_INVALID_AMOUNT, and callers must never catch exceptions. This is our ledger UI's permanent error contract. Add tests for -1, nonsense, and 42; run them. Use file/shell tools, but no memory tool calls.",
     followup:
@@ -76,6 +78,7 @@ const FACTS = [
   {
     title: "e2e-readme",
     fact: "E2E_FACT_README: wrote a README section explaining the two-phase memory plugin",
+    recalled: /\bbun test tests\/csv\.test\.ts tests\/result\.test\.ts\b/i,
     prompt:
       "Update README.md with our permanent contribution workflow. Project decision E2E_FACT_README: this repo uses Bun only; run bun test tests/csv.test.ts tests/result.test.ts before every change, preserve CSV string identifiers, and keep ledger error codes stable. Document that the memory plugin uses Phase 1 extraction then Phase 2 consolidation. Read the implementation and run that exact verification command before documenting success. No memory tool calls.",
     followup:
@@ -431,27 +434,18 @@ async function main() {
       log("phase1", `${rows.length} stage1 row(s) after extra trigger`)
     }
 
-    const blob = rows.map((r) => `${r.raw_memory}\n${r.rollout_summary}`).join("\n")
-    const factHits = FACTS.filter((f) => blob.includes(f.fact.split(":")[0]!))
+    const workRows = rows.filter((row) => workIds.includes(row.session_id))
+    // Extraction can paraphrase the transcript. Require a fixture-specific
+    // detail from a work session, not the test prompt's arbitrary marker.
+    const learned = FACTS.filter((fact) =>
+      workRows.some((row) => fact.recalled.test(`${row.raw_memory}\n${row.rollout_summary}`)),
+    )
+    check(learned.length > 0, "phase1", `stage1 output retains concrete work facts (${learned.length}/${FACTS.length})`)
     if (sandbox.memoryVersion === "v2") {
-      const paraphrased = /csv|result type|readme|typed rows|two-phase/i.test(blob)
       check(
-        rows.some((r) => (r.rollout_summary ?? "").trim().length > 0),
+        workRows.some((r) => (r.rollout_summary ?? "").trim().length > 0),
         "phase1",
         "v2 rows have non-empty rollout_summary",
-      )
-      check(
-        factHits.length >= 1 || paraphrased,
-        "phase1",
-        factHits.length >= 1
-          ? `stage1 summaries mention work facts (${factHits.length}/${FACTS.length} markers)`
-          : `stage1 summaries paraphrase work facts (markers=${factHits.length}; v2 may omit E2E_FACT_* ids)`,
-      )
-    } else {
-      check(
-        factHits.length >= 1,
-        "phase1",
-        `stage1 output mentions work facts (${factHits.length}/${FACTS.length} markers)`,
       )
     }
 
