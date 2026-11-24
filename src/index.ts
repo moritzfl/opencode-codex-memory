@@ -22,7 +22,7 @@ import { beginPluginShutdown, isPluginShuttingDown, resetPluginLifecycle } from 
 import { externalContextClassifier, hostMcpStatus } from "./host-client.js"
 import { recordDiagnostic } from "./diagnostics.js"
 import { loadBundledAgentDefinitions, recordAgentConfig, resetAgentHealth } from "./agent-health.js"
-import type { PluginInput, PluginOptions } from "@opencode-ai/plugin"
+import type { PluginInput, PluginOptions, ToolDefinition } from "@opencode-ai/plugin"
 import path from "path"
 
 const hosts: PluginInput[] = []
@@ -447,6 +447,9 @@ export function injectAgentDefinitions(config: { agent?: Record<string, unknown>
   recordAgentConfig(config, true, defs)
 }
 
+type MemoryTools = Record<"memory_reset" | "memory_inspect" | "memory_mode", ToolDefinition> &
+  Partial<Record<"memory_read" | "memory_search" | "memory_list" | "memory_add_note", ToolDefinition>>
+
 function buildHooks(client: PluginInput["client"]) {
   const classifyExternalContextTool = externalContextClassifier((signal) => hostMcpStatus(client, signal))
   const base = {
@@ -697,7 +700,7 @@ function buildHooks(client: PluginInput["client"]) {
   // read/search/list/add-note tools require BOTH use_memories and
   // dedicated_tools, mirroring codex's MemoriesExtension: use_memories=false
   // disables the whole extension including its tools (extension.rs).
-  const tool =
+  const tool: MemoryTools =
     pluginOptions.use_memories && pluginOptions.dedicated_tools
       ? {
           memory_read,

@@ -140,9 +140,8 @@ async function main(): Promise<number> {
   // Every bare specifier the plugin imports at runtime must resolve from the
   // installed copy. Optional peers (V2 SDK, opentui) are intentionally absent,
   // so probe the entrypoints that need only runtime dependencies: the V1 entry
-  // and the V2 tool adapter (whose static `zod` import is the exact
-  // regression). Exercise hooks/assets and tool schemas too: successful
-  // imports alone cannot establish that the installed plugin works.
+  // and the V2 tool adapter. Exercise hooks/assets and the SDK-owned tool
+  // schemas too: successful imports alone cannot prove the installed plugin works.
   const toolsModule = path.join(pluginDir, "dist", "src", "v2", "tools.js")
   if (!fs.existsSync(toolsModule)) fail("packed V2 tool adapter missing", tempDirs)
   const probe = `
@@ -179,12 +178,12 @@ async function main(): Promise<number> {
     } catch (e) { report.errors.push("V1 hooks/assets/tui: " + e.message); }
     try {
       const { buildV2Tools } = await import(${JSON.stringify(toolsModule)});
-      const { z } = await import("zod");
+      const { tool: sdkTool } = await import("@opencode-ai/plugin");
       const tools = buildV2Tools();
       assert.equal(tools.length, 6);
       for (const tool of tools) {
         assert.equal(tool.options.codemode, false);
-        assert.equal(z.toJSONSchema(tool.input).type, "object");
+        assert.equal(sdkTool.schema.toJSONSchema(tool.input).type, "object");
       }
       for (const [name, args, expected] of [
         ["memory_read", { path: "memory_summary.md" }, "smoke memory"],

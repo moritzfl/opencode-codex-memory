@@ -1,6 +1,6 @@
 import fs from "fs"
 import path from "path"
-import { tool } from "@opencode-ai/plugin"
+import { tool, type ToolDefinition } from "@opencode-ai/plugin"
 import {
   allMemoryRoots,
   memoryDbPath,
@@ -232,7 +232,7 @@ export function performMemoryReset(): { ok: boolean; message: string } {
   }
 }
 
-export const memory_reset = tool({
+export const memory_reset: ToolDefinition = tool({
   description:
     "Reset all persistent memory. Wipes the plugin's extracted memories and jobs tables and the entire " +
     "contents of the memories and memories_v2 directories (including git history). Per-session memory modes are preserved, " +
@@ -279,7 +279,7 @@ function phase2NoteLines(phase2: { status: string; last_error: string | null; fi
   return []
 }
 
-export const memory_inspect = tool({
+export const memory_inspect: ToolDefinition = tool({
   description:
     "Inspect the current memory state. Returns: stage1_outputs count, stage-1 job status " +
     "breakdown, failure classes (backoff / provider_capacity / other_exhausted), recent errors, " +
@@ -464,7 +464,7 @@ function inspect(args: { min_consolidated_threads?: number }, ctx?: { sessionID?
   }
 }
 
-export const memory_mode = tool({
+export const memory_mode: ToolDefinition = tool({
   description:
     "Set the memory mode for the target session (current session by default). 'enabled' allows Phase 1 extraction. " +
     "'disabled' excludes this session from extraction. 'polluted' marks it as having external context " +

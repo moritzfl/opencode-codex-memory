@@ -389,7 +389,13 @@ async function main(): Promise<void> {
           const consumer = path.join(v1Install, "consumer.mts")
           fs.writeFileSync(
             consumer,
-            'import plugin from "opencode-codex-memory"\nconst server = plugin.server\nif (typeof server !== "function") throw new Error("missing V1 server export")\n',
+            [
+              'import plugin from "opencode-codex-memory"',
+              'import { memory_read } from "opencode-codex-memory/tools/memory"',
+              'import { memory_mode } from "opencode-codex-memory/tools/control"',
+              "const server = plugin.server",
+              "const toolArgs = [memory_read.args, memory_mode.args]",
+            ].join("\n"),
           )
           const typecheck = await runQuiet(
             [
@@ -410,7 +416,7 @@ async function main(): Promise<void> {
           const typecheckOutput = typecheck.stderr || typecheck.stdout
           note(
             typecheck.code === 0,
-            `packed V1 declarations typecheck without V2 peers${typecheck.code === 0 ? "" : `: ${typecheckOutput.slice(-1000)}`}`,
+            `packed V1 server and tool declarations typecheck without V2 peers${typecheck.code === 0 ? "" : `: ${typecheckOutput.slice(-1000)}`}`,
           )
 
           // The actual cache does not install the V2 SDK peer. Boot that exact
@@ -525,19 +531,6 @@ async function main(): Promise<void> {
         )
         note(v2.code === 0, `packed artifact installs for V2${v2.code === 0 ? "" : `: ${v2.stderr.slice(-1000)}`}`)
         if (v2.code === 0) {
-          // zod is a static import of dist/src/v2/tools.js. Assert it resolves
-          // from the plugin's own directory, not via a hoisted copy.
-          const reachable = await runQuiet(
-            [
-              process.execPath,
-              "--input-type=module",
-              "-e",
-              "import('zod').then(() => process.exit(0)).catch(() => process.exit(1))",
-            ],
-            path.join(v2Install, "node_modules", "opencode-codex-memory"),
-          )
-          note(reachable.code === 0, "zod resolves from the installed plugin directory (no hoisted peer)")
-
           const loaded = await runQuiet(
             [
               process.execPath,

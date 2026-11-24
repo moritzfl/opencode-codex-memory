@@ -8,7 +8,7 @@ import {
   readRegularFileNoFollow,
   writeRegularFileNoFollow,
 } from "../src/path-guard.js"
-import { tool as defineTool } from "@opencode-ai/plugin"
+import { tool as defineTool, type ToolDefinition } from "@opencode-ai/plugin"
 import { withSessionMemoryVersion } from "../src/session-version.js"
 
 // Both host adapters call these definitions. Resolve once for the whole tool
@@ -25,7 +25,8 @@ const tool = Object.assign(sessionTool, { schema: defineTool.schema })
 
 const MAX_READ_BYTES = 256 * 1024
 
-export const memory_read = tool({
+// Keep public declarations on the SDK's type rather than a nested Zod import.
+export const memory_read: ToolDefinition = tool({
   description:
     "Read a file from the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*, etc.). " +
     "Paths are relative to the memory root and cannot escape it. Supports line_offset/max_lines for " +
@@ -131,7 +132,7 @@ function comparePathNames(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-export const memory_list = tool({
+export const memory_list: ToolDefinition = tool({
   description:
     "List the immediate entries of a directory in the persistent memory workspace, sorted by name, " +
     "with entry types. Hidden files and symlinks are skipped. Supports cursor pagination and listing " +
@@ -365,7 +366,7 @@ function renderMatch(m: SearchMatch): string {
   return `${header} (content from line ${m.content_start_line_number}):\n${m.content}`
 }
 
-export const memory_search = tool({
+export const memory_search: ToolDefinition = tool({
   description:
     "Search the persistent memory workspace (MEMORY.md, rollout_summaries/*, skills/*) for substring " +
     "matches. Supports multiple queries with match_mode: 'any' (a line matching any query), " +
@@ -609,7 +610,7 @@ export const memory_search = tool({
 
 const NOTES_DIR = "extensions/ad_hoc/notes"
 
-export const memory_add_note = tool({
+export const memory_add_note: ToolDefinition = tool({
   description:
     "Append a short ad-hoc note to the persistent memory workspace under extensions/ad_hoc/notes/. " +
     "Used when the user asks to remember something for future sessions.",

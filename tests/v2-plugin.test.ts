@@ -128,17 +128,21 @@ afterEach(() => {
 })
 
 describe("v2 setup", () => {
-  it("publishes zod as a runtime dependency and the V2 SDK as an optional peer", () => {
+  it("takes tool schemas from the V1 SDK and keeps the V2 SDK as an optional peer", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "..", "package.json"), "utf8")) as {
       dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+      optionalDependencies?: Record<string, string>
       peerDependencies?: Record<string, string>
       peerDependenciesMeta?: Record<string, { optional?: boolean }>
       exports?: Record<string, { import?: string }>
     }
+    expect(pkg.dependencies?.["@opencode-ai/plugin"]).toBeDefined()
+    for (const deps of [pkg.dependencies, pkg.devDependencies, pkg.optionalDependencies, pkg.peerDependencies]) {
+      expect(deps?.zod).toBeUndefined()
+    }
     expect(pkg.dependencies?.["@opencode/plugin"]).toBeUndefined()
     expect(pkg.peerDependencies?.["@opencode/plugin"]).toBe(">=2.0.3")
-    expect(pkg.dependencies?.zod).toBe("4.1.8")
-    expect(pkg.peerDependencies?.zod).toBeUndefined()
     expect(pkg.peerDependenciesMeta?.["@opencode/plugin"]?.optional).toBe(true)
     expect(pkg.exports?.["."]?.import).toBe("./dist/src/index.js")
     expect(pkg.exports?.["./server"]?.import).toBe("./dist/src/index.js")
@@ -149,8 +153,8 @@ describe("v2 setup", () => {
   /**
    * Regression guard for the shipped 0.9.5: zod was an optional peer, and the
    * plugin cache (`~/.cache/opencode/packages/<spec>/`, a bare `npm install`)
-   * never installs optional peers. `dist/src/v2/tools.js` statically imports
-   * zod, so V2 setup died with ERR_MODULE_NOT_FOUND. Every bare specifier the
+   * never installs optional peers. `dist/src/v2/tools.js` imported Zod directly,
+   * so V2 setup died with ERR_MODULE_NOT_FOUND. Every bare specifier the
    * shipped runtime graph imports must be a declared dependency (or a Node
    * builtin carried by the host runtime).
    */
@@ -218,9 +222,8 @@ describe("v2 setup", () => {
     for (const spec of [...bare].filter((spec) => hostProvided.has(spec))) {
       expect(pkg.peerDependencies?.[packageName(spec)]).toBeDefined()
     }
-    // The specific regression: zod must be reachable without the optional peer.
-    expect(bare.has("zod")).toBe(true)
-    expect(pkg.dependencies?.zod).toBeDefined()
+    // Both adapters use the V1 SDK's public tool.schema, not a second Zod pin.
+    expect(runtimePackages).not.toContain("zod")
   }, 30_000)
 
   it("serves read-only status with effective options without starting memory jobs", async () => {

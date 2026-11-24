@@ -10,7 +10,6 @@
         "diff": "^9.0.0",
         "isomorphic-git": "^1.38.6",
         "xdg-basedir": "^5.1.0",
-        "zod": "4.1.8",
       },
       "devDependencies": {
         "@opencode/plugin": "2.4.1",

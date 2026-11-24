@@ -3,23 +3,17 @@
  *
  * The memory tools' logic lives in tools/*.ts (V1 tool() definitions) and is
  * reused verbatim: each V1 definition already bundles {description, args
- * (zod raw shape), execute}. V2 accepts any StandardSchema as input, which
- * zod v4 satisfies natively, so the adapter just re-wraps the same validate
- * + execute path and maps the result shape:
+ * (Zod raw shape), execute}. Wrap that shape using the SDK's own tool.schema:
+ * its Zod objects implement StandardSchema, which V2 accepts directly.
+ * Keep version ownership in the SDK, then map only the result shape:
  *   V1 string | {output, metadata}  →  V2 {content, metadata}
  * Inspect additionally reports the V2 host discovery scope and fallback reason.
  */
-import { z } from "zod"
+import { tool, type ToolDefinition } from "@opencode-ai/plugin"
 import { memory_read, memory_search, memory_list, memory_add_note } from "../../tools/memory.js"
 import { memory_inspect, memory_mode } from "../../tools/control.js"
 import { pluginOptions } from "../options.js"
 import { getV2DiscoveryStatus } from "./shim.js"
-
-interface V1Tool {
-  description: string
-  args: Record<string, z.ZodTypeAny>
-  execute: (args: any, ctx: any) => Promise<string | { output?: string; content?: unknown; metadata?: unknown }>
-}
 
 type CallContext = {
   sessionID: string
@@ -34,7 +28,7 @@ type Ask = (ctx: CallContext, request: { patterns: string[]; metadata: unknown }
 interface V2ToolDefinition {
   name: string
   description: string
-  input: z.ZodTypeAny
+  input: ReturnType<typeof tool.schema.object>
   /**
    * OpenCode 2 defaults plugin tools into Code Mode (`execute`). The read-path
    * prompt tells the model to call these by name. Leaving the default hides
@@ -45,11 +39,11 @@ interface V2ToolDefinition {
   execute: (input: any, ctx: CallContext) => Promise<{ content: string | unknown[]; metadata?: unknown }>
 }
 
-function adaptTool(name: string, v1: V1Tool, ask?: Ask): V2ToolDefinition {
+function adaptTool(name: string, v1: ToolDefinition, ask?: Ask): V2ToolDefinition {
   return {
     name,
     description: v1.description,
-    input: z.object(v1.args),
+    input: tool.schema.object(v1.args),
     options: { codemode: false },
     async execute(input: any, tctx: CallContext) {
       const v1ctx = {
@@ -92,13 +86,13 @@ function adaptTool(name: string, v1: V1Tool, ask?: Ask): V2ToolDefinition {
   }
 }
 
-const ALL_MEMORY_TOOLS: [string, V1Tool][] = [
-  ["memory_read", memory_read as unknown as V1Tool],
-  ["memory_search", memory_search as unknown as V1Tool],
-  ["memory_list", memory_list as unknown as V1Tool],
-  ["memory_add_note", memory_add_note as unknown as V1Tool],
-  ["memory_inspect", memory_inspect as unknown as V1Tool],
-  ["memory_mode", memory_mode as unknown as V1Tool],
+const ALL_MEMORY_TOOLS: [string, ToolDefinition][] = [
+  ["memory_read", memory_read],
+  ["memory_search", memory_search],
+  ["memory_list", memory_list],
+  ["memory_add_note", memory_add_note],
+  ["memory_inspect", memory_inspect],
+  ["memory_mode", memory_mode],
 ]
 
 const CONTROL_ONLY = new Set(["memory_inspect", "memory_mode"])
