@@ -299,24 +299,35 @@ async function main() {
     {
       const sid = await createSession(serve, sandbox, "e2e-read")
       if (serve.v2) {
-        const status = await api(
-          serve,
-          sandbox,
-          "POST",
-          "/api/rpc/opencode-codex-memory/status",
-          { input: {} },
-          {
-            "location[directory]": sandbox.project,
+        // Creating a session starts location activation but does not wait for its RPC.
+        await waitFor(
+          "V2 memory status RPC",
+          async () => {
+            const status = await api(
+              serve!,
+              sandbox,
+              "POST",
+              "/api/rpc/opencode-codex-memory/status",
+              { input: {} },
+              { "location[directory]": sandbox.project },
+              AbortSignal.timeout(5_000),
+            )
+            const response = status.json as {
+              type?: string
+              output?: { extractModel?: string; consolidationModel?: string }
+            } | null
+            if (response?.type === "rpc.unavailable") return false
+            if (
+              status.status !== 200 ||
+              response?.output?.extractModel !== extractModel ||
+              response.output.consolidationModel !== consolidationModel
+            ) {
+              throw new Error(`plugin options not applied: ${status.text}`)
+            }
+            return true
           },
+          { timeoutMs: 30_000, intervalMs: 200 },
         )
-        const effective = (status.json as { output?: { extractModel?: string; consolidationModel?: string } })?.output
-        if (
-          status.status !== 200 ||
-          effective?.extractModel !== extractModel ||
-          effective.consolidationModel !== consolidationModel
-        ) {
-          throw new Error(`plugin options not applied: ${status.text}`)
-        }
         log("config", "OK — V2 plugin received configured model options")
       }
       const text = await promptSession(
