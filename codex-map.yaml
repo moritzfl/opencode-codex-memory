@@ -16,8 +16,12 @@
 #   read-path, or job-level partitioning. See consolidation.md mapping note.
 
 # codex commit this map was last verified against.
-codex_ref: 553c7f8ea63a921308b4b30ddaaef7730fd22bba
-codex_ref_date: 2026-11-21
+codex_ref: d18dddd984247ee852af1d5cc9e7b683b5963205
+codex_ref_date: 2026-11-24
+# Since 553c7f8e: rollout events gained metadata but remain excluded from
+# extraction. Removed SQLite listing helpers were unused by the port, which
+# discovers sessions via the host API. New output budgets apply to Codex
+# environment-startup errors, not memory transcripts. No memory port required.
 # Since db724032: concurrent reasoning summaries are stable/on (#62903);
 # the TUI defaults to automatic summaries for OpenAI providers (#62904).
 # Memory extraction still excludes reasoning items. No port required.
@@ -669,7 +673,8 @@ mappings:
       registry.rs marks on output.contains_external_context() after a
       successful builtin tool — opencode exposes no equivalent output flag;
       hook_runtime.rs marks on MCP-tool hooks ("mcp_tool_hook") — opencode
-      has no MCP hook handlers. OpenCode2 codemode `fetch()` is a sandbox
+      has no corresponding MCP hook handlers or encrypted session-start
+      hook payloads (#63474). OpenCode2 codemode `fetch()` is a sandbox
       extension, not a tool, so it never reaches tool.execute.before — an
       accepted gap (no `fetch(` code heuristics; see ARCHITECTURE known gaps).
       Pollution re-queues phase 2 when a consumed
