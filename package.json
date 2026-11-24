@@ -65,21 +65,21 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@opencode-ai/plugin": "^1.18.0",
+    "@opencode-ai/plugin": "1.19.6",
     "@opencode/client": "2.4.1",
-    "diff": "^9.0.0",
-    "isomorphic-git": "^1.42.0",
-    "xdg-basedir": "^5.1.0"
+    "diff": "9.0.0",
+    "isomorphic-git": "1.44.19",
+    "xdg-basedir": "5.1.0"
   },
   "devDependencies": {
     "@opencode/plugin": "2.4.1",
     "@opencode/theme": "2.4.1",
     "@opentui/core": "0.9.9",
     "@opentui/solid": "0.9.9",
-    "@types/bun": "^1.1.0",
-    "prettier": "^3.9.10",
+    "@types/bun": "1.4.5",
+    "prettier": "3.10.1",
     "solid-js": "1.9.20",
-    "typescript": "^5.5.0"
+    "typescript": "5.9.3"
   },
   "peerDependencies": {
     "@opencode/client": ">=2.0.3",
