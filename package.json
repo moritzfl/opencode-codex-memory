@@ -79,7 +79,7 @@
     "@types/bun": "1.4.5",
     "prettier": "3.10.1",
     "solid-js": "1.9.20",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "@opencode/client": ">=2.0.3",
