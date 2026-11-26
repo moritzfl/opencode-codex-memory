@@ -66,14 +66,14 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@opencode-ai/plugin": "1.19.6",
-    "@opencode/client": "2.4.1",
+    "@opencode/client": "2.4.2",
     "diff": "9.0.0",
     "isomorphic-git": "1.44.19",
     "xdg-basedir": "5.1.0"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.4.1",
-    "@opencode/theme": "2.4.1",
+    "@opencode/plugin": "2.4.2",
+    "@opencode/theme": "2.4.2",
     "@opentui/core": "0.9.9",
     "@opentui/solid": "0.9.9",
     "@types/bun": "1.4.5",
